@@ -3,6 +3,7 @@ from datetime import datetime
 import urllib3.exceptions
 from bs4 import BeautifulSoup
 import socket, requests
+import dns.resolver
 
 
 def timestamp():
@@ -10,116 +11,105 @@ def timestamp():
     ts = dt.strftime("%H:%M:%S")
     return ts
 
-
 def print_error(error):
     print("\n" + timestamp() + " " + str(error))
 
-
 def sanitize_url(url):
-    sanitized = ""
-    if url.startswith("https://") and url.endswith("/"):
-        sanitized = url.replace("https://", "")
-        sanitized = sanitized[:-1]
-    elif url.startswith("http://") and url.endswith("/"):
-        sanitized = url.replace("https://", "")
-        sanitized = sanitized[:-1]
-    elif url.startswith("https://"):
-        sanitized = url.replace("https://", "")
-    elif url.startswith("http://"):
-        sanitized = url.replace("http://", "")
+    # Use regular expression to remove the protocol and trailing slash
+    sanitized = re.sub(r'^(https?:\/\/)?(www\.)?(.+?)(\/)$', r'\3', url)
     return sanitized
 
+    # TODO: save DNS information to database
 
 def create_request_header():
-    choice = random.randint(1, 3)
-    if choice == 1:
-        #MacOS X-based computer using a Firefox browser
-        header = {"Accept": "text/html",
-                  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/109.0",
-                  "Accept-Encoding": "gzip, deflate, br",
-                  "Referer": "127.0.0.1"}
-        return header
-    elif choice == 2:
-        #Chrome OS-based laptop using Chrome browser (Chromebook)
-        header = {"Accept": "text/html",
-                  "User-Agent": "Mozilla/5.0 (X11; CrOS x86_64 8172.45.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.64 Safari/537.36",
-                  "Accept-Encoding": "gzip, deflate, br",
-                  "Referer": "127.0.0.1"}
-        return header
-    elif choice == 3:
-        #Windows 7-based PC using a Chrome browser
-        header = {"Accept": "text/html",
-                  "User-Agent": "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.111 Safari/537.36",
-                  "Accept-Encoding": "gzip, deflate, br",
-                  "Referer": "127.0.0.1"}
-        return header
-    return None
+    header_dict = {
+        1: {"Accept": "text/html",
+             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/109.0",
+             "Accept-Encoding": "gzip, deflate, br",
+             "Referer": "127.0.0.1"},
+        2: {"Accept": "text/html",
+             "User-Agent": "Mozilla/5.0 (X11; CrOS x86_64 8172.45.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.64 Safari/537.36",
+             "Accept-Encoding": "gzip, deflate, br",
+             "Referer": "127.0.0.1"},
+        3: {"Accept": "text/html",
+             "User-Agent": "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.111 Safari/537.36",
+             "Accept-Encoding": "gzip, deflate, br",
+             "Referer": "127.0.0.1"}
+    }
 
+    choice = random.randint(1, 3)
+    return header_dict.get(choice, None)
 
 def email_scraper(response):
     email_pattern = r"^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$"
     parsed_data = BeautifulSoup(response.content, "lxml")
-    emails = parsed_data.find_all(string=re.compile(email_pattern))
-    if len(emails) > 0:
-        for email in emails:
+    emails = [email.strip() for email in parsed_data.find_all(string=re.compile(email_pattern))]
+
+    # Filter out any empty strings or duplicates
+    unique_emails = list(dict.fromkeys(emails))
+
+    if len(unique_emails) > 0:
+        for email in unique_emails:
             write_to_email_database(email)
 
 def request_and_parse(url):
     response = ""
     try:
         response = requests.get(url, headers=create_request_header())
+        if response.status_code == 200:
+            html_data = response.content
+            parsed_data = BeautifulSoup(html_data, "lxml")  # lxml is fast and lenient
+            anchors = parsed_data.find_all(lambda tag: tag.name == 'a' and tag.get('href'))
+            email_scraper(response)
+            return anchors
     except (requests.exceptions.ConnectionError, socket.gaierror,
             requests.exceptions.TooManyRedirects, requests.exceptions.InvalidURL,
             requests.exceptions.ChunkedEncodingError, requests.exceptions.InvalidSchema,
             urllib3.exceptions.LocationParseError) as error:
         print_error("\n" + timestamp() + " " + str(error))
-
-    if response:
-        html_data = response.content
-        parsed_data = BeautifulSoup(html_data, "lxml")  # lxml is fast and lenient
-        anchors = parsed_data.find_all(lambda tag: tag.name == 'a' and tag.get('href'))
-        email_scraper(response)
-        return anchors
     return None
-
 
 def grab_title(url):
-    get_response = ""
     try:
-        get_response = requests.get(url, headers=create_request_header())
-    except (requests.exceptions.TooManyRedirects, requests.exceptions.ConnectionError,
-            socket.gaierror, requests.exceptions.InvalidURL) as error:
+        response = requests.get(url, headers=create_request_header())
+        if response.status_code == 200:
+            html_data = response.content
+            parsed_data = BeautifulSoup(html_data, "lxml")  # lxml is fast and lenient
+            title = parsed_data.find('title')
+            if title:
+                return str(title.string).strip()
+            return None
+    except (requests.exceptions.ConnectionError, socket.gaierror,
+            requests.exceptions.TooManyRedirects, requests.exceptions.InvalidURL) as error:
         print_error(str(error))
-
-    if get_response:
-        html_data = get_response.content
-        parsed_data = BeautifulSoup(html_data, "lxml")  # lxml is fast and lenient
-        title = parsed_data.find('title')
-        if title:
-            title = str(title).removeprefix("<title>").removesuffix("</title>")
-            return title
-        return None
     return None
-
 
 def get_server_info(domain_name):
     try:
         header_response = requests.head(domain_name, headers=create_request_header())
 
+        # Extract title
         title = grab_title(domain_name)
-        server = header_response.headers['Server']
-        content_type = header_response.headers['Content-Type']
+
+        # Extract server and content type
+        server = header_response.headers.get('Server', 'Unknown')
+        content_type = header_response.headers.get('Content-Type', 'Unknown')
+
+        # Get IP
         ip = socket.gethostbyname(sanitize_url(str(domain_name)))
+
+        # DNS lookup
+        dns_lookup(sanitize_url(str(domain_name)))
+
+        # Write to database
         write_to_domain_database(str(domain_name), ip, server, content_type, title)
+
         return 0
 
-    except (KeyError, TypeError,
-            UnicodeEncodeError, socket.error,
-            requests.exceptions.ConnectionError,
-            requests.exceptions.InvalidURL) as err:
+    except (KeyError, TypeError, UnicodeEncodeError, socket.error,
+            requests.exceptions.ConnectionError, requests.exceptions.InvalidURL) as err:
         print_error(str(err))
         return 0
-
 
 def get_domain_names(anchors, url_list):
     try:
@@ -128,50 +118,42 @@ def get_domain_names(anchors, url_list):
             for r in references:
                 if r.startswith("http") and r not in url_list:
                     url_list.append(r)
-                    tld_list = (".com", ".gov/", ".net/", ".edu/", ".org/", ".io/", ".co.uk/", ".ie/", ".info/")
-                    if r.endswith(tld_list):
+                    if r.endswith((".com", ".gov/", ".net/", ".edu/", ".org/", ".io/", ".co.uk/", ".ie/", ".info/")):
                         get_server_info(r)
     except TypeError as err:
         print_error(str(err))
     return url_list
 
-
 def create_db(conn, table_name):
-    if table_name == "Domains":
-        try:
-            conn.execute('''CREATE TABLE IF NOT EXISTS '{}' (
-                                        "url"	TEXT NOT NULL,
-                                        "ip"	TEXT NOT NULL,
-                                        "servertype"	TEXT,
-                                        "content_type"  TEXT,
-                                        "title"	TEXT
-                                        )'''.format(table_name))
-        except sqlite3.OperationalError as err:
-            print_error(err)
-    elif table_name == "Emails":
-        try:
-            conn.execute('''CREATE TABLE IF NOT EXISTS '{}' (
-                                        "email_address"	TEXT NOT NULL
-                                        )'''.format(table_name))
-        except sqlite3.OperationalError as err:
-            print_error(err)
+    table_creation_map = {
+        "Domains": '''CREATE TABLE IF NOT EXISTS '{}' (
+                                    "url"	TEXT NOT NULL,
+                                    "ip"	TEXT NOT NULL,
+                                    "servertype"	TEXT,
+                                    "content_type"  TEXT,
+                                    "title"	TEXT
+                                    )''',
+        "Emails": '''CREATE TABLE IF NOT EXISTS '{}' (
+                                    "email_address"	TEXT NOT NULL
+                                    )'''
+    }
 
+    if table_name in table_creation_map:
+        try:
+            conn.execute(table_creation_map[table_name].format(table_name))
+        except sqlite3.OperationalError as err:
+            print_error(err)
 
 def check_db_for_domain(conn, name, table_name):
     print(timestamp() + " Checking for " + name + " in database")
-    if table_name == "Domains":
-        entry_exists = conn.execute("SELECT DISTINCT url FROM '{}' WHERE url='{}'".format(table_name, name))
-        try:
-            db_result = str(entry_exists.fetchall()[0]).replace("('", "").replace("',)", "")
-        except IndexError:
-            return True
-        if db_result == name:
-            print("\n" + timestamp() + " " + name + " is already in DB")
-            return False
-        else:
-            return True
-    elif table_name == "Emails":
-        entry_exists = conn.execute("SELECT DISTINCT email_address FROM '{}' WHERE email_address='{}'".format(table_name, name))
+
+    table_checks = {
+        "Domains": lambda: conn.execute("SELECT DISTINCT url FROM '{}' WHERE url='{}'".format(table_name, name)),
+        "Emails": lambda: conn.execute("SELECT DISTINCT email_address FROM '{}' WHERE email_address='{}'".format(table_name, name))
+    }
+
+    entry_exists = table_checks.get(table_name, lambda: None)()
+    if entry_exists:
         try:
             db_result = str(entry_exists.fetchall()[0]).replace("('", "").replace("',)", "")
         except IndexError:
@@ -183,37 +165,31 @@ def check_db_for_domain(conn, name, table_name):
             return True
     return None
 
-
 def write_to_domain_database(name, ip, server, content_type, title):
     table_name = "Domains"
     conn = sqlite3.connect("ScrapeDB", isolation_level=None)
-    create_db(conn, table_name)
-    if check_db_for_domain(conn, name, table_name):
-        sql = """INSERT INTO '{}' (url, ip, servertype, content_type, title)
-                    VALUES ('{}','{}','{}','{}','{}');""".format(table_name, name, ip, server, content_type, title)
-        try:
+    try:
+        create_db(conn, table_name)
+        if check_db_for_domain(conn, name, table_name):
+            sql = """INSERT INTO '{}' (url, ip, servertype, content_type, title)
+                        VALUES ('{}','{}','{}','{}','{}');""".format(table_name, name, ip, server, content_type, title)
             conn.execute(sql)
             print(timestamp() + " " + name + " saved to database")
-            return
-        finally:
-            return
-    return
-
+    finally:
+        conn.close()
 
 def write_to_email_database(email_address):
     table_name = "Emails"
     conn = sqlite3.connect("ScrapeDB", isolation_level=None)
-    create_db(conn, table_name)
-    if check_db_for_domain(conn, email_address, table_name):
-        sql = """INSERT INTO '{}' (email_address)
-                    VALUES ('{}');""".format(table_name, email_address)
-        try:
+    try:
+        create_db(conn, table_name)
+        if check_db_for_domain(conn, email_address, table_name):
+            sql = """INSERT INTO '{}' (email_address)
+                        VALUES ('{}');""".format(table_name, email_address)
             conn.execute(sql)
             print(timestamp() + " " + email_address + " saved to database")
-        except sqlite3.OperationalError:
-            return
-    return
-
+    finally:
+        conn.close()
 
 def main_crawler(start_url):
     url_list = [start_url, ]
@@ -226,7 +202,7 @@ def main_crawler(start_url):
         print(timestamp() + " Now searching: " + url)
 
         anchors = request_and_parse(url)
-        url_list = get_domain_names(anchors, url_list)
+        url_list.extend(get_domain_names(anchors, url_list))
         url_list.pop(0)
         i = i + 1
 
