@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
-import os, sys, sqlite3, subprocess, threading, time, json, signal
+import os, sys, sqlite3, subprocess, threading, time, json, signal, csv, io
 from datetime import datetime
 from collections import deque
-from flask import Flask, render_template_string, jsonify, request, Response, stream_with_context
+from flask import Flask, jsonify, request, Response
 
 app = Flask(__name__)
 
-BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-DB_PATH     = os.path.join(BASE_DIR, "ScrapeDB")
-CRAWLER     = os.path.join(BASE_DIR, "main.py")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH  = os.path.join(BASE_DIR, "ScrapeDB")
+CRAWLER  = os.path.join(BASE_DIR, "main.py")
 
-# ── Crawler state ────────────────────────────────────────────────────────────
-crawler_proc   = None
-crawler_lock   = threading.Lock()
-log_buffer     = deque(maxlen=500)   # ring buffer — last 500 lines
-log_lock       = threading.Lock()
-crawler_stats  = {"started": None, "domain": None, "pages": 0}
+# ── Crawler state ─────────────────────────────────────────────
+crawler_proc  = None
+crawler_lock  = threading.Lock()
+log_buffer    = deque(maxlen=500)
+log_total     = [0]   # mutable so stream thread can increment
+log_lock      = threading.Lock()
+crawler_stats = {"started": None, "domain": None}
 
 def ts():
     return datetime.now().strftime("%H:%M:%S")
@@ -23,14 +24,14 @@ def ts():
 def push_log(line):
     with log_lock:
         log_buffer.append({"t": ts(), "msg": line.rstrip()})
+        log_total[0] += 1
 
 def stream_proc(proc):
-    """Read stdout/stderr from crawler and push into log_buffer."""
     for line in iter(proc.stdout.readline, b""):
         push_log(line.decode("utf-8", errors="replace"))
     proc.stdout.close()
 
-# ── DB helper ────────────────────────────────────────────────────────────────
+# ── DB helpers ────────────────────────────────────────────────
 def qdb(sql, args=()):
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -48,23 +49,27 @@ def count(table, col="*"):
     except Exception:
         return 0
 
-# ── Flask routes ─────────────────────────────────────────────────────────────
+# ── Routes ────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
-    return render_template_string(HTML)
+    return Response(HTML, mimetype="text/html")
 
 # -- Crawler control --
 
 @app.route("/api/start", methods=["POST"])
 def api_start():
     global crawler_proc
-    data = request.json or {}
+    data        = request.json or {}
     domain      = data.get("domain", "").strip()
     rate_min    = float(data.get("rate_min", 1.0))
     rate_max    = float(data.get("rate_max", 3.0))
     concurrency = int(data.get("concurrency", 5))
-    same_domain = bool(data.get("same_domain", False))
+    same_domain   = bool(data.get("same_domain", False))
+    resume        = bool(data.get("resume", False))
+    ignore_robots = bool(data.get("ignore_robots", False))
+    use_playwright = bool(data.get("playwright", False))
+    no_social      = bool(data.get("no_social", False))
 
     if not domain:
         return jsonify({"ok": False, "error": "No domain provided"}), 400
@@ -74,7 +79,7 @@ def api_start():
             return jsonify({"ok": False, "error": "Crawler already running"}), 400
 
         cmd = [
-            sys.executable, "-u", CRAWLER,
+            sys.executable, "-u", CRAWLER,   # -u = unbuffered stdout
             "-D", domain,
             "--rate-min", str(rate_min),
             "--rate-max", str(rate_max),
@@ -82,12 +87,21 @@ def api_start():
         ]
         if same_domain:
             cmd.append("--same-domain-only")
+        if resume:
+            cmd.append("--resume")
+        if ignore_robots:
+            cmd.append("--ignore-robots")
+        if use_playwright:
+            cmd.append("--playwright")
+        if no_social:
+            cmd.append("--no-social")
 
         with log_lock:
             log_buffer.clear()
+            log_total[0] = 0
 
         push_log(f"[NuScrape] Starting crawler → {domain}")
-        push_log(f"[NuScrape] Args: rate={rate_min}-{rate_max}s  concurrency={concurrency}  same-domain={same_domain}")
+        push_log(f"[NuScrape] Args: rate={rate_min}-{rate_max}s  concurrency={concurrency}  same-domain={same_domain}  resume={resume}")
 
         crawler_proc = subprocess.Popen(
             cmd,
@@ -97,7 +111,6 @@ def api_start():
         )
         crawler_stats["started"] = ts()
         crawler_stats["domain"]  = domain
-        crawler_stats["pages"]   = 0
 
         t = threading.Thread(target=stream_proc, args=(crawler_proc,), daemon=True)
         t.start()
@@ -116,30 +129,42 @@ def api_stop():
 
 @app.route("/api/status")
 def api_status():
-    global crawler_proc
     running = crawler_proc is not None and crawler_proc.poll() is None
     return jsonify({
-        "running":  running,
-        "domain":   crawler_stats["domain"],
-        "started":  crawler_stats["started"],
-        "pid":      crawler_proc.pid if running else None,
+        "running": running,
+        "domain":  crawler_stats["domain"],
+        "started": crawler_stats["started"],
+        "pid":     crawler_proc.pid if running else None,
     })
 
 @app.route("/api/logs")
 def api_logs():
     since = int(request.args.get("since", 0))
     with log_lock:
-        all_logs = list(log_buffer)
-    return jsonify(all_logs[since:])
+        all_logs  = list(log_buffer)
+        total     = log_total[0]
+    # Buffer holds the last N lines. Absolute index of first line in buffer:
+    buf_start = max(0, total - len(all_logs))
+    # Client offset is absolute. Find where to slice from in the buffer:
+    if since <= buf_start:
+        # Client is behind the buffer window — send everything we have
+        new_lines = all_logs
+    else:
+        new_lines = all_logs[since - buf_start:]
+    return jsonify({"lines": new_lines, "total": total})
 
 @app.route("/api/clear_db", methods=["POST"])
 def api_clear_db():
     tables = ["Domains","Emails","DNS","MX","SSL","WHOIS","Ports",
-              "HTTPHistory","Technologies","Robots","Sitemap"]
+              "HTTPHistory","Technologies","Robots","Sitemap",
+              "SecurityHeaders","Subdomains","ASN","XHREndpoints","JSFindings","Alerts"]
     try:
         conn = sqlite3.connect(DB_PATH)
         for t in tables:
-            conn.execute(f"DELETE FROM {t}")
+            try:
+                conn.execute(f"DELETE FROM {t}")
+            except Exception:
+                pass   # table may not exist yet
         conn.commit()
         conn.close()
         push_log("[NuScrape] Database cleared.")
@@ -152,18 +177,50 @@ def api_clear_db():
 @app.route("/api/stats")
 def api_stats():
     return jsonify({
-        "domains": count("Domains"),
-        "emails":  count("Emails"),
-        "ports":   count("Ports"),
-        "tech":    count("Technologies","DISTINCT technology"),
-        "ssl":     count("SSL"),
-        "mx":      count("MX"),
-        "http":    count("HTTPHistory"),
+        "domains":    count("Domains"),
+        "emails":     count("Emails"),
+        "ports":      count("Ports"),
+        "tech":       count("Technologies", "DISTINCT technology"),
+        "ssl":        count("SSL"),
+        "mx":         count("MX"),
+        "http":       count("HTTPHistory"),
+        "subdomains": count("Subdomains"),
+        "secheaders": count("SecurityHeaders"),
+        "asn":        count("ASN"),
+        "xhr":        count("XHREndpoints"),
+        "js":         count("JSFindings"),
+        "alerts":     count("Alerts"),
     })
 
 @app.route("/api/domains")
 def api_domains():
-    return jsonify(qdb("SELECT DISTINCT url,ip,servertype,content_type,title FROM Domains ORDER BY url"))
+    return jsonify(qdb("""
+        SELECT d.url, d.ip, d.servertype, d.content_type, d.title,
+               a.asn, a.org, a.country, a.is_cdn, a.cdn_name
+        FROM Domains d
+        LEFT JOIN ASN a ON d.ip = a.ip
+        ORDER BY d.url
+    """))
+
+@app.route("/api/asn")
+def api_asn():
+    return jsonify(qdb("SELECT ip,asn,org,country,is_cdn,cdn_name,looked_up FROM ASN ORDER BY org"))
+
+@app.route("/api/xhr")
+def api_xhr():
+    return jsonify(qdb("SELECT url,endpoint,method,found_at FROM XHREndpoints ORDER BY found_at DESC"))
+
+@app.route("/api/alerts")
+def api_alerts():
+    try:
+        return jsonify(qdb("SELECT id,alert_type,severity,target,detail,found_at FROM Alerts ORDER BY found_at DESC"))
+    except Exception:
+        return jsonify([])
+
+@app.route("/api/js")
+def api_js():
+    return jsonify(qdb("SELECT url,js_url,finding_type,value,found_at FROM JSFindings ORDER BY finding_type,found_at DESC"))
+
 
 @app.route("/api/technologies")
 def api_technologies():
@@ -197,7 +254,120 @@ def api_mx():
 def api_http_history():
     return jsonify(qdb("SELECT url,status_code,checked_at FROM HTTPHistory ORDER BY checked_at DESC LIMIT 200"))
 
-# ── HTML ─────────────────────────────────────────────────────────────────────
+@app.route("/api/security_headers")
+def api_security_headers():
+    return jsonify(qdb("SELECT domain,present,missing,leaking,checked_at FROM SecurityHeaders ORDER BY checked_at DESC"))
+
+@app.route("/api/subdomains")
+def api_subdomains():
+    return jsonify(qdb("SELECT root_domain,subdomain,ip,status_code,found_at FROM Subdomains ORDER BY root_domain,subdomain"))
+
+# -- Resume state --
+
+@app.route("/api/resume_state")
+def api_resume_state():
+    state_file = os.path.join(BASE_DIR, "crawl_state.json")
+    if os.path.exists(state_file):
+        try:
+            with open(state_file) as f:
+                s = json.load(f)
+            return jsonify({
+                "available": True,
+                "domain":    s.get("start_url"),
+                "saved_at":  s.get("saved_at"),
+                "queue":     len(s.get("url_queue", [])),
+                "crawled":   s.get("pages_crawled", 0),
+            })
+        except Exception:
+            pass
+    return jsonify({"available": False})
+
+# -- Reporting & export --
+
+@app.route("/api/report")
+def api_report():
+    top_tech = qdb("SELECT technology, COUNT(*) as cnt FROM Technologies GROUP BY technology ORDER BY cnt DESC LIMIT 10")
+    open_ports = qdb("SELECT port, COUNT(*) as cnt FROM Ports GROUP BY port ORDER BY cnt DESC")
+    status_breakdown = qdb("SELECT status_code, COUNT(*) as cnt FROM HTTPHistory GROUP BY status_code ORDER BY cnt DESC")
+    ssl_expiring = qdb("SELECT domain, not_after FROM SSL WHERE not_after != 'Unknown' ORDER BY not_after ASC LIMIT 10")
+    top_registrars = qdb("SELECT registrar, COUNT(*) as cnt FROM WHOIS GROUP BY registrar ORDER BY cnt DESC LIMIT 5")
+    worst_headers = qdb("""
+        SELECT domain, missing, leaking FROM SecurityHeaders
+        WHERE missing != '' OR leaking != ''
+        ORDER BY checked_at DESC LIMIT 10
+    """)
+    return jsonify({
+        "generated_at": ts(),
+        "totals": {
+            "domains":      count("Domains"),
+            "emails":       count("Emails"),
+            "open_ports":   count("Ports"),
+            "technologies": count("Technologies", "DISTINCT technology"),
+            "ssl_certs":    count("SSL"),
+            "mx_records":   count("MX"),
+            "http_requests":count("HTTPHistory"),
+            "subdomains":   count("Subdomains"),
+        },
+        "top_technologies":      top_tech,
+        "open_ports":            open_ports,
+        "http_status_breakdown": status_breakdown,
+        "ssl_expiring_soonest":  ssl_expiring,
+        "top_registrars":        top_registrars,
+        "worst_security_headers":worst_headers,
+    })
+
+def make_csv(rows, fieldnames):
+    out = io.StringIO()
+    w = csv.DictWriter(out, fieldnames=fieldnames, extrasaction='ignore')
+    w.writeheader()
+    w.writerows(rows)
+    return out.getvalue()
+
+@app.route("/api/export/<table>.<fmt>")
+def api_export(table, fmt):
+    exports = {
+        "domains":         ("SELECT DISTINCT url,ip,servertype,content_type,title FROM Domains ORDER BY url",
+                            ["url","ip","servertype","content_type","title"]),
+        "emails":          ("SELECT DISTINCT email_address FROM Emails ORDER BY email_address",
+                            ["email_address"]),
+        "ports":           ("SELECT DISTINCT domain,ip,port FROM Ports ORDER BY domain,port",
+                            ["domain","ip","port"]),
+        "ssl":             ("SELECT DISTINCT domain,common_name,issuer,not_before,not_after FROM SSL ORDER BY domain",
+                            ["domain","common_name","issuer","not_before","not_after"]),
+        "whois":           ("SELECT DISTINCT domain,registrar,creation_date,expiration_date FROM WHOIS ORDER BY domain",
+                            ["domain","registrar","creation_date","expiration_date"]),
+        "technologies":    ("SELECT url,technology FROM Technologies ORDER BY technology,url",
+                            ["url","technology"]),
+        "dns":             ("SELECT DISTINCT domain,ip FROM DNS ORDER BY domain",
+                            ["domain","ip"]),
+        "mx":              ("SELECT DISTINCT domain,mx_host,preference FROM MX ORDER BY domain",
+                            ["domain","mx_host","preference"]),
+        "subdomains":      ("SELECT root_domain,subdomain,ip,status_code,found_at FROM Subdomains ORDER BY root_domain,subdomain",
+                            ["root_domain","subdomain","ip","status_code","found_at"]),
+        "security_headers":("SELECT domain,present,missing,leaking,checked_at FROM SecurityHeaders ORDER BY domain",
+                            ["domain","present","missing","leaking","checked_at"]),
+        "asn":             ("SELECT ip,asn,org,country,is_cdn,cdn_name,looked_up FROM ASN ORDER BY org",
+                            ["ip","asn","org","country","is_cdn","cdn_name","looked_up"]),
+        "xhr":             ("SELECT url,endpoint,method,found_at FROM XHREndpoints ORDER BY found_at DESC",
+                            ["url","endpoint","method","found_at"]),
+        "js_findings":     ("SELECT url,js_url,finding_type,value,found_at FROM JSFindings ORDER BY finding_type",
+                            ["url","js_url","finding_type","value","found_at"]),
+        "alerts":          ("SELECT alert_type,severity,target,detail,found_at FROM Alerts ORDER BY found_at DESC",
+                            ["alert_type","severity","target","detail","found_at"]),
+    }
+    if table not in exports:
+        return jsonify({"error": "Unknown table"}), 404
+    sql, fields = exports[table]
+    rows = qdb(sql)
+    if fmt == "json":
+        return Response(json.dumps(rows, indent=2), mimetype="application/json",
+                        headers={"Content-Disposition": f"attachment; filename={table}.json"})
+    elif fmt == "csv":
+        return Response(make_csv(rows, fields), mimetype="text/csv",
+                        headers={"Content-Disposition": f"attachment; filename={table}.csv"})
+    return jsonify({"error": "Format must be csv or json"}), 400
+
+# ── HTML ──────────────────────────────────────────────────────
 
 HTML = r"""
 <!DOCTYPE html>
@@ -208,119 +378,55 @@ HTML = r"""
 <title>NuScrape</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet">
 <style>
-:root {
-  --bg:      #060a0e;
-  --surf:    #0b1118;
-  --surf2:   #0f1820;
-  --border:  #182030;
-  --accent:  #00e5ff;
-  --red:     #ff3e5e;
-  --green:   #00ff88;
-  --yellow:  #ffc542;
-  --purple:  #b06aff;
-  --text:    #ccdaeb;
-  --muted:   #3d5470;
-  --mono:    'Share Tech Mono', monospace;
-  --sans:    'Exo 2', sans-serif;
+:root{
+  --bg:#060a0e;--surf:#0b1118;--surf2:#0f1820;--border:#182030;
+  --accent:#00e5ff;--red:#ff3e5e;--green:#00ff88;--yellow:#ffc542;--purple:#b06aff;
+  --text:#ccdaeb;--muted:#3d5470;
+  --mono:'Share Tech Mono',monospace;--sans:'Exo 2',sans-serif;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
-body{
-  background:var(--bg);
-  color:var(--text);
-  font-family:var(--sans);
-  font-size:14px;
-  display:flex;
-  flex-direction:column;
-  height:100vh;
-  overflow:hidden;
-}
-/* scanlines */
-body::after{
-  content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
-  background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,229,255,.012) 3px,rgba(0,229,255,.012) 4px);
-}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,229,255,.012) 3px,rgba(0,229,255,.012) 4px)}
 
-/* ── HEADER ── */
-header{
-  flex:0 0 auto;
-  display:flex;align-items:center;gap:1.5rem;
-  padding:.9rem 1.8rem;
-  border-bottom:1px solid var(--border);
-  background:var(--surf);
-  position:relative;
-}
-header::after{
-  content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,transparent,var(--accent),transparent);
-}
+/* HEADER */
+header{flex:0 0 auto;display:flex;align-items:center;gap:1.5rem;padding:.9rem 1.8rem;border-bottom:1px solid var(--border);background:var(--surf);position:relative}
+header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--accent),transparent)}
 .logo{font-family:var(--mono);font-size:1.4rem;color:var(--accent);text-shadow:0 0 18px rgba(0,229,255,.5);letter-spacing:.08em}
 .logo em{color:var(--red);font-style:normal}
 .hstats{margin-left:auto;display:flex;gap:1.8rem}
 .hstat{display:flex;flex-direction:column;align-items:flex-end}
 .hstat .n{font-family:var(--mono);font-size:1.2rem;color:var(--accent);line-height:1}
 .hstat .l{font-size:.65rem;color:var(--muted);letter-spacing:.12em;text-transform:uppercase}
-.status-dot{
-  width:9px;height:9px;border-radius:50%;
-  background:var(--muted);
-  box-shadow:none;
-  transition:background .3s,box-shadow .3s;
-  flex-shrink:0;
-}
+.status-dot{width:9px;height:9px;border-radius:50%;background:var(--muted);transition:background .3s,box-shadow .3s;flex-shrink:0}
 .status-dot.running{background:var(--green);box-shadow:0 0 8px var(--green)}
 .status-dot.stopped{background:var(--red)}
 
-/* ── LAYOUT ── */
+/* LAYOUT */
 .body{flex:1;display:flex;min-height:0}
 
-/* ── SIDEBAR ── */
-.sidebar{
-  flex:0 0 260px;
-  background:var(--surf);
-  border-right:1px solid var(--border);
-  display:flex;flex-direction:column;
-  overflow-y:auto;
-}
+/* SIDEBAR */
+.sidebar{flex:0 0 260px;background:var(--surf);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
 .sidebar-section{padding:1.2rem 1.4rem;border-bottom:1px solid var(--border)}
 .sidebar-section:last-child{border-bottom:none}
-.sid-title{
-  font-size:.65rem;font-weight:800;letter-spacing:.18em;
-  text-transform:uppercase;color:var(--muted);margin-bottom:1rem;
-}
+.sid-title{font-size:.65rem;font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:1rem}
 
-/* Control form */
+/* Form controls */
 .field{margin-bottom:.8rem}
 .field label{display:block;font-size:.7rem;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
-.field input[type=text],
-.field input[type=number]{
-  width:100%;background:var(--bg);border:1px solid var(--border);
-  color:var(--text);font-family:var(--mono);font-size:.82rem;
-  padding:.45rem .7rem;outline:none;transition:border-color .2s;
-}
+.field input[type=text],.field input[type=number]{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:.82rem;padding:.45rem .7rem;outline:none;transition:border-color .2s}
 .field input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,229,255,.07)}
 .field input::placeholder{color:var(--muted)}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
-
 .toggle-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem}
 .toggle-row label{font-size:.75rem;color:var(--text)}
 .toggle{position:relative;width:36px;height:20px;flex-shrink:0}
 .toggle input{opacity:0;width:0;height:0}
-.toggle-slider{
-  position:absolute;inset:0;background:var(--border);cursor:pointer;
-  transition:background .2s;border-radius:20px;
-}
-.toggle-slider::before{
-  content:'';position:absolute;height:14px;width:14px;left:3px;bottom:3px;
-  background:var(--muted);transition:.2s;border-radius:50%;
-}
-.toggle input:checked + .toggle-slider{background:rgba(0,229,255,.25)}
-.toggle input:checked + .toggle-slider::before{transform:translateX(16px);background:var(--accent)}
-
-.btn{
-  width:100%;padding:.55rem;border:none;cursor:pointer;
-  font-family:var(--sans);font-size:.8rem;font-weight:600;
-  letter-spacing:.1em;text-transform:uppercase;transition:all .2s;
-}
+.toggle-slider{position:absolute;inset:0;background:var(--border);cursor:pointer;transition:background .2s;border-radius:20px}
+.toggle-slider::before{content:'';position:absolute;height:14px;width:14px;left:3px;bottom:3px;background:var(--muted);transition:.2s;border-radius:50%}
+.toggle input:checked+.toggle-slider{background:rgba(0,229,255,.25)}
+.toggle input:checked+.toggle-slider::before{transform:translateX(16px);background:var(--accent)}
+.btn{width:100%;padding:.55rem;border:none;cursor:pointer;font-family:var(--sans);font-size:.8rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;transition:all .2s}
 .btn-start{background:rgba(0,229,255,.1);color:var(--accent);border:1px solid rgba(0,229,255,.25)}
 .btn-start:hover{background:rgba(0,229,255,.2);box-shadow:0 0 14px rgba(0,229,255,.15)}
 .btn-start:disabled{opacity:.35;cursor:not-allowed}
@@ -329,32 +435,23 @@ header::after{
 .btn-stop:disabled{opacity:.35;cursor:not-allowed}
 .btn-danger{background:rgba(255,62,94,.07);color:var(--red);border:1px solid rgba(255,62,94,.2);margin-top:.4rem;font-size:.72rem}
 .btn-danger:hover{background:rgba(255,62,94,.15)}
-
 .run-info{margin-top:.8rem;font-family:var(--mono);font-size:.72rem;color:var(--muted);line-height:1.7}
 .run-info span{color:var(--text)}
 
 /* Nav pills */
 .nav-pills{display:flex;flex-direction:column;gap:2px}
-.nav-pill{
-  background:none;border:none;text-align:left;
-  font-family:var(--sans);font-size:.78rem;font-weight:600;
-  letter-spacing:.08em;text-transform:uppercase;
-  color:var(--muted);padding:.55rem .9rem;cursor:pointer;
-  transition:color .15s,background .15s;border-left:2px solid transparent;
-}
+.nav-pill{background:none;border:none;text-align:left;font-family:var(--sans);font-size:.78rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:.55rem .9rem;cursor:pointer;transition:color .15s,background .15s;border-left:2px solid transparent}
 .nav-pill:hover{color:var(--text);background:rgba(255,255,255,.03)}
 .nav-pill.active{color:var(--accent);border-left-color:var(--accent);background:rgba(0,229,255,.05)}
-.nav-pill .pill-count{
-  float:right;font-family:var(--mono);font-size:.68rem;
-  color:var(--muted);background:rgba(255,255,255,.04);
-  padding:.05rem .45rem;border-radius:2px;
-}
+.nav-pill .pill-count{float:right;font-family:var(--mono);font-size:.68rem;color:var(--muted);background:rgba(255,255,255,.04);padding:.05rem .45rem;border-radius:2px}
 .nav-pill.active .pill-count{color:var(--accent)}
 
-/* ── CONTENT ── */
+/* CONTENT */
 .content{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .tab-panel{display:none;flex:1;flex-direction:column;min-height:0;overflow:hidden}
 .tab-panel.active{display:flex}
+@keyframes fadeUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+.tab-panel.active{animation:fadeUp .18s ease}
 
 /* Log panel */
 .log-wrap{flex:1;overflow-y:auto;padding:1rem 1.4rem;font-family:var(--mono);font-size:.78rem;line-height:1.7}
@@ -363,30 +460,18 @@ header::after{
 .log-line .lm{color:var(--text)}
 .log-line.info .lm{color:var(--accent)}
 .log-line.warn .lm{color:var(--yellow)}
-.log-line.err  .lm{color:var(--red)}
-.log-line.sys  .lm{color:var(--purple)}
-.log-controls{
-  flex:0 0 auto;display:flex;align-items:center;gap:1rem;
-  padding:.7rem 1.4rem;border-top:1px solid var(--border);background:var(--surf);
-}
+.log-line.err .lm{color:var(--red)}
+.log-line.sys .lm{color:var(--purple)}
+.log-controls{flex:0 0 auto;display:flex;align-items:center;gap:1rem;padding:.7rem 1.4rem;border-top:1px solid var(--border);background:var(--surf)}
 .log-controls label{font-size:.7rem;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
 
 /* Data panels */
 .panel-inner{flex:1;overflow-y:auto;padding:1.4rem 1.8rem}
-.panel-header{display:flex;align-items:center;gap:.8rem;margin-bottom:1.2rem}
+.panel-header{display:flex;align-items:center;gap:.8rem;margin-bottom:1.2rem;flex-wrap:wrap}
 .panel-title{font-size:1rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
-.cnt-badge{
-  font-family:var(--mono);font-size:.7rem;
-  background:rgba(0,229,255,.08);color:var(--accent);
-  border:1px solid rgba(0,229,255,.18);padding:.1rem .5rem;border-radius:2px;
-}
+.cnt-badge{font-family:var(--mono);font-size:.7rem;background:rgba(0,229,255,.08);color:var(--accent);border:1px solid rgba(0,229,255,.18);padding:.1rem .5rem;border-radius:2px}
 .search-row{margin-bottom:1rem}
-.search-row input{
-  background:var(--surf2);border:1px solid var(--border);
-  color:var(--text);font-family:var(--mono);font-size:.8rem;
-  padding:.5rem .9rem;width:100%;max-width:380px;outline:none;
-  transition:border-color .2s;
-}
+.search-row input{background:var(--surf2);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:.8rem;padding:.5rem .9rem;width:100%;max-width:380px;outline:none;transition:border-color .2s}
 .search-row input:focus{border-color:var(--accent)}
 .search-row input::placeholder{color:var(--muted)}
 
@@ -394,30 +479,22 @@ header::after{
 .tbl-wrap{overflow-x:auto;border:1px solid var(--border)}
 table{width:100%;border-collapse:collapse;font-size:.8rem}
 thead tr{background:#090e14;border-bottom:1px solid var(--border)}
-th{
-  font-family:var(--mono);font-size:.65rem;letter-spacing:.12em;
-  text-transform:uppercase;color:var(--muted);padding:.65rem 1rem;
-  text-align:left;white-space:nowrap;
-}
+th{font-family:var(--mono);font-size:.65rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:.65rem 1rem;text-align:left;white-space:nowrap}
 tbody tr{border-bottom:1px solid rgba(24,32,48,.5);transition:background .12s}
 tbody tr:hover{background:rgba(0,229,255,.025)}
-td{
-  padding:.55rem 1rem;color:var(--text);font-family:var(--mono);
-  font-size:.78rem;max-width:280px;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap;
-}
+td{padding:.55rem 1rem;color:var(--text);font-family:var(--mono);font-size:.78rem;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 td.wrap{white-space:normal;word-break:break-all}
 td a{color:var(--accent);text-decoration:none}
 td a:hover{text-decoration:underline}
 
 /* Badges */
 .b{display:inline-block;font-family:var(--mono);font-size:.68rem;padding:.08rem .45rem;border-radius:2px;margin:1px}
-.bc {background:rgba(0,229,255,.1); color:var(--accent);  border:1px solid rgba(0,229,255,.2)}
-.bg {background:rgba(0,255,136,.1); color:var(--green);   border:1px solid rgba(0,255,136,.2)}
-.br {background:rgba(255,62,94,.1); color:var(--red);     border:1px solid rgba(255,62,94,.2)}
-.by {background:rgba(255,197,66,.1);color:var(--yellow);  border:1px solid rgba(255,197,66,.2)}
-.bp {background:rgba(176,106,255,.1);color:var(--purple); border:1px solid rgba(176,106,255,.2)}
-.bm {background:rgba(61,84,112,.15);color:var(--muted);   border:1px solid rgba(61,84,112,.3)}
+.bc{background:rgba(0,229,255,.1);color:var(--accent);border:1px solid rgba(0,229,255,.2)}
+.bg{background:rgba(0,255,136,.1);color:var(--green);border:1px solid rgba(0,255,136,.2)}
+.br{background:rgba(255,62,94,.1);color:var(--red);border:1px solid rgba(255,62,94,.2)}
+.by{background:rgba(255,197,66,.1);color:var(--yellow);border:1px solid rgba(255,197,66,.2)}
+.bp{background:rgba(176,106,255,.1);color:var(--purple);border:1px solid rgba(176,106,255,.2)}
+.bm{background:rgba(61,84,112,.15);color:var(--muted);border:1px solid rgba(61,84,112,.3)}
 
 .ok{color:var(--green)}.warn{color:var(--yellow)}.bad{color:var(--red)}
 
@@ -430,18 +507,17 @@ td a:hover{text-decoration:underline}
 .tech-card .tl{font-size:.62rem;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
 
 .empty{padding:2.5rem;text-align:center;color:var(--muted);font-family:var(--mono);font-size:.8rem;letter-spacing:.08em}
-
-/* HTTP status colours */
 .s2{color:var(--green)}.s3{color:var(--accent)}.s4{color:var(--yellow)}.s5{color:var(--red)}
+
+/* Export buttons */
+.xbtn{display:inline-block;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.35rem .8rem;cursor:pointer;text-decoration:none;transition:all .15s}
+.xbtn:hover{border-color:var(--accent);color:var(--accent)}
 
 /* Scrollbars */
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 ::-webkit-scrollbar-thumb:hover{background:var(--muted)}
-
-@keyframes fadeUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
-.tab-panel.active{animation:fadeUp .18s ease}
 
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .pulsing{animation:pulse 1.4s ease-in-out infinite}
@@ -458,17 +534,15 @@ td a:hover{text-decoration:underline}
     <div class="hstat"><span class="n" id="hEmails">—</span><span class="l">Emails</span></div>
     <div class="hstat"><span class="n" id="hPorts">—</span><span class="l">Ports</span></div>
     <div class="hstat"><span class="n" id="hTech">—</span><span class="l">Tech</span></div>
+    <div class="hstat"><span class="n" id="hSubs">—</span><span class="l">Subdomains</span></div>
+    <div class="hstat"><span class="n" id="hAlerts" style="color:var(--muted)">—</span><span class="l" style="color:var(--red)">Alerts</span></div>
   </div>
 </header>
 
 <div class="body">
-
-  <!-- SIDEBAR -->
   <aside class="sidebar">
-
     <div class="sidebar-section">
       <div class="sid-title">Crawler Control</div>
-
       <div class="field">
         <label>Target Domain</label>
         <input type="text" id="domain" placeholder="https://example.com">
@@ -482,16 +556,30 @@ td a:hover{text-decoration:underline}
         <label>Same Domain Only</label>
         <label class="toggle"><input type="checkbox" id="sameDomain"><span class="toggle-slider"></span></label>
       </div>
-
+      <div class="toggle-row">
+        <label>Resume Previous Crawl</label>
+        <label class="toggle"><input type="checkbox" id="resumeCrawl"><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label>Ignore robots.txt</label>
+        <label class="toggle"><input type="checkbox" id="ignoreRobots"><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label>JS Rendering (Playwright)</label>
+        <label class="toggle"><input type="checkbox" id="usePW"><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label>Skip Social Media</label>
+        <label class="toggle"><input type="checkbox" id="noSocial"><span class="toggle-slider"></span></label>
+      </div>
+      <div id="resumeInfo" style="display:none;font-family:var(--mono);font-size:.68rem;color:var(--yellow);margin-bottom:.6rem;line-height:1.6"></div>
       <button class="btn btn-start" id="btnStart" onclick="startCrawler()">▶ Start Crawler</button>
       <button class="btn btn-stop"  id="btnStop"  onclick="stopCrawler()" disabled>■ Stop Crawler</button>
-
       <div class="run-info" id="runInfo" style="display:none">
         <div>Domain: <span id="riDomain">—</span></div>
         <div>Started: <span id="riStarted">—</span></div>
         <div>PID: <span id="riPid">—</span></div>
       </div>
-
       <button class="btn btn-danger" onclick="clearDB()">⚠ Clear Database</button>
     </div>
 
@@ -522,13 +610,50 @@ td a:hover{text-decoration:underline}
         <button class="nav-pill" onclick="switchTab('http')" id="pill-http">
           HTTP History <span class="pill-count" id="pc-http">0</span>
         </button>
+        <button class="nav-pill" onclick="switchTab('subdomains')" id="pill-subdomains">
+          Subdomains <span class="pill-count" id="pc-subdomains">0</span>
+        </button>
+        <button class="nav-pill" onclick="switchTab('secheaders')" id="pill-secheaders">
+          Sec Headers <span class="pill-count" id="pc-secheaders">0</span>
+        </button>
+        <button class="nav-pill" onclick="switchTab('xhr')" id="pill-xhr">
+          XHR Endpoints <span class="pill-count" id="pc-xhr">0</span>
+        </button>
+        <button class="nav-pill" onclick="switchTab('alerts')" id="pill-alerts">
+          !! Alerts <span class="pill-count" id="pc-alerts" style="color:var(--red)">0</span>
+        </button>
+        <button class="nav-pill" onclick="switchTab('recon')" id="pill-recon">
+          Recon <span class="pill-count" id="pc-recon">0</span>
+        </button>
+        <button class="nav-pill" onclick="switchTab('report')" id="pill-report">
+          Report / Export
+        </button>
       </div>
     </div>
-
   </aside>
 
-  <!-- CONTENT -->
   <div class="content">
+
+    <!-- ALERTS -->
+    <div class="tab-panel" id="tab-alerts">
+      <div class="panel-inner">
+        <div class="panel-header">
+          <span class="panel-title" style="color:var(--red)">!! Alerts</span>
+          <span class="cnt-badge" id="c-alerts" style="background:rgba(255,62,94,.1);color:var(--red);border-color:rgba(255,62,94,.3)">0</span>
+          <button onclick="loadAlerts()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+          <a href="/api/export/alerts.csv" class="xbtn">↓ CSV</a>
+          <a href="/api/export/alerts.json" class="xbtn">↓ JSON</a>
+        </div>
+        <div style="font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-bottom:1.2rem;padding:.7rem 1rem;border:1px solid rgba(255,62,94,.15);background:rgba(255,62,94,.04)">
+          Exploitable findings requiring immediate attention — exposed secrets, critical open ports, EOL software, high-value subdomains, and expiring certificates.
+        </div>
+        <div class="search-row"><input type="text" placeholder="Filter..." oninput="filterTbl('tAlerts',this.value)"></div>
+        <div class="tbl-wrap"><table id="tAlerts">
+          <thead><tr><th>Severity</th><th>Type</th><th>Target</th><th>Detail</th><th>Found</th></tr></thead>
+          <tbody id="bAlerts"></tbody>
+        </table></div>
+      </div>
+    </div>
 
     <!-- LOG -->
     <div class="tab-panel active" id="tab-log">
@@ -547,10 +672,12 @@ td a:hover{text-decoration:underline}
           <span class="panel-title">Domains</span>
           <span class="cnt-badge" id="c-domains">0</span>
           <button onclick="loadDomains()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+          <a href="/api/export/domains.csv"  class="xbtn">↓ CSV</a>
+          <a href="/api/export/domains.json" class="xbtn">↓ JSON</a>
         </div>
         <div class="search-row"><input type="text" placeholder="Filter..." oninput="filterTbl('tDomains',this.value)"></div>
         <div class="tbl-wrap"><table id="tDomains">
-          <thead><tr><th>URL</th><th>IP</th><th>Server</th><th>Content-Type</th><th>Title</th></tr></thead>
+          <thead><tr><th>URL</th><th>IP</th><th>ASN / Org</th><th>Server</th><th>Content-Type</th><th>Title</th></tr></thead>
           <tbody id="bDomains"></tbody>
         </table></div>
       </div>
@@ -563,6 +690,7 @@ td a:hover{text-decoration:underline}
           <span class="panel-title">Technologies</span>
           <span class="cnt-badge" id="c-technologies">0</span>
           <button onclick="loadTech()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+          <a href="/api/export/technologies.csv" class="xbtn">↓ CSV</a>
         </div>
         <div class="tech-grid" id="techGrid"></div>
         <div class="search-row"><input type="text" placeholder="Filter..." oninput="filterTbl('tTech',this.value)"></div>
@@ -580,6 +708,7 @@ td a:hover{text-decoration:underline}
           <span class="panel-title">Open Ports</span>
           <span class="cnt-badge" id="c-ports">0</span>
           <button onclick="loadPorts()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+          <a href="/api/export/ports.csv" class="xbtn">↓ CSV</a>
         </div>
         <div class="search-row"><input type="text" placeholder="Filter..." oninput="filterTbl('tPorts',this.value)"></div>
         <div class="tbl-wrap"><table id="tPorts">
@@ -596,6 +725,8 @@ td a:hover{text-decoration:underline}
           <span class="panel-title">SSL / WHOIS</span>
           <span class="cnt-badge" id="c-ssl">0</span>
           <button onclick="loadSSL()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+          <a href="/api/export/ssl.csv"   class="xbtn">↓ SSL CSV</a>
+          <a href="/api/export/whois.csv" class="xbtn">↓ WHOIS CSV</a>
         </div>
         <div class="search-row"><input type="text" placeholder="Filter..." oninput="filterTbl('tSSL',this.value)"></div>
         <div class="tbl-wrap"><table id="tSSL">
@@ -612,6 +743,7 @@ td a:hover{text-decoration:underline}
           <span class="panel-title">Emails</span>
           <span class="cnt-badge" id="c-emails">0</span>
           <button onclick="loadEmails()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+          <a href="/api/export/emails.csv" class="xbtn">↓ CSV</a>
         </div>
         <div class="search-row"><input type="text" placeholder="Filter..." oninput="filterTbl('tEmails',this.value)"></div>
         <div class="tbl-wrap"><table id="tEmails">
@@ -624,8 +756,11 @@ td a:hover{text-decoration:underline}
     <!-- DNS / MX -->
     <div class="tab-panel" id="tab-dns">
       <div class="panel-inner">
-        <div class="panel-header"><span class="panel-title">DNS / MX Records</span>
+        <div class="panel-header">
+          <span class="panel-title">DNS / MX Records</span>
           <button onclick="loadDNS()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+          <a href="/api/export/dns.csv" class="xbtn">↓ DNS CSV</a>
+          <a href="/api/export/mx.csv"  class="xbtn">↓ MX CSV</a>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.4rem">
           <div>
@@ -658,6 +793,151 @@ td a:hover{text-decoration:underline}
       </div>
     </div>
 
+    <!-- SUBDOMAINS -->
+    <div class="tab-panel" id="tab-subdomains">
+      <div class="panel-inner">
+        <div class="panel-header">
+          <span class="panel-title">Subdomains</span>
+          <span class="cnt-badge" id="c-subdomains">0</span>
+          <button onclick="loadSubdomains()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+          <a href="/api/export/subdomains.csv"  class="xbtn">↓ CSV</a>
+          <a href="/api/export/subdomains.json" class="xbtn">↓ JSON</a>
+        </div>
+        <div class="search-row"><input type="text" placeholder="Filter..." oninput="filterTbl('tSubdomains',this.value)"></div>
+        <div class="tbl-wrap"><table id="tSubdomains">
+          <thead><tr><th>Root Domain</th><th>Subdomain</th><th>IP</th><th>HTTP Status</th><th>Found At</th></tr></thead>
+          <tbody id="bSubdomains"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- SECURITY HEADERS -->
+    <div class="tab-panel" id="tab-secheaders">
+      <div class="panel-inner">
+        <div class="panel-header">
+          <span class="panel-title">Security Headers</span>
+          <span class="cnt-badge" id="c-secheaders">0</span>
+          <button onclick="loadSecHeaders()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+          <a href="/api/export/security_headers.csv" class="xbtn">↓ CSV</a>
+        </div>
+        <div class="search-row"><input type="text" placeholder="Filter..." oninput="filterTbl('tSecHeaders',this.value)"></div>
+        <div class="tbl-wrap"><table id="tSecHeaders">
+          <thead><tr><th>Domain</th><th>Present</th><th>Missing</th><th>Leaking</th><th>Checked</th></tr></thead>
+          <tbody id="bSecHeaders"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- XHR ENDPOINTS -->
+    <div class="tab-panel" id="tab-xhr">
+      <div class="panel-inner">
+        <div class="panel-header">
+          <span class="panel-title">XHR / Fetch Endpoints</span>
+          <span class="cnt-badge" id="c-xhr">0</span>
+          <button onclick="loadXhr()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">&#8635; Refresh</button>
+          <a href="/api/export/xhr.csv" class="xbtn">&#8595; CSV</a>
+          <a href="/api/export/xhr.json" class="xbtn">&#8595; JSON</a>
+        </div>
+        <div class="search-row"><input type="text" placeholder="Filter..." oninput="filterTbl('tXhr',this.value)"></div>
+        <div class="tbl-wrap"><table id="tXhr">
+          <thead><tr><th>Page URL</th><th>Method</th><th>Endpoint</th><th>Found</th></tr></thead>
+          <tbody id="bXhr"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- RECON -->
+    <div class="tab-panel" id="tab-recon">
+      <div class="panel-inner">
+        <div class="panel-header">
+          <span class="panel-title">JS Bundle Analysis</span>
+          <span class="cnt-badge" id="c-recon">0</span>
+          <button onclick="loadRecon()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">&#8635; Refresh</button>
+          <a href="/api/export/js_findings.csv" class="xbtn">&#8595; CSV</a>
+          <a href="/api/export/js_findings.json" class="xbtn">&#8595; JSON</a>
+        </div>
+        <div class="search-row">
+          <input type="text" placeholder="Filter findings..." oninput="filterTbl('tRecon',this.value)" style="flex:1">
+          <select onchange="filterReconType(this.value)" style="background:var(--bg);border:1px solid var(--border);color:var(--fg);padding:.35rem .6rem;font-family:var(--mono);font-size:.75rem;cursor:pointer">
+            <option value="">All types</option>
+            <option value="api_key">api_key</option>
+            <option value="secret">secret</option>
+            <option value="token">token</option>
+            <option value="password">password</option>
+            <option value="aws_access_key">aws_access_key</option>
+            <option value="github_token">github_token</option>
+            <option value="openai_key">openai_key</option>
+            <option value="endpoint">endpoint</option>
+            <option value="staging_url">staging_url</option>
+          </select>
+        </div>
+        <div class="tbl-wrap"><table id="tRecon">
+          <thead><tr><th>Type</th><th>Value</th><th>JS File</th><th>Page</th><th>Found</th></tr></thead>
+          <tbody id="bRecon"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- REPORT / EXPORT -->
+    <div class="tab-panel" id="tab-report">
+      <div class="panel-inner">
+        <div class="panel-header">
+          <span class="panel-title">Report &amp; Export</span>
+          <button onclick="loadReport()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+        </div>
+
+        <div id="reportTotals" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);margin-bottom:1.4rem"></div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1.4rem;margin-bottom:1.4rem">
+          <div>
+            <div style="font-size:.7rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:.8rem">Top Technologies</div>
+            <div class="tbl-wrap"><table><thead><tr><th>Technology</th><th>Count</th></tr></thead><tbody id="bRTech"></tbody></table></div>
+          </div>
+          <div>
+            <div style="font-size:.7rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:.8rem">Open Ports</div>
+            <div class="tbl-wrap"><table><thead><tr><th>Port</th><th>Service</th><th>Count</th></tr></thead><tbody id="bRPorts"></tbody></table></div>
+          </div>
+          <div>
+            <div style="font-size:.7rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:.8rem">HTTP Status Codes</div>
+            <div class="tbl-wrap"><table><thead><tr><th>Status</th><th>Count</th></tr></thead><tbody id="bRStatus"></tbody></table></div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1.4rem;margin-bottom:1.4rem">
+          <div>
+            <div style="font-size:.7rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:.8rem">SSL Expiring Soonest</div>
+            <div class="tbl-wrap"><table><thead><tr><th>Domain</th><th>Expires</th></tr></thead><tbody id="bRSSL"></tbody></table></div>
+          </div>
+          <div>
+            <div style="font-size:.7rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:.8rem">Top Registrars</div>
+            <div class="tbl-wrap"><table><thead><tr><th>Registrar</th><th>Count</th></tr></thead><tbody id="bRReg"></tbody></table></div>
+          </div>
+          <div>
+            <div style="font-size:.7rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:.8rem">Worst Sec Headers</div>
+            <div class="tbl-wrap"><table><thead><tr><th>Domain</th><th>Missing</th><th>Leaking</th></tr></thead><tbody id="bRSecH"></tbody></table></div>
+          </div>
+        </div>
+
+        <div style="font-size:.7rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:.8rem">Export All Data</div>
+        <div style="display:flex;flex-wrap:wrap;gap:.5rem">
+          <a href="/api/export/domains.csv"          class="xbtn">Domains CSV</a>
+          <a href="/api/export/domains.json"         class="xbtn">Domains JSON</a>
+          <a href="/api/export/emails.csv"           class="xbtn">Emails CSV</a>
+          <a href="/api/export/technologies.csv"     class="xbtn">Technologies CSV</a>
+          <a href="/api/export/ports.csv"            class="xbtn">Ports CSV</a>
+          <a href="/api/export/ssl.csv"              class="xbtn">SSL CSV</a>
+          <a href="/api/export/whois.csv"            class="xbtn">WHOIS CSV</a>
+          <a href="/api/export/dns.csv"              class="xbtn">DNS CSV</a>
+          <a href="/api/export/mx.csv"               class="xbtn">MX CSV</a>
+          <a href="/api/export/subdomains.csv"       class="xbtn">Subdomains CSV</a>
+          <a href="/api/export/subdomains.json"      class="xbtn">Subdomains JSON</a>
+          <a href="/api/export/security_headers.csv" class="xbtn">Sec Headers CSV</a>
+          <a href="/api/export/asn.csv" class="xbtn">ASN CSV</a>
+          <a href="/api/export/asn.json" class="xbtn">ASN JSON</a>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /content -->
 </div><!-- /body -->
 
@@ -665,23 +945,26 @@ td a:hover{text-decoration:underline}
 const PORT_SVC={21:'FTP',22:'SSH',23:'Telnet',25:'SMTP',53:'DNS',80:'HTTP',443:'HTTPS',8080:'HTTP-Alt',8443:'HTTPS-Alt',3306:'MySQL',5432:'PostgreSQL',6379:'Redis',27017:'MongoDB'};
 const TECH_CLS={'WordPress':'bc','Shopify':'bg','React':'bp','Vue.js':'bp','Angular':'bp','jQuery':'by','Bootstrap':'by','Cloudflare':'bc','Nginx':'bg','Apache':'br','Google Analytics':'bm','Google Tag Mgr':'bm','PHP':'br','ASP.NET':'br','Cloudfront':'bc','Drupal':'bc','Joomla':'bc','Wix':'by','Squarespace':'by'};
 
-let logOffset=0, logLines=0;
-let pollInterval=null;
-let currentTab='log';
+let logOffset=0, logLines=0, currentTab='log';
 
-// ── Tab switching ────────────────────────────────────────────
+// ── Tab switching ──────────────────────────────────────
 function switchTab(name){
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-pill').forEach(b=>b.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   document.getElementById('pill-'+name).classList.add('active');
   currentTab=name;
+  // Immediately catch up on logs when returning to log tab
+  if(name==='log') pollLogs();
   ({log:()=>{},domains:loadDomains,technologies:loadTech,ports:loadPorts,
-    ssl:loadSSL,emails:loadEmails,dns:loadDNS,http:loadHTTP})[name]?.();
+    ssl:loadSSL,emails:loadEmails,dns:loadDNS,http:loadHTTP,
+    subdomains:loadSubdomains,secheaders:loadSecHeaders,xhr:loadXhr,recon:loadRecon,
+    alerts:loadAlerts,report:loadReport})[name]?.();
 }
 
-// ── Crawler control ──────────────────────────────────────────
+// ── Crawler control ────────────────────────────────────
 async function startCrawler(){
+  logOffset=0;logLines=0;clearLog();
   const domain=document.getElementById('domain').value.trim();
   if(!domain){alert('Enter a target domain');return}
   const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -690,83 +973,80 @@ async function startCrawler(){
       rate_min:parseFloat(document.getElementById('rateMin').value)||1,
       rate_max:parseFloat(document.getElementById('rateMax').value)||3,
       concurrency:parseInt(document.getElementById('concurrency').value)||5,
-      same_domain:document.getElementById('sameDomain').checked
+      same_domain:document.getElementById('sameDomain').checked,
+      resume:document.getElementById('resumeCrawl').checked,
+      ignore_robots:document.getElementById('ignoreRobots').checked,
+      playwright:document.getElementById('usePW').checked,
+      no_social:document.getElementById('noSocial').checked,
     })});
   const d=await r.json();
   if(!d.ok){alert('Error: '+d.error);return}
-  switchTab('log');
-  pollStatus();
+  switchTab('log');pollStatus();
 }
 
-async function stopCrawler(){
-  await fetch('/api/stop',{method:'POST'});
-}
+async function stopCrawler(){await fetch('/api/stop',{method:'POST'})}
 
 async function clearDB(){
   if(!confirm('Delete all data from the database?'))return;
   const r=await fetch('/api/clear_db',{method:'POST'});
   const d=await r.json();
-  if(d.ok) pollStats();
-  else alert('Error: '+d.error);
+  if(d.ok)pollStats();else alert('Error: '+d.error);
 }
 
-// ── Status polling ───────────────────────────────────────────
+// ── Status polling ─────────────────────────────────────
 async function pollStatus(){
   const r=await fetch('/api/status');
   const d=await r.json();
   const dot=document.getElementById('statusDot');
   const lbl=document.getElementById('runLabel');
   const info=document.getElementById('runInfo');
-  const btnStart=document.getElementById('btnStart');
-  const btnStop=document.getElementById('btnStop');
   const pulse=document.getElementById('logPulse');
-
   if(d.running){
     dot.className='status-dot running';
-    lbl.textContent='running → '+d.domain;
-    lbl.style.color='var(--green)';
+    lbl.textContent='running → '+d.domain;lbl.style.color='var(--green)';
     info.style.display='block';
-    document.getElementById('riDomain').textContent=d.domain||'—';
-    document.getElementById('riStarted').textContent=d.started||'—';
-    document.getElementById('riPid').textContent=d.pid||'—';
-    btnStart.disabled=true;
-    btnStop.disabled=false;
+    document.getElementById('riDomain').textContent=d.domain||'-';
+    document.getElementById('riStarted').textContent=d.started||'-';
+    document.getElementById('riPid').textContent=d.pid||'-';
+    document.getElementById('btnStart').disabled=true;
+    document.getElementById('btnStop').disabled=false;
     pulse.style.display='inline';
   } else {
     dot.className='status-dot stopped';
-    lbl.textContent='idle';
-    lbl.style.color='var(--muted)';
+    lbl.textContent='idle';lbl.style.color='var(--muted)';
     info.style.display='none';
-    btnStart.disabled=false;
-    btnStop.disabled=true;
+    document.getElementById('btnStart').disabled=false;
+    document.getElementById('btnStop').disabled=true;
     pulse.style.display='none';
   }
 }
 
-// ── Log polling ──────────────────────────────────────────────
+// ── Log polling ────────────────────────────────────────
 function logClass(msg){
   if(msg.startsWith('[NuScrape]'))return'sys';
   if(/error|fail|exception/i.test(msg))return'err';
   if(/warning|warn/i.test(msg))return'warn';
-  if(/found|saved|detected|open port/i.test(msg))return'info';
+  if(/found|saved|detected|open port|subdomain/i.test(msg))return'info';
   return'';
 }
 
 async function pollLogs(){
   const r=await fetch('/api/logs?since='+logOffset);
-  const lines=await r.json();
+  const data=await r.json();
+  const lines=data.lines||[];
+  // Always sync offset to server total so we never drift out of range
+  if(typeof data.total==='number') logOffset=data.total;
   if(!lines.length)return;
   const wrap=document.getElementById('logWrap');
   lines.forEach(l=>{
-    logOffset++;logLines++;
+    logLines++;
     document.getElementById('pc-log').textContent=logLines;
     const div=document.createElement('div');
     div.className='log-line '+logClass(l.msg);
     div.innerHTML=`<span class="lt">${l.t}</span><span class="lm">${escHtml(l.msg)}</span>`;
     wrap.appendChild(div);
   });
-  if(document.getElementById('autoScroll').checked)
-    wrap.scrollTop=wrap.scrollHeight;
+  if(document.getElementById('autoScroll').checked)wrap.scrollTop=wrap.scrollHeight;
 }
 
 function clearLog(){
@@ -775,11 +1055,9 @@ function clearLog(){
   document.getElementById('pc-log').textContent='0';
 }
 
-function escHtml(s){
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
-// ── Stats polling ────────────────────────────────────────────
+// ── Stats polling ──────────────────────────────────────
 async function pollStats(){
   const r=await fetch('/api/stats');
   const d=await r.json();
@@ -787,6 +1065,7 @@ async function pollStats(){
   document.getElementById('hEmails').textContent=d.emails??0;
   document.getElementById('hPorts').textContent=d.ports??0;
   document.getElementById('hTech').textContent=d.tech??0;
+  document.getElementById('hSubs').textContent=d.subdomains??0;
   document.getElementById('pc-domains').textContent=d.domains??0;
   document.getElementById('pc-technologies').textContent=d.tech??0;
   document.getElementById('pc-emails').textContent=d.emails??0;
@@ -794,9 +1073,21 @@ async function pollStats(){
   document.getElementById('pc-ssl').textContent=d.ssl??0;
   document.getElementById('pc-dns').textContent=d.mx??0;
   document.getElementById('pc-http').textContent=d.http??0;
+  document.getElementById('pc-subdomains').textContent=d.subdomains??0;
+  document.getElementById('pc-secheaders').textContent=d.secheaders??0;
+  document.getElementById('pc-xhr').textContent=d.xhr??0;
+  document.getElementById('pc-recon').textContent=d.js??0;
+  const alertCount=d.alerts??0;
+  document.getElementById('pc-alerts').textContent=alertCount;
+  document.getElementById('c-alerts').textContent=alertCount;
+  document.getElementById('hAlerts').textContent=alertCount;
+  if(alertCount>0){
+    document.getElementById('hAlerts').style.color='var(--red)';
+    document.getElementById('pill-alerts').style.color='var(--red)';
+  }
 }
 
-// ── Filter ───────────────────────────────────────────────────
+// ── Filter ─────────────────────────────────────────────
 function filterTbl(id,q){
   q=q.toLowerCase();
   document.querySelectorAll('#'+id+' tbody tr').forEach(r=>{
@@ -804,36 +1095,41 @@ function filterTbl(id,q){
   });
 }
 
-// ── Data loaders ─────────────────────────────────────────────
-function empty(msg='// no records found'){
-  return`<tr><td colspan="99" class="empty">${msg}</td></tr>`;
-}
+function empty(msg='// no records found'){return`<tr><td colspan="99" class="empty">${msg}</td></tr>`}
+function expiryClass(s){if(!s||s==='Unknown')return'';const d=(new Date(s)-new Date())/86400000;return d<0?'bad':d<30?'warn':'ok'}
 
-function expiryClass(s){
-  if(!s||s==='Unknown')return'';
-  const d=(new Date(s)-new Date())/86400000;
-  return d<0?'bad':d<30?'warn':'ok';
-}
-
+// ── Data loaders ───────────────────────────────────────
 async function loadDomains(){
   const rows=await(await fetch('/api/domains')).json();
   document.getElementById('c-domains').textContent=rows.length;
   document.getElementById('bDomains').innerHTML=rows.length
-    ?rows.map(d=>`<tr>
-      <td class="wrap"><a href="http://${d.url}" target="_blank">${d.url}</a></td>
-      <td>${d.ip||'—'}</td>
-      <td>${d.servertype?`<span class="b bm">${d.servertype}</span>`:'—'}</td>
-      <td>${(d.content_type||'').split(';')[0]||'—'}</td>
-      <td>${d.title||'—'}</td>
-    </tr>`).join('')
+    ?rows.map(d=>{
+      const href=d.url.startsWith('http')?d.url:'https://'+d.url;
+      const srv=d.servertype?'<span class="b bm">'+d.servertype+'</span>':'-';
+      const ct=(d.content_type||'').split(';')[0]||'-';
+      let asnCell='-';
+      if(d.org){
+        const cdnBadge=d.is_cdn?'<span class="b br" style="margin-left:3px">CDN</span>':'';
+        const asnTag=d.asn?'<span class="b bm" style="font-size:.65rem">'+d.asn+'</span> ':'';
+        const orgShort=(d.org||'').replace(/^AS\d+\s*/,'').substring(0,32);
+        asnCell=asnTag+orgShort+cdnBadge;
+      }
+      return '<tr>'
+        +'<td class="wrap"><a href="'+href+'" target="_blank">'+d.url+'</a></td>'
+        +'<td style="font-family:var(--mono);font-size:.75rem">'+(d.ip||'-')+'</td>'
+        +'<td class="wrap" style="font-size:.75rem">'+asnCell+'</td>'
+        +'<td>'+srv+'</td>'
+        +'<td>'+(ct||'-')+'</td>'
+        +'<td>'+(d.title||'-')+'</td>'
+        +'</tr>';
+    }).join('')
     :empty();
 }
 
 async function loadTech(){
   const rows=await(await fetch('/api/technologies')).json();
   document.getElementById('c-technologies').textContent=rows.length;
-  const counts={};
-  rows.forEach(r=>{counts[r.technology]=(counts[r.technology]||0)+1});
+  const counts={};rows.forEach(r=>{counts[r.technology]=(counts[r.technology]||0)+1});
   document.getElementById('techGrid').innerHTML=
     Object.entries(counts).sort((a,b)=>b[1]-a[1])
     .map(([t,c])=>`<div class="tech-card"><div class="tn">${t}</div><div class="tv">${c}</div><div class="tl">detections</div></div>`).join('');
@@ -856,20 +1152,15 @@ async function loadPorts(){
 }
 
 async function loadSSL(){
-  const [ssl,whois]=await Promise.all([
-    (await fetch('/api/ssl')).json(),
-    (await fetch('/api/whois')).json()
-  ]);
+  const [ssl,whois]=await Promise.all([(await fetch('/api/ssl')).json(),(await fetch('/api/whois')).json()]);
   const wm={};whois.forEach(w=>{wm[w.domain]=w});
   document.getElementById('c-ssl').textContent=ssl.length;
   document.getElementById('bSSL').innerHTML=ssl.length
     ?ssl.map(d=>{const w=wm[d.domain]||{};return`<tr>
-      <td>${d.domain}</td>
-      <td>${d.common_name||'—'}</td>
-      <td>${d.issuer||'—'}</td>
-      <td class="${expiryClass(d.not_after)}">${d.not_after||'—'}</td>
-      <td>${w.registrar||'—'}</td>
-      <td class="${expiryClass(w.expiration_date)}">${w.expiration_date||'—'}</td>
+      <td>${d.domain}</td><td>${d.common_name||'-'}</td><td>${d.issuer||'-'}</td>
+      <td class="${expiryClass(d.not_after)}">${d.not_after||'-'}</td>
+      <td>${w.registrar||'-'}</td>
+      <td class="${expiryClass(w.expiration_date)}">${w.expiration_date||'-'}</td>
     </tr>`}).join('')
     :empty();
 }
@@ -882,11 +1173,34 @@ async function loadEmails(){
     :empty();
 }
 
+async function loadAlerts(){
+  const rows=await(await fetch('/api/alerts')).json();
+  document.getElementById('c-alerts').textContent=rows.length;
+  document.getElementById('pc-alerts').textContent=rows.length;
+  // Flash the pill red if there are alerts
+  const pill=document.getElementById('pill-alerts');
+  if(rows.length>0){
+    pill.style.color='var(--red)';
+    pill.style.borderLeftColor='var(--red)';
+  }
+  const sevCls={CRITICAL:'br',HIGH:'br',MEDIUM:'by'};
+  const sevIcon={CRITICAL:'🔴',HIGH:'🟠',MEDIUM:'🟡'};
+  document.getElementById('bAlerts').innerHTML=rows.length
+    ?rows.map(r=>{
+      const cls=sevCls[r.severity]||'by';
+      return`<tr>
+        <td><span class="b ${cls}">${sevIcon[r.severity]||''} ${escHtml(r.severity||'-')}</span></td>
+        <td style="font-family:var(--mono);font-size:.72rem;color:var(--red)">${escHtml(r.alert_type||'-')}</td>
+        <td class="wrap" style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${escHtml(r.target||'-')}</td>
+        <td class="wrap" style="font-size:.72rem;white-space:normal;min-width:200px">${escHtml(r.detail||'-')}</td>
+        <td style="font-size:.72rem;white-space:nowrap;color:var(--muted)">${escHtml(r.found_at||'-')}</td>
+      </tr>`;
+    }).join('')
+    :`<tr><td colspan="5" class="empty">// no alerts — system looks clean</td></tr>`;
+}
+
 async function loadDNS(){
-  const [dns,mx]=await Promise.all([
-    (await fetch('/api/dns')).json(),
-    (await fetch('/api/mx')).json()
-  ]);
+  const [dns,mx]=await Promise.all([(await fetch('/api/dns')).json(),(await fetch('/api/mx')).json()]);
   document.getElementById('c-dns').textContent=dns.length;
   document.getElementById('c-mx').textContent=mx.length;
   document.getElementById('bDNS').innerHTML=dns.length
@@ -901,26 +1215,187 @@ async function loadHTTP(){
   document.getElementById('bHTTP').innerHTML=rows.length
     ?rows.map(r=>{
       const s=r.status_code;
-      const cls=s<300?'s2':s<400?'s3':s<500?'s4':'s5';
       return`<tr>
         <td><span class="b ${s<300?'bg':s<400?'bc':s<500?'by':'br'}">${s}</span></td>
-        <td class="wrap ${cls}">${r.url}</td>
+        <td class="wrap ${s<300?'s2':s<400?'s3':s<500?'s4':'s5'}">${r.url}</td>
         <td style="color:var(--muted)">${r.checked_at}</td>
       </tr>`;
     }).join('')
     :empty();
 }
 
-// ── Init ─────────────────────────────────────────────────────
-pollStatus();
-pollStats();
-pollLogs();
+async function loadXhr(){
+  const rows=await(await fetch('/api/xhr')).json();
+  document.getElementById('c-xhr').textContent=rows.length;
+  document.getElementById('bXhr').innerHTML=rows.length
+    ?rows.map(r=>{
+      const mCls=r.method==='POST'?'br':r.method==='PUT'?'bw':r.method==='DELETE'?'bad':'bm';
+      return '<tr>'
+        +'<td class="wrap" style="font-size:.72rem">'+escHtml(r.url||'-')+'</td>'
+        +'<td><span class="b '+mCls+'">'+escHtml(r.method||'GET')+'</span></td>'
+        +'<td class="wrap" style="font-family:var(--mono);font-size:.72rem">'+escHtml(r.endpoint||'-')+'</td>'
+        +'<td style="font-size:.72rem">'+escHtml(r.found_at||'-')+'</td>'
+        +'</tr>';
+    }).join('')
+    :empty();
+}
 
-setInterval(()=>{
+async function loadRecon(){
+  const rows=await(await fetch('/api/js')).json();
+  document.getElementById('c-recon').textContent=rows.length;
+  const typeColor={
+    'api_key':'br','secret':'br','token':'br','password':'br',
+    'aws_access_key':'br','github_token':'br','openai_key':'br',
+    'private_key':'br','client_secret':'br',
+    'endpoint':'bm','staging_url':'bw'
+  };
+  document.getElementById('bRecon').innerHTML=rows.length
+    ?rows.map(r=>{
+      const cls=typeColor[r.finding_type]||'bc';
+      const jsPath=r.js_url.replace(/^https?:\/\//,'').split('?')[0];
+      return`<tr data-type="${escHtml(r.finding_type||'')}">
+        <td><span class="b ${cls}">${escHtml(r.finding_type||'-')}</span></td>
+        <td class="wrap" style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${escHtml(r.value||'-')}</td>
+        <td style="font-family:var(--mono);font-size:.72rem;word-break:break-all;white-space:normal;min-width:180px">${escHtml(jsPath)}</td>
+        <td class="wrap" style="font-size:.72rem">${escHtml(r.url||'-')}</td>
+        <td style="font-size:.72rem;white-space:nowrap">${escHtml(r.found_at||'-')}</td>
+      </tr>`;
+    }).join('')
+    :empty();
+}
+function filterReconType(type){
+  document.querySelectorAll('#tRecon tbody tr').forEach(r=>{
+    r.style.display=(!type||r.dataset.type===type)?'':'none';
+  });
+}
+
+async function loadSubdomains(){
+  const rows=await(await fetch('/api/subdomains')).json();
+  document.getElementById('c-subdomains').textContent=rows.length;
+  document.getElementById('bSubdomains').innerHTML=rows.length
+    ?rows.map(r=>{
+      const s=r.status_code;
+      const scls=s?s<300?'bg':s<400?'bc':s<500?'by':'br':'bm';
+      return`<tr>
+        <td>${r.root_domain}</td>
+        <td><a href="https://${r.subdomain}" target="_blank">${r.subdomain}</a></td>
+        <td>${r.ip||'-'}</td>
+        <td>${s?`<span class="b ${scls}">${s}</span>`:'-'}</td>
+        <td style="color:var(--muted)">${r.found_at}</td>
+      </tr>`;
+    }).join('')
+    :empty();
+}
+
+async function loadSecHeaders(){
+  const rows=await(await fetch('/api/security_headers')).json();
+  document.getElementById('c-secheaders').textContent=rows.length;
+  document.getElementById('bSecHeaders').innerHTML=rows.length
+    ?rows.map(r=>`<tr>
+      <td>${r.domain}</td>
+      <td class="wrap" style="color:var(--green);font-size:.7rem">${r.present||'-'}</td>
+      <td class="wrap" style="color:var(--red);font-size:.7rem">${r.missing||'-'}</td>
+      <td class="wrap" style="color:var(--yellow);font-size:.7rem">${r.leaking||'-'}</td>
+      <td style="color:var(--muted)">${r.checked_at}</td>
+    </tr>`).join('')
+    :empty();
+}
+
+// ── Resume state check ─────────────────────────────────
+async function checkResumeState(){
+  const r=await fetch('/api/resume_state');
+  const d=await r.json();
+  const info=document.getElementById('resumeInfo');
+  if(d.available){
+    info.style.display='block';
+    info.innerHTML=`Saved: ${d.domain}<br>At: ${d.saved_at} | ${d.crawled} crawled | ${d.queue} queued`;
+    if(d.domain)document.getElementById('domain').value=d.domain;
+  } else {
+    info.style.display='none';
+    document.getElementById('resumeCrawl').checked=false;
+  }
+}
+
+// ── Report loader ──────────────────────────────────────
+async function loadReport(){
+  const r=await fetch('/api/report');
+  const d=await r.json();
+  const labels={domains:'Domains',emails:'Emails',open_ports:'Open Ports',
+    technologies:'Technologies',ssl_certs:'SSL Certs',mx_records:'MX Records',
+    http_requests:'HTTP Req',subdomains:'Subdomains'};
+  document.getElementById('reportTotals').innerHTML=
+    Object.entries(d.totals).map(([k,v])=>`
+      <div style="background:var(--surf2);padding:.9rem 1.1rem">
+        <div style="font-family:var(--mono);font-size:.72rem;color:var(--accent);margin-bottom:.2rem">${labels[k]||k}</div>
+        <div style="font-size:1.5rem;font-weight:800;color:var(--text);line-height:1">${v}</div>
+      </div>`).join('');
+
+  document.getElementById('bRTech').innerHTML=d.top_technologies.length
+    ?d.top_technologies.map(r=>`<tr><td><span class="b ${TECH_CLS[r.technology]||'bm'}">${r.technology}</span></td><td style="color:var(--accent);font-family:var(--mono)">${r.cnt}</td></tr>`).join('')
+    :empty('// none');
+
+  const PORT_CLS2={80:'bc',443:'bc',8080:'bc',8443:'bc',22:'by',3306:'br',5432:'br',6379:'br',27017:'br'};
+  document.getElementById('bRPorts').innerHTML=d.open_ports.length
+    ?d.open_ports.map(r=>`<tr><td><span class="b ${PORT_CLS2[r.port]||'bm'}">${r.port}</span></td><td style="color:var(--muted)">${PORT_SVC[r.port]||'-'}</td><td style="color:var(--accent);font-family:var(--mono)">${r.cnt}</td></tr>`).join('')
+    :empty('// none');
+
+  document.getElementById('bRStatus').innerHTML=d.http_status_breakdown.length
+    ?d.http_status_breakdown.map(r=>{const s=r.status_code;return`<tr><td><span class="b ${s<300?'bg':s<400?'bc':s<500?'by':'br'}">${s}</span></td><td style="color:var(--accent);font-family:var(--mono)">${r.cnt}</td></tr>`}).join('')
+    :empty('// none');
+
+  document.getElementById('bRSSL').innerHTML=d.ssl_expiring_soonest.length
+    ?d.ssl_expiring_soonest.map(r=>`<tr><td>${r.domain}</td><td class="${expiryClass(r.not_after)}">${r.not_after}</td></tr>`).join('')
+    :empty('// none');
+
+  document.getElementById('bRReg').innerHTML=d.top_registrars.length
+    ?d.top_registrars.map(r=>`<tr><td>${r.registrar}</td><td style="color:var(--accent);font-family:var(--mono)">${r.cnt}</td></tr>`).join('')
+    :empty('// none');
+
+  document.getElementById('bRSecH').innerHTML=d.worst_security_headers.length
+    ?d.worst_security_headers.map(r=>`<tr>
+        <td>${r.domain}</td>
+        <td class="wrap" style="color:var(--red);font-size:.7rem">${r.missing||'-'}</td>
+        <td class="wrap" style="color:var(--yellow);font-size:.7rem">${r.leaking||'-'}</td>
+      </tr>`).join('')
+    :empty('// none');
+}
+
+// ── Init ───────────────────────────────────────────────
+// Use a Web Worker for polling so the browser cannot throttle it
+// when the tab is hidden or loses focus. Workers run in a separate
+// thread and are exempt from background timer throttling.
+const _workerSrc = `
+  let tid = null;
+  function tick(){
+    postMessage('tick');
+    tid = setTimeout(tick, 2000);
+  }
+  tick();
+  onmessage = function(e){
+    if(e.data === 'stop'){ clearTimeout(tid); }
+  };
+`;
+const _workerBlob = new Blob([_workerSrc], {type:'application/javascript'});
+const _pollWorker = new Worker(URL.createObjectURL(_workerBlob));
+
+_pollWorker.onmessage = function(){
   pollStatus();
   pollStats();
   pollLogs();
-},2000);
+};
+
+// Catch-up poll immediately when tab becomes visible again
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'){
+    pollStatus();pollStats();pollLogs();
+  }
+});
+
+pollLogs();
+pollStatus();
+pollStats();
+checkResumeState();
+loadAlerts();
 </script>
 </body>
 </html>
