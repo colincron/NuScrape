@@ -9,6 +9,7 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(BASE_DIR, "ScrapeDB")
 CRAWLER  = os.path.join(BASE_DIR, "main.py")
+SCAN_LOG = os.path.join(BASE_DIR, "scan.log")   # persistent rolling log
 
 # ── Crawler state ─────────────────────────────────────────────
 crawler_proc  = None
@@ -17,6 +18,7 @@ log_buffer    = deque(maxlen=500)
 log_total     = [0]   # mutable so stream thread can increment
 log_lock      = threading.Lock()
 crawler_stats = {"started": None, "domain": None}
+_stopped_by_user = [False]   # set True when /api/stop is called — suppresses auto-restart
 
 def ts():
     return datetime.now().strftime("%H:%M:%S")
@@ -26,10 +28,43 @@ def push_log(line):
         log_buffer.append({"t": ts(), "msg": line.rstrip()})
         log_total[0] += 1
 
+def _write_scan_log(text):
+    """Append a line to the persistent scan log file (best-effort)."""
+    try:
+        with open(SCAN_LOG, "a", encoding="utf-8") as f:
+            f.write(text if text.endswith("\n") else text + "\n")
+    except Exception:
+        pass
+
 def stream_proc(proc):
+    """Read subprocess stdout, push to in-memory buffer, write to scan.log."""
     for line in iter(proc.stdout.readline, b""):
-        push_log(line.decode("utf-8", errors="replace"))
+        decoded = line.decode("utf-8", errors="replace")
+        push_log(decoded)
+        _write_scan_log(decoded)
     proc.stdout.close()
+
+    # ── Post-exit: detect unexpected crash and auto-restart ───
+    exit_code = proc.wait()
+    domain    = crawler_stats.get("domain")
+    # Guard against poisoned domain values (e.g. error strings from a previous crash loop)
+    if domain and not (domain.startswith("http://") or domain.startswith("https://")):
+        domain = None
+
+    if exit_code != 0 and not _stopped_by_user[0] and domain:
+        msg = (f"[NuScrape] main.py exited with code {exit_code} — "
+               f"restarting in 15 s (domain: {domain})")
+        push_log(msg)
+        _write_scan_log(msg)
+        time.sleep(15)
+        # Only restart if no new scan was started in the meantime
+        with crawler_lock:
+            if crawler_proc is proc:   # still the same dead process
+                _launch_crawler(domain)
+    elif exit_code == 0 and not _stopped_by_user[0]:
+        msg = f"[NuScrape] Scan completed cleanly (exit 0) for {domain}."
+        push_log(msg)
+        _write_scan_log(msg)
 
 # ── DB helpers ────────────────────────────────────────────────
 def qdb(sql, args=()):
@@ -51,11 +86,48 @@ def count(table, col="*"):
 
 # ── Routes ────────────────────────────────────────────────────
 
+def nocache(resp):
+    """Attach no-store headers so browsers never cache API responses."""
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
 @app.route("/")
 def index():
     return Response(HTML, mimetype="text/html")
 
 # -- Crawler control --
+
+# Stored launch args so auto-restart can reuse them
+_last_cmd = [None]
+
+def _launch_crawler(domain, cmd=None):
+    """Spawn main.py and start the stream/watchdog thread. Must be called
+    with crawler_lock held (or at startup before Flask is serving)."""
+    global crawler_proc
+    if not domain or not (domain.startswith("http://") or domain.startswith("https://")):
+        _write_scan_log(f"[NuScrape] _launch_crawler blocked: invalid domain {domain!r}\n")
+        return
+    if cmd is None:
+        cmd = _last_cmd[0]
+    _last_cmd[0] = cmd
+    _stopped_by_user[0] = False
+
+    _write_scan_log(f"\n{'='*60}\n[NuScrape] Starting scan → {domain}  @ {datetime.now()}\n{'='*60}\n")
+    push_log(f"[NuScrape] Starting crawler → {domain}")
+
+    crawler_proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        cwd=BASE_DIR,
+    )
+    crawler_stats["started"] = ts()
+    crawler_stats["domain"]  = domain
+
+    t = threading.Thread(target=stream_proc, args=(crawler_proc,), daemon=True)
+    t.start()
 
 @app.route("/api/start", methods=["POST"])
 def api_start():
@@ -70,6 +142,9 @@ def api_start():
     ignore_robots = bool(data.get("ignore_robots", False))
     use_playwright = bool(data.get("playwright", False))
     no_social      = bool(data.get("no_social", False))
+    stealth_profile = data.get("stealth_profile", "LOUD").upper()
+    if stealth_profile not in ("LOUD", "NORMAL", "GHOST"):
+        stealth_profile = "LOUD"
 
     if not domain:
         return jsonify({"ok": False, "error": "No domain provided"}), 400
@@ -95,25 +170,15 @@ def api_start():
             cmd.append("--playwright")
         if no_social:
             cmd.append("--no-social")
+        if stealth_profile != "LOUD":
+            cmd.extend(["--stealth", stealth_profile])
 
         with log_lock:
             log_buffer.clear()
             log_total[0] = 0
 
-        push_log(f"[NuScrape] Starting crawler → {domain}")
-        push_log(f"[NuScrape] Args: rate={rate_min}-{rate_max}s  concurrency={concurrency}  same-domain={same_domain}  resume={resume}")
-
-        crawler_proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            cwd=BASE_DIR,
-        )
-        crawler_stats["started"] = ts()
-        crawler_stats["domain"]  = domain
-
-        t = threading.Thread(target=stream_proc, args=(crawler_proc,), daemon=True)
-        t.start()
+        push_log(f"[NuScrape] Args: rate={rate_min}-{rate_max}s  concurrency={concurrency}  same-domain={same_domain}  resume={resume}  stealth={stealth_profile}")
+        _launch_crawler(domain, cmd)
 
     return jsonify({"ok": True})
 
@@ -122,7 +187,9 @@ def api_stop():
     global crawler_proc
     with crawler_lock:
         if crawler_proc and crawler_proc.poll() is None:
+            _stopped_by_user[0] = True   # suppress auto-restart
             crawler_proc.terminate()
+            _write_scan_log(f"[NuScrape] Scan stopped by user @ {datetime.now()}\n")
             push_log("[NuScrape] Crawler stopped by user.")
             return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "No crawler running"})
@@ -153,11 +220,27 @@ def api_logs():
         new_lines = all_logs[since - buf_start:]
     return jsonify({"lines": new_lines, "total": total})
 
+@app.route("/api/scanlog")
+def api_scanlog():
+    """Return the last N lines of the persistent scan.log file.
+    Useful for post-mortem debugging when the in-memory buffer has been cleared."""
+    n = int(request.args.get("lines", 200))
+    try:
+        if not os.path.exists(SCAN_LOG):
+            return jsonify({"lines": [], "size": 0})
+        with open(SCAN_LOG, "r", encoding="utf-8", errors="replace") as f:
+            all_lines = f.readlines()
+        tail = [l.rstrip() for l in all_lines[-n:]]
+        return jsonify({"lines": tail, "size": os.path.getsize(SCAN_LOG)})
+    except Exception as e:
+        return jsonify({"lines": [], "error": str(e)})
+
 @app.route("/api/clear_db", methods=["POST"])
 def api_clear_db():
     tables = ["Domains","Emails","DNS","MX","SSL","WHOIS","Ports",
               "HTTPHistory","Technologies","Robots","Sitemap",
-              "SecurityHeaders","Subdomains","ASN","XHREndpoints","JSFindings","Alerts"]
+              "SecurityHeaders","Subdomains","ASN","XHREndpoints","JSFindings","Alerts",
+              "ZoneTransfer","WAF","WellKnown"]
     try:
         conn = sqlite3.connect(DB_PATH)
         for t in tables:
@@ -176,21 +259,24 @@ def api_clear_db():
 
 @app.route("/api/stats")
 def api_stats():
-    return jsonify({
-        "domains":    count("Domains"),
-        "emails":     count("Emails"),
-        "ports":      count("Ports"),
-        "tech":       count("Technologies", "DISTINCT technology"),
-        "ssl":        count("SSL"),
-        "mx":         count("MX"),
-        "http":       count("HTTPHistory"),
-        "subdomains": count("Subdomains"),
-        "secheaders": count("SecurityHeaders"),
-        "asn":        count("ASN"),
-        "xhr":        count("XHREndpoints"),
-        "js":         count("JSFindings"),
-        "alerts":     count("Alerts"),
-    })
+    return nocache(jsonify({
+        "domains":      count("Domains"),
+        "emails":       count("Emails"),
+        "ports":        count("Ports"),
+        "tech":         count("Technologies", "DISTINCT technology"),
+        "ssl":          count("SSL"),
+        "mx":           count("MX"),
+        "http":         count("HTTPHistory"),
+        "subdomains":   count("Subdomains"),
+        "secheaders":   count("SecurityHeaders"),
+        "asn":          count("ASN"),
+        "xhr":          count("XHREndpoints"),
+        "js":           count("JSFindings"),
+        "alerts":       count("Alerts"),
+        "zone_records": count("ZoneTransfer"),
+        "waf":          count("WAF"),
+        "well_known":   count("WellKnown"),
+    }))
 
 @app.route("/api/domains")
 def api_domains():
@@ -213,13 +299,13 @@ def api_xhr():
 @app.route("/api/alerts")
 def api_alerts():
     try:
-        return jsonify(qdb("SELECT id,alert_type,severity,target,detail,found_at FROM Alerts ORDER BY found_at DESC"))
+        return nocache(jsonify(qdb("SELECT id,alert_type,severity,target,detail,found_at FROM Alerts ORDER BY id DESC")))
     except Exception:
-        return jsonify([])
+        return nocache(jsonify([]))
 
 @app.route("/api/js")
 def api_js():
-    return jsonify(qdb("SELECT url,js_url,finding_type,value,found_at FROM JSFindings ORDER BY finding_type,found_at DESC"))
+    return jsonify(qdb("SELECT url,js_url,finding_type,value,context,found_at FROM JSFindings ORDER BY finding_type,found_at DESC"))
 
 
 @app.route("/api/technologies")
@@ -261,6 +347,18 @@ def api_security_headers():
 @app.route("/api/subdomains")
 def api_subdomains():
     return jsonify(qdb("SELECT root_domain,subdomain,ip,status_code,found_at FROM Subdomains ORDER BY root_domain,subdomain"))
+
+@app.route("/api/zone_transfers")
+def api_zone_transfers():
+    return jsonify(qdb("SELECT root_domain,nameserver,record,found_at FROM ZoneTransfer ORDER BY root_domain,nameserver"))
+
+@app.route("/api/waf")
+def api_waf():
+    return jsonify(qdb("SELECT domain,waf_vendor,detected_by,found_at FROM WAF ORDER BY domain"))
+
+@app.route("/api/well_known")
+def api_well_known():
+    return jsonify(qdb("SELECT domain,path,category,content_snippet,found_at FROM WellKnown ORDER BY domain,path"))
 
 # -- Resume state --
 
@@ -350,10 +448,16 @@ def api_export(table, fmt):
                             ["ip","asn","org","country","is_cdn","cdn_name","looked_up"]),
         "xhr":             ("SELECT url,endpoint,method,found_at FROM XHREndpoints ORDER BY found_at DESC",
                             ["url","endpoint","method","found_at"]),
-        "js_findings":     ("SELECT url,js_url,finding_type,value,found_at FROM JSFindings ORDER BY finding_type",
-                            ["url","js_url","finding_type","value","found_at"]),
+        "js_findings":     ("SELECT url,js_url,finding_type,value,context,found_at FROM JSFindings ORDER BY finding_type",
+                            ["url","js_url","finding_type","value","context","found_at"]),
         "alerts":          ("SELECT alert_type,severity,target,detail,found_at FROM Alerts ORDER BY found_at DESC",
                             ["alert_type","severity","target","detail","found_at"]),
+        "waf":             ("SELECT domain,waf_vendor,detected_by,found_at FROM WAF ORDER BY domain",
+                            ["domain","waf_vendor","detected_by","found_at"]),
+        "zone_transfers":  ("SELECT root_domain,nameserver,record,found_at FROM ZoneTransfer ORDER BY root_domain,nameserver",
+                            ["root_domain","nameserver","record","found_at"]),
+        "well_known":      ("SELECT domain,path,category,content_snippet,found_at FROM WellKnown ORDER BY domain,path",
+                            ["domain","path","category","content_snippet","found_at"]),
     }
     if table not in exports:
         return jsonify({"error": "Unknown table"}), 404
@@ -427,6 +531,9 @@ header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;ba
 .toggle input:checked+.toggle-slider{background:rgba(0,229,255,.25)}
 .toggle input:checked+.toggle-slider::before{transform:translateX(16px);background:var(--accent)}
 .btn{width:100%;padding:.55rem;border:none;cursor:pointer;font-family:var(--sans);font-size:.8rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;transition:all .2s}
+.stealth-btn{display:block;padding:.3rem .2rem;font-size:.68rem;font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:4px;cursor:pointer;transition:all .15s;text-align:center}
+.stealth-btn:hover{color:var(--text);border-color:var(--muted)}
+.stealth-btn.active{color:var(--accent);border-color:rgba(0,229,255,.5);background:rgba(0,229,255,.08);box-shadow:0 0 8px rgba(0,229,255,.1)}
 .btn-start{background:rgba(0,229,255,.1);color:var(--accent);border:1px solid rgba(0,229,255,.25)}
 .btn-start:hover{background:rgba(0,229,255,.2);box-shadow:0 0 14px rgba(0,229,255,.15)}
 .btn-start:disabled{opacity:.35;cursor:not-allowed}
@@ -573,6 +680,24 @@ td a:hover{text-decoration:underline}
         <label class="toggle"><input type="checkbox" id="noSocial"><span class="toggle-slider"></span></label>
       </div>
       <div id="resumeInfo" style="display:none;font-family:var(--mono);font-size:.68rem;color:var(--yellow);margin-bottom:.6rem;line-height:1.6"></div>
+      <div style="margin-bottom:.7rem">
+        <div style="font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.4rem">Stealth Profile</div>
+        <div style="display:flex;gap:.3rem" id="stealthBtns">
+          <label style="flex:1;text-align:center">
+            <input type="radio" name="stealthProfile" value="LOUD" checked style="display:none">
+            <span class="stealth-btn active" data-tip="Fast, no delays" onclick="setStealthBtn(this,'LOUD')">LOUD</span>
+          </label>
+          <label style="flex:1;text-align:center">
+            <input type="radio" name="stealthProfile" value="NORMAL" style="display:none">
+            <span class="stealth-btn" data-tip="Moderate delays" onclick="setStealthBtn(this,'NORMAL')">NORMAL</span>
+          </label>
+          <label style="flex:1;text-align:center">
+            <input type="radio" name="stealthProfile" value="GHOST" style="display:none">
+            <span class="stealth-btn" data-tip="Slow, randomised, rotates UA" onclick="setStealthBtn(this,'GHOST')">GHOST</span>
+          </label>
+        </div>
+        <div id="stealthDesc" style="font-size:.65rem;color:var(--dim);margin-top:.3rem;font-family:var(--mono)">Fast scanning, no rate limiting beyond base settings</div>
+      </div>
       <button class="btn btn-start" id="btnStart" onclick="startCrawler()">▶ Start Crawler</button>
       <button class="btn btn-stop"  id="btnStop"  onclick="stopCrawler()" disabled>■ Stop Crawler</button>
       <div class="run-info" id="runInfo" style="display:none">
@@ -624,6 +749,15 @@ td a:hover{text-decoration:underline}
         </button>
         <button class="nav-pill" onclick="switchTab('recon')" id="pill-recon">
           Recon <span class="pill-count" id="pc-recon">0</span>
+        </button>
+        <button class="nav-pill" onclick="switchTab('waf')" id="pill-waf">
+          WAF <span class="pill-count" id="pc-waf">0</span>
+        </button>
+        <button class="nav-pill" onclick="switchTab('zonetransfer')" id="pill-zonetransfer">
+          Zone Transfers <span class="pill-count" id="pc-zonetransfer">0</span>
+        </button>
+        <button class="nav-pill" onclick="switchTab('wellknown')" id="pill-wellknown">
+          Well-Known <span class="pill-count" id="pc-wellknown">0</span>
         </button>
         <button class="nav-pill" onclick="switchTab('report')" id="pill-report">
           Report / Export
@@ -869,11 +1003,73 @@ td a:hover{text-decoration:underline}
             <option value="openai_key">openai_key</option>
             <option value="endpoint">endpoint</option>
             <option value="staging_url">staging_url</option>
+            <option value="source_map">source_map</option>
           </select>
         </div>
         <div class="tbl-wrap"><table id="tRecon">
-          <thead><tr><th>Type</th><th>Value</th><th>JS File</th><th>Page</th><th>Found</th></tr></thead>
+          <thead><tr><th>Type</th><th>Value</th><th>Context</th><th>JS File</th><th>Page</th><th>Found</th></tr></thead>
           <tbody id="bRecon"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- WAF -->
+    <div class="tab-panel" id="tab-waf">
+      <div class="panel-inner">
+        <div class="panel-header">
+          <span class="panel-title">WAF Detection</span>
+          <span class="cnt-badge" id="c-waf">0</span>
+          <button onclick="loadWaf()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+          <a href="/api/export/waf.csv" class="xbtn">↓ CSV</a>
+        </div>
+        <div style="font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-bottom:1.2rem;padding:.7rem 1rem;border:1px solid rgba(0,229,255,.1);background:rgba(0,229,255,.03)">
+          WAF vendor fingerprinted from response headers, cookies, and error page signatures. Informational — not a vulnerability, but critical context for choosing techniques.
+        </div>
+        <div class="search-row"><input type="text" placeholder="Filter..." oninput="filterTbl('tWaf',this.value)"></div>
+        <div class="tbl-wrap"><table id="tWaf">
+          <thead><tr><th>Domain</th><th>WAF Vendor</th><th>Evidence</th><th>Found</th></tr></thead>
+          <tbody id="bWaf"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ZONE TRANSFERS -->
+    <div class="tab-panel" id="tab-zonetransfer">
+      <div class="panel-inner">
+        <div class="panel-header">
+          <span class="panel-title" style="color:var(--red)">Zone Transfers</span>
+          <span class="cnt-badge" id="c-zonetransfer" style="background:rgba(255,62,94,.1);color:var(--red);border-color:rgba(255,62,94,.3)">0</span>
+          <button onclick="loadZoneTransfers()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+          <a href="/api/export/zone_transfers.csv" class="xbtn">↓ CSV</a>
+          <a href="/api/export/zone_transfers.json" class="xbtn">↓ JSON</a>
+        </div>
+        <div style="font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-bottom:1.2rem;padding:.7rem 1rem;border:1px solid rgba(255,62,94,.15);background:rgba(255,62,94,.04)">
+          Records obtained via successful DNS AXFR zone transfer. Any data here means the nameserver is critically misconfigured — the full DNS zone was publicly downloadable.
+        </div>
+        <div class="search-row"><input type="text" placeholder="Filter..." oninput="filterTbl('tZoneTransfer',this.value)"></div>
+        <div class="tbl-wrap"><table id="tZoneTransfer">
+          <thead><tr><th>Root Domain</th><th>Nameserver</th><th>Record</th><th>Found</th></tr></thead>
+          <tbody id="bZoneTransfer"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- WELL-KNOWN -->
+    <div class="tab-panel" id="tab-wellknown">
+      <div class="panel-inner">
+        <div class="panel-header">
+          <span class="panel-title">Well-Known</span>
+          <span class="cnt-badge" id="c-wellknown">0</span>
+          <button onclick="loadWellKnown()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+          <a href="/api/export/well_known.csv" class="xbtn">↓ CSV</a>
+        </div>
+        <div style="font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-bottom:1.2rem;padding:.7rem 1rem;border:1px solid rgba(0,229,255,.1);background:rgba(0,229,255,.03)">
+          Accessible <code>/.well-known/</code> paths. Auth category findings (OpenID/OAuth config) indicate the full authentication surface is exposed.
+        </div>
+        <div class="search-row"><input type="text" placeholder="Filter..." oninput="filterTbl('tWellKnown',this.value)"></div>
+        <div class="tbl-wrap"><table id="tWellKnown">
+          <thead><tr><th>Domain</th><th>Path</th><th>Category</th><th>Content</th><th>Found</th></tr></thead>
+          <tbody id="bWellKnown"></tbody>
         </table></div>
       </div>
     </div>
@@ -934,6 +1130,10 @@ td a:hover{text-decoration:underline}
           <a href="/api/export/security_headers.csv" class="xbtn">Sec Headers CSV</a>
           <a href="/api/export/asn.csv" class="xbtn">ASN CSV</a>
           <a href="/api/export/asn.json" class="xbtn">ASN JSON</a>
+          <a href="/api/export/waf.csv" class="xbtn">WAF CSV</a>
+          <a href="/api/export/zone_transfers.csv" class="xbtn">Zone Transfers CSV</a>
+          <a href="/api/export/zone_transfers.json" class="xbtn">Zone Transfers JSON</a>
+          <a href="/api/export/well_known.csv" class="xbtn">Well-Known CSV</a>
         </div>
       </div>
     </div>
@@ -945,7 +1145,7 @@ td a:hover{text-decoration:underline}
 const PORT_SVC={21:'FTP',22:'SSH',23:'Telnet',25:'SMTP',53:'DNS',80:'HTTP',443:'HTTPS',8080:'HTTP-Alt',8443:'HTTPS-Alt',3306:'MySQL',5432:'PostgreSQL',6379:'Redis',27017:'MongoDB'};
 const TECH_CLS={'WordPress':'bc','Shopify':'bg','React':'bp','Vue.js':'bp','Angular':'bp','jQuery':'by','Bootstrap':'by','Cloudflare':'bc','Nginx':'bg','Apache':'br','Google Analytics':'bm','Google Tag Mgr':'bm','PHP':'br','ASP.NET':'br','Cloudfront':'bc','Drupal':'bc','Joomla':'bc','Wix':'by','Squarespace':'by'};
 
-let logOffset=0, logLines=0, currentTab='log';
+let logOffset=0, logLines=0, currentTab='log', _lastAlertCount=-1;
 
 // ── Tab switching ──────────────────────────────────────
 function switchTab(name){
@@ -959,7 +1159,17 @@ function switchTab(name){
   ({log:()=>{},domains:loadDomains,technologies:loadTech,ports:loadPorts,
     ssl:loadSSL,emails:loadEmails,dns:loadDNS,http:loadHTTP,
     subdomains:loadSubdomains,secheaders:loadSecHeaders,xhr:loadXhr,recon:loadRecon,
-    alerts:loadAlerts,report:loadReport})[name]?.();
+    alerts:loadAlerts,waf:loadWaf,zonetransfer:loadZoneTransfers,wellknown:loadWellKnown,
+    report:loadReport})[name]?.();
+}
+
+// ── Stealth profile selector ───────────────────────────
+const _stealthDesc={LOUD:'Fast scanning, no rate limiting beyond base settings',NORMAL:'Moderate random delays (0.5–1.5s) between requests',GHOST:'Slow randomised delays (2–6s), rotated User-Agents, periodic burst pauses'};
+function setStealthBtn(el,val){
+  document.querySelectorAll('.stealth-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelector(`input[name="stealthProfile"][value="${val}"]`).checked=true;
+  document.getElementById('stealthDesc').textContent=_stealthDesc[val]||'';
 }
 
 // ── Crawler control ────────────────────────────────────
@@ -978,6 +1188,7 @@ async function startCrawler(){
       ignore_robots:document.getElementById('ignoreRobots').checked,
       playwright:document.getElementById('usePW').checked,
       no_social:document.getElementById('noSocial').checked,
+      stealth_profile:document.querySelector('input[name="stealthProfile"]:checked')?.value||'LOUD',
     })});
   const d=await r.json();
   if(!d.ok){alert('Error: '+d.error);return}
@@ -1077,6 +1288,9 @@ async function pollStats(){
   document.getElementById('pc-secheaders').textContent=d.secheaders??0;
   document.getElementById('pc-xhr').textContent=d.xhr??0;
   document.getElementById('pc-recon').textContent=d.js??0;
+  document.getElementById('pc-waf').textContent=d.waf??0;
+  document.getElementById('pc-zonetransfer').textContent=d.zone_records??0;
+  document.getElementById('pc-wellknown').textContent=d.well_known??0;
   const alertCount=d.alerts??0;
   document.getElementById('pc-alerts').textContent=alertCount;
   document.getElementById('c-alerts').textContent=alertCount;
@@ -1084,6 +1298,10 @@ async function pollStats(){
   if(alertCount>0){
     document.getElementById('hAlerts').style.color='var(--red)';
     document.getElementById('pill-alerts').style.color='var(--red)';
+  }
+  if(alertCount!==_lastAlertCount || currentTab==='alerts'){
+    _lastAlertCount=alertCount;
+    loadAlerts();
   }
 }
 
@@ -1174,7 +1392,7 @@ async function loadEmails(){
 }
 
 async function loadAlerts(){
-  const rows=await(await fetch('/api/alerts')).json();
+  const rows=await(await fetch('/api/alerts?_='+Date.now())).json();
   document.getElementById('c-alerts').textContent=rows.length;
   document.getElementById('pc-alerts').textContent=rows.length;
   // Flash the pill red if there are alerts
@@ -1256,6 +1474,7 @@ async function loadRecon(){
       return`<tr data-type="${escHtml(r.finding_type||'')}">
         <td><span class="b ${cls}">${escHtml(r.finding_type||'-')}</span></td>
         <td class="wrap" style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${escHtml(r.value||'-')}</td>
+        <td class="wrap" style="font-family:var(--mono);font-size:.72rem;color:var(--muted);white-space:pre-wrap;max-width:320px">${escHtml(r.context||'')}</td>
         <td style="font-family:var(--mono);font-size:.72rem;word-break:break-all;white-space:normal;min-width:180px">${escHtml(jsPath)}</td>
         <td class="wrap" style="font-size:.72rem">${escHtml(r.url||'-')}</td>
         <td style="font-size:.72rem;white-space:nowrap">${escHtml(r.found_at||'-')}</td>
@@ -1299,6 +1518,53 @@ async function loadSecHeaders(){
       <td style="color:var(--muted)">${r.checked_at}</td>
     </tr>`).join('')
     :empty();
+}
+
+async function loadWaf(){
+  const rows=await(await fetch('/api/waf')).json();
+  document.getElementById('c-waf').textContent=rows.length;
+  document.getElementById('pc-waf').textContent=rows.length;
+  const vendorCls={'Cloudflare':'bc','Akamai':'bc','Imperva Incapsula':'br','AWS WAF':'by',
+    'Sucuri':'bg','F5 BIG-IP ASM':'br','Barracuda':'by','Wordfence':'bm',
+    'ModSecurity':'bm','Fortinet FortiWeb':'br','Reblaze':'bc'};
+  document.getElementById('bWaf').innerHTML=rows.length
+    ?rows.map(r=>`<tr>
+      <td>${escHtml(r.domain||'-')}</td>
+      <td><span class="b ${vendorCls[r.waf_vendor]||'bm'}">${escHtml(r.waf_vendor||'-')}</span></td>
+      <td class="wrap" style="font-family:var(--mono);font-size:.72rem;white-space:normal">${escHtml(r.detected_by||'-')}</td>
+      <td style="color:var(--muted)">${escHtml(r.found_at||'-')}</td>
+    </tr>`).join('')
+    :empty('// no WAF detected on any domain');
+}
+
+async function loadZoneTransfers(){
+  const rows=await(await fetch('/api/zone_transfers')).json();
+  document.getElementById('c-zonetransfer').textContent=rows.length;
+  document.getElementById('pc-zonetransfer').textContent=rows.length;
+  document.getElementById('bZoneTransfer').innerHTML=rows.length
+    ?rows.map(r=>`<tr>
+      <td><span class="b br">${escHtml(r.root_domain||'-')}</span></td>
+      <td style="font-family:var(--mono);font-size:.72rem">${escHtml(r.nameserver||'-')}</td>
+      <td class="wrap" style="font-family:var(--mono);font-size:.72rem;white-space:normal;word-break:break-all">${escHtml(r.record||'-')}</td>
+      <td style="color:var(--muted)">${escHtml(r.found_at||'-')}</td>
+    </tr>`).join('')
+    :empty('// no successful zone transfers — nameservers correctly refuse AXFR');
+}
+
+async function loadWellKnown(){
+  const rows=await(await fetch('/api/well_known')).json();
+  document.getElementById('c-wellknown').textContent=rows.length;
+  document.getElementById('pc-wellknown').textContent=rows.length;
+  const catCls={osint:'bg',auth:'br',info:'bm'};
+  document.getElementById('bWellKnown').innerHTML=rows.length
+    ?rows.map(r=>`<tr>
+      <td>${escHtml(r.domain||'-')}</td>
+      <td style="font-family:var(--mono);font-size:.72rem">${escHtml(r.path||'-')}</td>
+      <td><span class="b ${catCls[r.category]||'bm'}">${escHtml(r.category||'-')}</span></td>
+      <td class="wrap" style="font-size:.72rem;white-space:normal;max-width:320px">${escHtml(r.content_snippet||'-')}</td>
+      <td style="color:var(--muted)">${escHtml(r.found_at||'-')}</td>
+    </tr>`).join('')
+    :empty('// no /.well-known/ paths found');
 }
 
 // ── Resume state check ─────────────────────────────────

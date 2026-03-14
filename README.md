@@ -138,6 +138,8 @@ NuScrape collects the following for every domain it encounters during crawling:
 - **Open ports** — scans common ports (21, 22, 25, 80, 443, 3306, 5432, 6379, 8080, 8443, 27017, etc.)
 - **Technology fingerprinting** — detects ~20 technologies from response headers and HTML signatures including WordPress, React, Vue, Angular, jQuery, Bootstrap, Cloudflare, nginx, Apache, PHP, Laravel, Django, Shopify, and others
 - **Subdomain enumeration** — probes a wordlist of common subdomain names against each root domain, with wildcard DNS detection to suppress false positives
+- **Certificate Transparency log mining** — queries `crt.sh` for all historical SSL certificate SANs matching the root domain, discovering subdomains that wordlist enumeration misses (historical certs, wildcard certs, unusual names)
+- **WAF / security appliance fingerprinting** — two-pass detection (passive header inspection + WAF-triggering probe) against signatures for Cloudflare, Akamai, Imperva Incapsula, AWS WAF, Sucuri, F5 BIG-IP ASM, Barracuda, Wordfence, ModSecurity, Fortinet FortiWeb, and Reblaze
 - **Email addresses** — scraped from page content
 - **Page titles** — for every crawled URL
 - **HTTP history** — status code for every request made
@@ -278,6 +280,35 @@ The MEDIUM alert exists because some services (e.g. Netlify with a custom domain
 
 ---
 
+#### DNS Zone Transfer (AXFR)
+Resolves all authoritative nameservers for the root domain, then attempts a zone transfer (`AXFR`) against each. A misconfigured nameserver that permits AXFR dumps the entire DNS zone in a single query — every subdomain, internal hostname, and IP address. **CRITICAL** when successful. All transferred records are stored in the `ZoneTransfer` table.
+
+---
+
+#### JavaScript Source Map Exposure
+For every JS bundle fetched during crawling, checks for:
+- `SourceMap` / `X-SourceMap` response headers (explicit bundler reference)
+- `<bundle>.map` — the conventional path used by webpack, esbuild, Vite, Rollup, and Parcel
+
+Confirms findings by requiring all three required JSON fields (`"version"`, `"mappings"`, `"sources"`) in the response body, then extracts source file paths for the alert detail. Exposed source maps leak the original unminified source code, internal file paths, variable and function names, and occasionally inline developer comments. **HIGH.**
+
+---
+
+#### `/.well-known/` Enumeration
+Probes standard well-known paths:
+
+| Path | Category | Action |
+|---|---|---|
+| `/.well-known/security.txt` | OSINT | Extracts Contact, Encryption, Policy, and Expires fields. Stored in `WellKnown` table. |
+| `/.well-known/openid-configuration` | Auth | Confirms valid JSON, extracts all OAuth/OIDC endpoints and supported grant types. **HIGH alert** — exposes complete auth surface. |
+| `/.well-known/oauth-authorization-server` | Auth | Same as above (RFC 8414). |
+| `/.well-known/jwks.json` | Auth | Counts exposed public keys. Informational. |
+| `/.well-known/change-password` | Info | Logged if present. |
+| `/.well-known/apple-app-site-association` | Info | Logged if present. |
+| `/.well-known/assetlinks.json` | Info | Logged if present. |
+
+---
+
 #### S3 Bucket Exposure
 Extracts AWS S3 bucket names from three URL patterns found in page HTML and JS bundles:
 - `https://bucketname.s3.amazonaws.com`
@@ -328,9 +359,12 @@ All findings are stored in `ScrapeDB` (SQLite) in the same directory as `main.py
 | `Subdomains` | Enumerated subdomains with IP and status |
 | `ASN` | IP → ASN/org/country/CDN mapping |
 | `XHREndpoints` | API endpoints extracted from JS bundles |
-| `JSFindings` | Secrets, endpoints, staging URLs, IDOR candidates, JWT findings |
+| `JSFindings` | Secrets, endpoints, staging URLs, source maps, IDOR candidates, JWT findings |
 | `Robots` | robots.txt content per domain |
 | `Sitemap` | Sitemap URL inventory |
+| `ZoneTransfer` | DNS records obtained via successful AXFR zone transfers |
+| `WAF` | Detected WAF vendor and evidence per domain |
+| `WellKnown` | `/.well-known/` path findings with category and content snippet |
 
 **Export:** Every table is exportable as CSV or JSON from the Report tab in the UI, or directly via `/api/export/<table>.<csv|json>`.
 
@@ -384,14 +418,16 @@ Start scan
     │       │     ├─ Open redirect detection
     │       │     ├─ IDOR candidate collection + verification
     │       │     ├─ JS bundle analysis (endpoints, secrets, staging URLs, JWTs, S3 refs)
+    │       │     ├─ JS source map exposure check
     │       │     └─ S3 bucket probing
     │       │
     │       └─ Per new domain discovered
     │             ├─ DNS / MX / SSL / WHOIS
+    │             ├─ Zone transfer attempt (AXFR against all NSes)
     │             ├─ ASN lookup
     │             ├─ Technology fingerprinting
     │             ├─ Port scan
-    │             ├─ Subdomain enumeration (with wildcard suppression)
+    │             ├─ Subdomain enumeration (wordlist + CT log mining)
     │             │     └─ Per subdomain: takeover check
     │             ├─ Security header audit
     │             ├─ SPF / DMARC
@@ -402,7 +438,9 @@ Start scan
     │                   ├─ CORS misconfiguration
     │                   ├─ Default credentials
     │                   ├─ GraphQL introspection
-    │                   └─ Spring Boot Actuator
+    │                   ├─ Spring Boot Actuator
+    │                   ├─ WAF fingerprinting
+    │                   └─ /.well-known/ enumeration
     │
     └─ All findings → ScrapeDB → UI alerts tab
 ```
