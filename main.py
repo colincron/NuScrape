@@ -50,6 +50,8 @@ COMMON_PORTS    = [21, 22, 23, 25, 53, 80, 443, 8080, 8443, 3306, 5432, 6379, 27
 
 STEALTH_PROFILE = "LOUD"   # overridden by --stealth CLI arg
 BUG_BOUNTY_HEADER = None   # Set via --bug-bounty-header CLI arg. None = disabled.
+SAME_DOMAIN_ONLY = False   # overridden by --same-domain-only CLI arg
+START_URL = ""             # set at crawler startup; used by is_in_scope()
 
 UA_POOL = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -3561,6 +3563,8 @@ def probe_js_endpoints(base_url=None):
                 continue
             if base_netloc and urlparse(full_url).netloc != base_netloc:
                 continue
+            if not is_in_scope(full_url):
+                continue
             seen_this_call.add(full_url)
             to_probe.append((full_url, page_url))
         except Exception:
@@ -3957,6 +3961,17 @@ def parse_anchors_from_html(html_content):
     except Exception:
         return []
 
+def is_in_scope(url):
+    """Return True if url is on the same domain as the scan target when SAME_DOMAIN_ONLY is set."""
+    if not SAME_DOMAIN_ONLY:
+        return True
+    try:
+        target_host = urlparse(START_URL).netloc.lstrip("www.")
+        url_host    = urlparse(url).netloc.lstrip("www.")
+        return url_host == target_host or url_host.endswith("." + target_host)
+    except Exception:
+        return False
+
 def _clean_url(url):
     """Strip trailing punctuation that can bleed into URLs from surrounding text."""
     return url.rstrip(")>]")
@@ -4236,6 +4251,9 @@ def write_to_subdomains_database(root_domain, subdomain, ip, status_code):
 # ─────────────────────────────────────────────
 
 def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=False):
+    global START_URL, SAME_DOMAIN_ONLY
+    START_URL        = start_url
+    SAME_DOMAIN_ONLY = same_domain_only
     parsed_start = urlparse(start_url)
     base_netloc  = parsed_start.netloc
     base_url     = parsed_start.scheme + "://" + base_netloc
@@ -5904,6 +5922,8 @@ def check_idor_candidates(page_url, html_content):
 
     # ── Verify each candidate before alerting ─────────────────
     for endpoint, param, value, kind in candidates:
+        if not is_in_scope(endpoint):
+            continue
         test_key   = (endpoint, param)
         report_key = (domain, endpoint, param)
 
