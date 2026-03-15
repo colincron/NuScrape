@@ -3509,7 +3509,8 @@ _JS_EP_SENSITIVE = [
     (re.compile(r'"role"\s*:\s*"admin"',             re.I), "admin role"),
 ]
 
-_js_endpoint_probed = set()
+_js_endpoint_probed      = set()
+_js_endpoint_probed_lock = threading.Lock()
 
 def _resolve_endpoint(endpoint, page_url):
     """Convert a relative or protocol-relative endpoint to a full URL."""
@@ -3559,7 +3560,9 @@ def probe_js_endpoints(base_url=None):
             full_url = _resolve_endpoint(endpoint, page_url or "")
             if not full_url.startswith("http"):
                 continue
-            if full_url in _js_endpoint_probed or full_url in seen_this_call:
+            with _js_endpoint_probed_lock:
+                already = full_url in _js_endpoint_probed
+            if already or full_url in seen_this_call:
                 continue
             if base_netloc and urlparse(full_url).netloc != base_netloc:
                 continue
@@ -3576,7 +3579,8 @@ def probe_js_endpoints(base_url=None):
     print(timestamp() + f" Probing {len(to_probe)} JS-discovered endpoints unauthenticated...")
 
     def _probe(full_url, page_url):
-        _js_endpoint_probed.add(full_url)
+        with _js_endpoint_probed_lock:
+            _js_endpoint_probed.add(full_url)
         try:
             resp = safe_get(full_url, timeout=8)
             if not resp:
@@ -3742,51 +3746,8 @@ def check_js_source_map(page_url, js_url, js_response=None):
 # Playwright JS rendering
 # ─────────────────────────────────────────────
 
-# Persistent browser instance — launched once, reused for all pages
-# Avoids 5-8s cold start overhead on every URL
-_pw_semaphore  = threading.Semaphore(PLAYWRIGHT_MAX_CONC)
-_pw_lock       = threading.Lock()
-_pw_instance   = {"playwright": None, "browser": None}  # mutable container
-
-def _get_browser():
-    """Return the shared browser, launching it if needed."""
-    import os
-    with _pw_lock:
-        if _pw_instance["browser"] is None or not _pw_instance["browser"].is_connected():
-            try:
-                pw  = sync_playwright().start()
-                exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", None)
-                b   = pw.chromium.launch(
-                    executable_path=exe,
-                    headless=True,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                        "--single-process",
-                    ]
-                )
-                _pw_instance["playwright"] = pw
-                _pw_instance["browser"]    = b
-                print(timestamp() + " Playwright browser launched")
-            except Exception as e:
-                print_error("Playwright browser launch failed: " + str(e))
-                return None
-        return _pw_instance["browser"]
-
-def _close_browser():
-    """Shut down the persistent browser cleanly."""
-    with _pw_lock:
-        try:
-            if _pw_instance["browser"]:
-                _pw_instance["browser"].close()
-            if _pw_instance["playwright"]:
-                _pw_instance["playwright"].stop()
-        except Exception:
-            pass
-        finally:
-            _pw_instance["browser"]    = None
-            _pw_instance["playwright"] = None
+# Each call gets its own browser instance — avoids cross-thread sharing
+_pw_semaphore = threading.Semaphore(PLAYWRIGHT_MAX_CONC)
 
 # JS frameworks that definitely need Playwright
 JS_FRAMEWORKS = {"React", "Angular", "Vue.js", "Next.js", "Nuxt.js", "Gatsby", "Svelte"}
@@ -3838,7 +3799,8 @@ def write_to_xhr_database(page_url, endpoint, method):
 
 def playwright_fetch(url):
     """
-    Render a page with Playwright using the persistent browser instance.
+    Render a page with Playwright using a per-call browser instance.
+    Each call launches and closes its own browser to avoid cross-thread sharing.
     Returns (html_bytes, xhr_endpoints).
     """
     if not PLAYWRIGHT_AVAILABLE:
@@ -3849,64 +3811,67 @@ def playwright_fetch(url):
     html_bytes    = None
 
     with _pw_semaphore:
-        browser = _get_browser()
-        if not browser:
-            return None, []
-        ctx  = None
-        page = None
+        browser = None
+        ctx     = None
+        page    = None
         try:
-            print(timestamp() + " Playwright rendering: " + url)
-            _ctx_headers = stealth_headers({})
-            _ctx_extra = {k: v for k, v in _ctx_headers.items() if k != "User-Agent"}
-            if BUG_BOUNTY_HEADER:
-                _ctx_extra["X-Bug-Bounty"] = BUG_BOUNTY_HEADER
-            ctx  = browser.new_context(
-                user_agent=random.choice(UA_POOL),
-                extra_http_headers=_ctx_extra,
-                ignore_https_errors=True,
-                java_script_enabled=True,
-            )
-            page = ctx.new_page()
-            if PLAYWRIGHT_STEALTH_AVAILABLE:
-                Stealth().apply_stealth_sync(page)
+            import os
+            exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", None)
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(
+                    executable_path=exe,
+                    headless=True,
+                    args=[
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-gpu",
+                        "--single-process",
+                    ]
+                )
+                print(timestamp() + " Playwright rendering: " + url)
+                _ctx_headers = stealth_headers({})
+                _ctx_extra = {k: v for k, v in _ctx_headers.items() if k != "User-Agent"}
+                if BUG_BOUNTY_HEADER:
+                    _ctx_extra["X-Bug-Bounty"] = BUG_BOUNTY_HEADER
+                ctx  = browser.new_context(
+                    user_agent=random.choice(UA_POOL),
+                    extra_http_headers=_ctx_extra,
+                    ignore_https_errors=True,
+                    java_script_enabled=True,
+                )
+                page = ctx.new_page()
+                if PLAYWRIGHT_STEALTH_AVAILABLE:
+                    _playwright_stealth(page)
 
-            def on_request(req):
-                if req.resource_type in ("xhr", "fetch"):
-                    skip = ["google-analytics", "googletagmanager", "facebook",
-                            "doubleclick", "hotjar", "segment", "mixpanel",
-                            "amplitude", "intercom", "hubspot", "clarity.ms"]
-                    if not any(s in req.url for s in skip):
-                        xhr_endpoints.append((req.url, req.method))
-                        print(timestamp() + " XHR: " + req.method + " " + req.url)
+                def on_request(req):
+                    if req.resource_type in ("xhr", "fetch"):
+                        skip = ["google-analytics", "googletagmanager", "facebook",
+                                "doubleclick", "hotjar", "segment", "mixpanel",
+                                "amplitude", "intercom", "hubspot", "clarity.ms"]
+                        if not any(s in req.url for s in skip):
+                            xhr_endpoints.append((req.url, req.method))
+                            print(timestamp() + " XHR: " + req.method + " " + req.url)
 
-            page.on("request", on_request)
+                page.on("request", on_request)
 
-            page.goto(url, timeout=PLAYWRIGHT_TIMEOUT, wait_until="domcontentloaded")
-            try:
-                page.wait_for_load_state("networkidle", timeout=4000)
-            except PlaywrightTimeout:
-                pass
+                page.goto(url, timeout=PLAYWRIGHT_TIMEOUT, wait_until="domcontentloaded")
+                try:
+                    page.wait_for_load_state("networkidle", timeout=4000)
+                except PlaywrightTimeout:
+                    pass
 
-            for _ in range(4):
-                page.evaluate("window.scrollBy(0, window.innerHeight)")
-                page.wait_for_timeout(500)
-            page.evaluate("window.scrollTo(0, 0)")
+                for _ in range(4):
+                    page.evaluate("window.scrollBy(0, window.innerHeight)")
+                    page.wait_for_timeout(500)
+                page.evaluate("window.scrollTo(0, 0)")
 
-            html_bytes = page.content().encode("utf-8", errors="ignore")
-            print(timestamp() + " Playwright got " + str(len(html_bytes)) + " bytes from " + url)
+                html_bytes = page.content().encode("utf-8", errors="ignore")
+                print(timestamp() + " Playwright got " + str(len(html_bytes)) + " bytes from " + url)
 
         except PlaywrightTimeout:
             print_error("Playwright page timeout: " + url)
         except Exception as e:
             print_error("Playwright page error on " + url + ": " + str(e))
-            # If browser crashed or disconnected, reset so it relaunches next time
-            _close_browser()
-        finally:
-            try:
-                if page: page.close()
-                if ctx:  ctx.close()
-            except Exception:
-                pass
 
     return html_bytes, xhr_endpoints
 
@@ -4439,8 +4404,6 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
     probe_js_endpoints()
 
     clear_state()
-    if PLAYWRIGHT_FLAGS["enabled"] and PLAYWRIGHT_AVAILABLE:
-        _close_browser()
     print(timestamp() + " Done! Crawled " + str(i) + " pages.")
     sys.exit(0)
 
