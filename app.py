@@ -145,6 +145,10 @@ def api_start():
     stealth_profile = data.get("stealth_profile", "LOUD").upper()
     if stealth_profile not in ("LOUD", "NORMAL", "GHOST"):
         stealth_profile = "LOUD"
+    bug_bounty_header = data.get("bug_bounty_header", "")
+    if not isinstance(bug_bounty_header, str):
+        bug_bounty_header = ""
+    bug_bounty_header = bug_bounty_header.strip()
 
     if not domain:
         return jsonify({"ok": False, "error": "No domain provided"}), 400
@@ -172,6 +176,8 @@ def api_start():
             cmd.append("--no-social")
         if stealth_profile != "LOUD":
             cmd.extend(["--stealth", stealth_profile])
+        if bug_bounty_header:
+            cmd.extend(["--bug-bounty-header", bug_bounty_header])
 
         with log_lock:
             log_buffer.clear()
@@ -698,6 +704,15 @@ td a:hover{text-decoration:underline}
         </div>
         <div id="stealthDesc" style="font-size:.65rem;color:var(--dim);margin-top:.3rem;font-family:var(--mono)">Fast scanning, no rate limiting beyond base settings</div>
       </div>
+      <div style="margin-bottom:.7rem">
+        <div class="toggle-row" style="margin-bottom:.4rem">
+          <label style="font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em">Bug Bounty Header</label>
+          <label class="toggle"><input type="checkbox" id="bugBountyToggle" onchange="toggleBugBounty(this)"><span class="toggle-slider"></span></label>
+        </div>
+        <input type="text" id="bugBountyValue" disabled placeholder="HackerOne-yourusername"
+          style="width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.35rem .5rem;border-radius:4px;outline:none;transition:border-color .15s,color .15s">
+        <div style="font-size:.62rem;color:var(--dim);margin-top:.25rem;font-family:var(--mono)">Injects X-Bug-Bounty header into all requests — required by some bug bounty programs</div>
+      </div>
       <button class="btn btn-start" id="btnStart" onclick="startCrawler()">▶ Start Crawler</button>
       <button class="btn btn-stop"  id="btnStop"  onclick="stopCrawler()" disabled>■ Stop Crawler</button>
       <div class="run-info" id="runInfo" style="display:none">
@@ -1163,6 +1178,22 @@ function switchTab(name){
     report:loadReport})[name]?.();
 }
 
+// ── Bug bounty header toggle ───────────────────────────
+function toggleBugBounty(cb){
+  const inp=document.getElementById('bugBountyValue');
+  if(cb.checked){
+    inp.disabled=false;
+    inp.style.color='var(--text)';
+    inp.style.borderColor='rgba(0,229,255,.3)';
+    inp.focus();
+  } else {
+    inp.disabled=true;
+    inp.value='';
+    inp.style.color='var(--muted)';
+    inp.style.borderColor='var(--border)';
+  }
+}
+
 // ── Stealth profile selector ───────────────────────────
 const _stealthDesc={LOUD:'Fast scanning, no rate limiting beyond base settings',NORMAL:'Moderate random delays (0.5–1.5s) between requests',GHOST:'Slow randomised delays (2–6s), rotated User-Agents, periodic burst pauses'};
 function setStealthBtn(el,val){
@@ -1189,6 +1220,9 @@ async function startCrawler(){
       playwright:document.getElementById('usePW').checked,
       no_social:document.getElementById('noSocial').checked,
       stealth_profile:document.querySelector('input[name="stealthProfile"]:checked')?.value||'LOUD',
+      ...(document.getElementById('bugBountyToggle').checked && document.getElementById('bugBountyValue').value.trim()
+        ? {bug_bounty_header: document.getElementById('bugBountyValue').value.trim()}
+        : {}),
     })});
   const d=await r.json();
   if(!d.ok){alert('Error: '+d.error);return}

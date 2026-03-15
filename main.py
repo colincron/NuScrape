@@ -49,6 +49,7 @@ COMMON_PORTS    = [21, 22, 23, 25, 53, 80, 443, 8080, 8443, 3306, 5432, 6379, 27
 # ─────────────────────────────────────────────
 
 STEALTH_PROFILE = "LOUD"   # overridden by --stealth CLI arg
+BUG_BOUNTY_HEADER = None   # Set via --bug-bounty-header CLI arg. None = disabled.
 
 UA_POOL = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -103,7 +104,10 @@ def stealth_delay(domain=None):
 def stealth_headers(existing=None):
     """Return a headers dict with stealth values merged over existing."""
     if STEALTH_PROFILE == "LOUD":
-        return existing or {}
+        headers = dict(existing or {})
+        if BUG_BOUNTY_HEADER:
+            headers["X-Bug-Bounty"] = BUG_BOUNTY_HEADER
+        return headers
     headers = dict(existing or {})
     headers["User-Agent"] = random.choice(UA_POOL)
     headers["Accept-Language"] = random.choice([
@@ -122,11 +126,13 @@ def stealth_headers(existing=None):
             headers["Upgrade-Insecure-Requests"] = "1"
         else:
             headers.pop("Upgrade-Insecure-Requests", None)
+    if BUG_BOUNTY_HEADER:
+        headers["X-Bug-Bounty"] = BUG_BOUNTY_HEADER
     return headers
 RATE_LIMIT_MIN  = 1.0
 RATE_LIMIT_MAX  = 3.0
 MAX_CONCURRENT  = 5
-SITEMAP_CAP     = 200
+SITEMAP_CAP     = 500
 REQUEST_TIMEOUT = 8
 ASYNC_TIMEOUT   = 10
 QUEUE_SAVE_FILE     = "crawl_state.json"
@@ -3847,15 +3853,18 @@ def playwright_fetch(url):
         try:
             print(timestamp() + " Playwright rendering: " + url)
             _ctx_headers = stealth_headers({})
+            _ctx_extra = {k: v for k, v in _ctx_headers.items() if k != "User-Agent"}
+            if BUG_BOUNTY_HEADER:
+                _ctx_extra["X-Bug-Bounty"] = BUG_BOUNTY_HEADER
             ctx  = browser.new_context(
                 user_agent=random.choice(UA_POOL),
-                extra_http_headers={k: v for k, v in _ctx_headers.items() if k != "User-Agent"},
+                extra_http_headers=_ctx_extra,
                 ignore_https_errors=True,
                 java_script_enabled=True,
             )
             page = ctx.new_page()
             if PLAYWRIGHT_STEALTH_AVAILABLE:
-                Stealth()(page)
+                Stealth().apply_stealth_sync(page)
 
             def on_request(req):
                 if req.resource_type in ("xhr", "fetch"):
@@ -6159,12 +6168,18 @@ if __name__ == "__main__":
     parser.add_argument("--no-social",     action="store_true",  help="Skip crawling into social media domains (Facebook, Twitter, YouTube, etc.)")
     parser.add_argument("--stealth",        default="LOUD",       choices=["LOUD", "NORMAL", "GHOST"],
                         help="Stealth profile: LOUD (fast, default), NORMAL (moderate delays), GHOST (slow, randomised)")
+    parser.add_argument("--bug-bounty-header", type=str, default=None,
+                        help="Value for X-Bug-Bounty header e.g. 'HackerOne-chr0nic'. Omit to disable.")
 
     args = parser.parse_args()
 
     STEALTH_PROFILE = args.stealth
     if STEALTH_PROFILE != "LOUD":
         print(f"[*] Stealth profile: {STEALTH_PROFILE}")
+
+    BUG_BOUNTY_HEADER = args.bug_bounty_header
+    if BUG_BOUNTY_HEADER:
+        print(f"[*] Bug bounty header enabled: X-Bug-Bounty: {BUG_BOUNTY_HEADER}")
 
     if args.rate_min:    RATE_LIMIT_MIN = args.rate_min
     if args.rate_max:    RATE_LIMIT_MAX = args.rate_max
