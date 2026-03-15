@@ -3841,7 +3841,7 @@ def playwright_fetch(url):
                 )
                 page = ctx.new_page()
                 if PLAYWRIGHT_STEALTH_AVAILABLE:
-                    _playwright_stealth(page)
+                    Stealth().apply_stealth_sync(page)
 
                 def on_request(req):
                     if req.resource_type in ("xhr", "fetch"):
