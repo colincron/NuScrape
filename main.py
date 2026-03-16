@@ -5184,7 +5184,8 @@ def check_path_traversal(page_url, html_content):
         if domain in _traversal_domains:
             break
         try:
-            parsed = urlparse(raw_url)
+            resolved_url = urljoin(page_url, raw_url)
+            parsed = urlparse(resolved_url)
             if not parsed.query:
                 continue
             params = {}
@@ -5550,7 +5551,8 @@ def check_ssti(page_url, html_content):
 
     for raw_url in all_urls:
         try:
-            parsed = urlparse(raw_url)
+            resolved_url = urljoin(page_url, raw_url)
+            parsed = urlparse(resolved_url)
             if not parsed.query:
                 continue
             base = parsed.scheme + "://" + parsed.netloc + parsed.path
@@ -5850,7 +5852,8 @@ def check_idor_candidates(page_url, html_content):
     # ── Collect query param candidates ────────────────────────
     for raw_url in all_urls:
         try:
-            parsed = urlparse(raw_url)
+            resolved_url = urljoin(page_url, raw_url)
+            parsed = urlparse(resolved_url)
             if not parsed.query:
                 continue
             for pair in parsed.query.split("&"):
@@ -5870,7 +5873,8 @@ def check_idor_candidates(page_url, html_content):
     # ── Collect REST path candidates ──────────────────────────
     for raw_url in all_urls:
         try:
-            parsed = urlparse(raw_url)
+            resolved_url = urljoin(page_url, raw_url)
+            parsed = urlparse(resolved_url)
             for match in IDOR_PATH_REGEX.finditer(parsed.path):
                 id_val  = match.group(1)
                 pattern = IDOR_PATH_REGEX.sub(
