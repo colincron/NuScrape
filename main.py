@@ -3924,6 +3924,10 @@ def analyse_js_bundle(page_url, js_url):
                         write_to_js_database(page_url, js_url, "comment_todo", clean, ctx)
                         findings += 1
 
+        # Prototype pollution sink scan — first-party JS only, active-probes only
+        if ACTIVE_PROBES:
+            scan_js_for_prototype_pollution_sinks(page_url, js_url, js_text)
+
         if findings:
             print(timestamp() + " JS analysis: " + str(findings) + " findings in " + js_url)
 
@@ -4888,6 +4892,8 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                 check_crlf_injection(url, html)
                 # XXE injection — probes XML-accepting and SOAP endpoints
                 check_xxe_injection(url, html, headers)
+                # Prototype pollution — server-side body/query probes
+                check_prototype_pollution(url, html)
             # IDOR candidate detection — runs in background thread with timeout
             # to prevent hung verification requests stalling the crawl
             _idor_thread = threading.Thread(
@@ -7009,6 +7015,266 @@ def check_xxe_injection(page_url: str, html_content: str, response_headers: dict
                 pass
             except Exception as e:
                 print_error(f"XXE probe failed for {endpoint_url}: {e}")
+
+
+# ─────────────────────────────────────────────
+# Prototype pollution detection
+# ─────────────────────────────────────────────
+
+_PP_CANARY = "pp-test"
+
+# JSON body payloads — one per probe slot; sent alongside any existing fields
+_PP_BODY_PAYLOADS = [
+    {"__proto__":              {"nuscrape": "pp-test"}},
+    {"constructor":            {"prototype": {"nuscrape": "pp-test"}}},
+]
+
+# URL query-string payloads — appended to existing params
+_PP_QUERY_PAYLOADS = [
+    "__proto__[nuscrape]=pp-test",
+    "constructor[prototype][nuscrape]=pp-test",
+]
+
+# Client-side sink patterns searched in first-party JS bundles.
+# Each tuple: (compiled regex, description shown in alert detail)
+_PP_JS_SINKS = [
+    (re.compile(r'\bObject\.assign\s*\(',        re.I), "Object.assign("),
+    (re.compile(r'\$\.extend\s*\(',              re.I), "$.extend("),
+    (re.compile(r'\b_\.merge\s*\(',              re.I), "_.merge("),
+    (re.compile(r'\b_\.defaultsDeep\s*\(',       re.I), "_.defaultsDeep("),
+    # JSON.parse result assigned via bracket notation
+    (re.compile(r'JSON\.parse\s*\(.*?\)\s*\[',  re.I | re.DOTALL), "JSON.parse(…)["),
+]
+
+# Rough heuristic — nearby user-input sources tighten the signal
+_PP_USER_INPUT_RE = re.compile(
+    r'\b(?:req(?:uest)?\.(?:body|query|params)|'
+    r'location\.(?:search|hash)|'
+    r'URLSearchParams|'
+    r'getParameter|'
+    r'document\.(?:URL|referrer)|'
+    r'window\.location)\b',
+    re.I
+)
+
+_JS_CDN_RE = re.compile(
+    r'cdnjs\.cloudflare\.com|unpkg\.com|cdn\.jsdelivr\.net|'
+    r'node_modules/|/vendor/|/bower_components/',
+    re.IGNORECASE
+)
+
+# Dedup sets
+_pp_body_tested:  set = set()   # endpoint URLs tested with body payloads
+_pp_query_tested: set = set()   # endpoint URLs tested with query payloads
+_pp_js_tested:    set = set()   # JS URLs already scanned for client-side sinks
+
+
+def _pp_baseline(endpoint_url: str, method: str, base_json: dict) -> tuple:
+    """
+    Fire one baseline request so we can compare status codes.
+    Returns (status_code, body) or (None, None) on failure.
+    """
+    try:
+        hdrs = {**create_request_header(), "Content-Type": "application/json"}
+        r = requests.request(
+            method, endpoint_url,
+            json=base_json,
+            headers=hdrs,
+            timeout=8,
+            allow_redirects=False,
+            verify=False,
+        )
+        return r.status_code, r.text
+    except Exception:
+        return None, None
+
+
+def check_prototype_pollution(page_url: str, html_content: str) -> None:
+    """
+    Server-side prototype pollution (body + URL param probes) and
+    client-side sink detection in first-party JS.
+
+    Only called when --active-probes is enabled.
+    Sends at most 3 pollution probes per endpoint to minimise instability risk.
+    8-second timeout per probe.
+    """
+    if not is_in_scope(page_url):
+        return
+
+    domain = urlparse(page_url).netloc
+
+    try:
+        text = html_content if isinstance(html_content, str) \
+               else html_content.decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(text, "lxml")
+    except Exception:
+        return
+
+    # ── Collect JSON-accepting POST/PUT endpoints ────────────────────────────
+    # Source 1: HTML forms with POST/PUT that have no enctype or use JSON
+    endpoints = []
+    for form in soup.find_all("form"):
+        method = form.get("method", "get").upper()
+        if method not in ("POST", "PUT"):
+            continue
+        action = form.get("action") or page_url
+        ep = urljoin(page_url, action)
+        if urlparse(ep).netloc != domain:
+            continue
+        # Collect existing fields as the baseline body
+        fields = {}
+        for inp in form.find_all(["input", "textarea", "select"]):
+            n = inp.get("name", "")
+            v = inp.get("value") or "test"
+            if n and inp.get("type", "").lower() not in ("submit", "button", "image", "reset", "file"):
+                fields[n] = v
+        endpoints.append((ep, method, fields))
+
+    # Source 2: API-looking page URL
+    parsed_page = urlparse(page_url)
+    if any(seg in parsed_page.path for seg in ("/api/", "/v1/", "/v2/", "/v3/", "/rest/", "/graphql")):
+        endpoints.append((page_url, "POST", {}))
+
+    # ── Server-side body probes ──────────────────────────────────────────────
+    for endpoint_url, method, base_fields in endpoints:
+        if endpoint_url in _pp_body_tested:
+            continue
+        _pp_body_tested.add(endpoint_url)
+
+        baseline_status, _ = _pp_baseline(endpoint_url, method, base_fields)
+        probes_sent = 0
+
+        for payload_extra in _PP_BODY_PAYLOADS:
+            if probes_sent >= 3:
+                break
+            probe_body = {**base_fields, **payload_extra}
+            try:
+                stealth_delay(domain)
+                hdrs = {**create_request_header(), "Content-Type": "application/json"}
+                resp = requests.request(
+                    method, endpoint_url,
+                    json=probe_body,
+                    headers=hdrs,
+                    timeout=8,
+                    allow_redirects=False,
+                    verify=False,
+                )
+                probes_sent += 1
+                body = resp.text
+
+                if _PP_CANARY in body:
+                    alert(
+                        "SERVER-SIDE PROTOTYPE POLLUTION",
+                        "HIGH",
+                        endpoint_url,
+                        f"Canary value '{_PP_CANARY}' reflected in response after "
+                        f"injecting prototype pollution payload {list(payload_extra.keys())[0]!r} "
+                        f"into {method} {endpoint_url} — server-side prototype chain "
+                        f"manipulation is confirmed; object properties injected via "
+                        f"__proto__ or constructor.prototype are resolved at runtime"
+                    )
+                    print(timestamp() + f" [!!] Server-side prototype pollution (body): {endpoint_url}")
+                    break  # one confirmed finding per endpoint is sufficient
+
+                elif resp.status_code == 500 and baseline_status is not None and baseline_status != 500:
+                    alert(
+                        "PROTOTYPE POLLUTION — POSSIBLE SERVER CRASH",
+                        "MEDIUM",
+                        endpoint_url,
+                        f"Server returned 500 (baseline: {baseline_status}) after "
+                        f"injecting prototype pollution payload {list(payload_extra.keys())[0]!r} "
+                        f"into {method} {endpoint_url} — the injection may have corrupted "
+                        f"a shared prototype, causing a runtime exception; manual "
+                        f"verification required"
+                    )
+                    print(timestamp() + f" [!] Prototype pollution possible crash: {endpoint_url}")
+
+            except requests.exceptions.Timeout:
+                probes_sent += 1
+            except Exception as e:
+                print_error(f"PP body probe failed for {endpoint_url}: {e}")
+                probes_sent += 1
+
+    # ── URL query-string probes ──────────────────────────────────────────────
+    for endpoint_url, method, _ in endpoints:
+        if endpoint_url in _pp_query_tested:
+            continue
+        _pp_query_tested.add(endpoint_url)
+
+        parsed_ep = urlparse(endpoint_url)
+        existing_qs = parsed_ep.query
+        probes_sent  = 0
+
+        for qs_suffix in _PP_QUERY_PAYLOADS:
+            if probes_sent >= 3:
+                break
+            sep      = "&" if existing_qs else "?"
+            test_url = endpoint_url.split("?")[0] + (
+                "?" + existing_qs + "&" + qs_suffix if existing_qs else "?" + qs_suffix
+            )
+            try:
+                stealth_delay(domain)
+                resp = requests.get(
+                    test_url,
+                    headers=create_request_header(),
+                    timeout=8,
+                    allow_redirects=False,
+                    verify=False,
+                )
+                probes_sent += 1
+                if _PP_CANARY in resp.text:
+                    alert(
+                        "PROTOTYPE POLLUTION VIA URL PARAMETER",
+                        "HIGH",
+                        test_url,
+                        f"Canary value '{_PP_CANARY}' reflected in response after "
+                        f"injecting '{qs_suffix}' as a query parameter — the server "
+                        f"parses bracket-notation query keys and merges them into "
+                        f"a shared object, enabling prototype chain manipulation"
+                    )
+                    print(timestamp() + f" [!!] Prototype pollution (query): {test_url}")
+                    break
+
+            except requests.exceptions.Timeout:
+                probes_sent += 1
+            except Exception as e:
+                print_error(f"PP query probe failed for {test_url}: {e}")
+                probes_sent += 1
+
+
+def scan_js_for_prototype_pollution_sinks(page_url: str, js_url: str, js_text: str) -> None:
+    """
+    Scan a first-party JS bundle for known prototype pollution sinks combined
+    with nearby user-input sources. Called from analyse_js_bundle when
+    --active-probes is enabled; the JS content is already downloaded.
+
+    Flags MEDIUM — a sink alone is not exploitable; the analyst must verify
+    that user-controlled data reaches it without sanitisation.
+    """
+    if js_url in _pp_js_tested:
+        return
+    if _JS_CDN_RE.search(js_url):
+        return  # skip vendor / CDN bundles
+    _pp_js_tested.add(js_url)
+
+    for sink_re, sink_label in _PP_JS_SINKS:
+        for m in sink_re.finditer(js_text):
+            start = max(0, m.start() - 300)
+            end   = min(len(js_text), m.end() + 300)
+            window = js_text[start:end]
+            if _PP_USER_INPUT_RE.search(window):
+                ctx = re.sub(r'\s+', ' ', window).strip()[:300]
+                alert(
+                    "CLIENT-SIDE PROTOTYPE POLLUTION SINK",
+                    "MEDIUM",
+                    js_url,
+                    f"Sink '{sink_label}' found in first-party JS with a "
+                    f"user-controlled input source nearby — manual verification "
+                    f"required to confirm exploitability. Context: {ctx!r}"
+                )
+                print(timestamp() + f" [!] PP client-side sink '{sink_label}': {js_url}")
+                # Report at most one finding per sink label per JS file
+                break
 
 
 # ─────────────────────────────────────────────

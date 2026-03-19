@@ -91,7 +91,7 @@ python3 main.py -D <url> [options]
 | `--no-skip-google-tracking` | off | Crawl Google Play and analytics URLs (skipped by default) |
 | `--stealth` | `LOUD` | Stealth profile: `LOUD` (fast), `NORMAL` (moderate delays), `GHOST` (slow, rotated UAs, randomised) |
 | `--bug-bounty-header` | — | Injects `X-Bug-Bounty: <value>` into all requests — required by some bug bounty programs |
-| `--active-probes` | off | Enable payload-injecting checks: path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT), WebSocket security probes (origin validation, auth, scheme), and XXE injection (XML/SOAP entity expansion). **Only use against targets you are authorised to test.** |
+| `--active-probes` | off | Enable payload-injecting checks: path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT), WebSocket security probes (origin validation, auth, scheme), XXE injection (XML/SOAP entity expansion), and prototype pollution (server-side body/query probes + client-side JS sink detection). **Only use against targets you are authorised to test.** |
 
 **Examples:**
 
@@ -314,6 +314,51 @@ The test payload uses a safe static string entity (`<!ENTITY xxe "xxe-test-nuscr
 
 - 8-second timeout per probe
 - Deduplicated per `(endpoint_url, content_type)` pair
+
+---
+
+#### Prototype Pollution Detection
+
+Three complementary detection surfaces, all requiring `--active-probes`.
+
+**1. Server-side body probes**
+
+For each POST/PUT endpoint found in page forms and API-style page URLs, sends a baseline request then up to 2 pollution payloads injected alongside normal fields:
+
+```
+{"__proto__": {"nuscrape": "pp-test"}}
+{"constructor": {"prototype": {"nuscrape": "pp-test"}}}
+```
+
+| Finding | Severity |
+|---|---|
+| Canary `pp-test` reflected in response body | HIGH — entity injection confirmed |
+| Server returns 500 on probe but not on baseline | MEDIUM — possible prototype corruption crash |
+
+**2. URL query-string probes**
+
+For the same endpoints, appends bracket-notation pollution params to the query string:
+
+```
+?__proto__[nuscrape]=pp-test
+?constructor[prototype][nuscrape]=pp-test
+```
+
+| Finding | Severity |
+|---|---|
+| Canary `pp-test` reflected in response body | HIGH |
+
+**3. Client-side sink detection**
+
+During JS bundle analysis, scans first-party JS for known prototype pollution sinks (`Object.assign(`, `$.extend(`, `_.merge(`, `_.defaultsDeep(`, `JSON.parse(…)[`) with a user-controlled input source (`req.body`, `location.search`, `URLSearchParams`, etc.) within 300 characters. CDN and vendor bundles are skipped.
+
+| Finding | Severity |
+|---|---|
+| Sink + nearby user-input source in first-party JS | MEDIUM — manual verification required |
+
+- At most 3 probes per endpoint (body + query combined) to avoid application instability
+- 8-second timeout per probe
+- Deduplicated per endpoint URL per probe type
 
 ---
 
@@ -628,7 +673,7 @@ Several measures are in place to reduce noise:
 
 NuScrape is designed for **responsible disclosure research only**. All active probes (backup files, credential testing, open redirect injection, IDOR verification) are limited to confirming the existence of a vulnerability and do not exfiltrate data, maintain persistence, or cause service disruption.
 
-> **Note:** Payload-injecting checks (path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, WebSocket security probes, XXE injection) are **disabled by default** and must be explicitly enabled with `--active-probes`. A warning is printed at startup and displayed in the UI whenever this flag is active. Only enable it against targets you are authorised to test.
+> **Note:** Payload-injecting checks (path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, WebSocket security probes, XXE injection, prototype pollution) are **disabled by default** and must be explicitly enabled with `--active-probes`. A warning is printed at startup and displayed in the UI whenever this flag is active. Only enable it against targets you are authorised to test.
 
 **When reporting findings:**
 
@@ -660,6 +705,7 @@ Start scan
     │       │     ├─ API version enumeration                    │
     │       │     ├─ WebSocket security (origin, auth, scheme) │
     │       │     ├─ XXE injection (XML/SOAP endpoints)        │
+    │       │     ├─ Prototype pollution (body, query, JS sinks)│
     │       │     ├─ Path traversal                            │
     │       │     ├─ SSTI                                      │
     │       │     ├─ CRLF injection                            ┘
