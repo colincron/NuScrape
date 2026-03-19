@@ -4718,6 +4718,10 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                 check_open_redirects(url, html)
                 # GraphQL introspection — probe if this URL looks like a GraphQL endpoint
                 probe_graphql_url(url)
+                # Mass assignment — injects privileged fields into POST/PUT form endpoints
+                check_mass_assignment(url, html)
+                # API version enumeration — probes adjacent versions of versioned paths
+                check_api_versioning(url)
                 # Path traversal detection — probes file-like parameters
                 check_path_traversal(url, html)
                 # SSTI detection — probes URL params with arithmetic template expressions
@@ -5604,6 +5608,211 @@ def check_open_redirects(page_url, html_content):
                     break
             except Exception as e:
                 print_error(f"Open redirect test failed for {test_url}: {e}")
+
+
+# ─────────────────────────────────────────────
+# Mass assignment detection
+# ─────────────────────────────────────────────
+
+# Field names that should never be accepted from client input but are
+# commonly left writable in frameworks that auto-bind request bodies
+# to model objects (Rails, Spring, Django, Laravel, etc.).
+_MASS_ASSIGN_FIELDS = [
+    "role", "admin", "is_admin", "isAdmin", "user_role", "permission",
+    "permissions", "is_superuser", "verified", "is_verified", "balance",
+    "credits", "group_id",
+]
+
+_mass_assign_tested = set()
+
+def check_mass_assignment(page_url, html_content):
+    """
+    Discover POST/PUT endpoints from page forms, inject the sensitive field
+    names alongside legitimate form fields, and check whether any injected
+    name appears reflected in the response body or headers.
+
+    A reflection indicates the server accepted and echoed the field — strong
+    signal that mass assignment is possible. Flags HIGH; manual verification
+    of whether the server *processed* (not just echoed) the field is required.
+
+    Only runs when --active-probes is enabled. Deduplicates per endpoint URL.
+    """
+    domain = urlparse(page_url).netloc
+
+    try:
+        text = html_content if isinstance(html_content, str) \
+               else html_content.decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(text, "lxml")
+    except Exception:
+        return
+
+    # Build a list of (endpoint_url, method, base_fields) from page forms
+    endpoints = []
+    for form in soup.find_all("form"):
+        method = form.get("method", "get").upper()
+        if method not in ("POST", "PUT"):
+            continue
+        action = form.get("action") or page_url
+        endpoint_url = urljoin(page_url, action)
+        # Stay in scope — skip cross-origin form actions
+        if urlparse(endpoint_url).netloc != domain:
+            continue
+        # Collect existing field values to send alongside injected fields
+        fields = {}
+        for inp in form.find_all(["input", "textarea", "select"]):
+            name = inp.get("name", "")
+            val  = inp.get("value") or "test"
+            if name and inp.get("type", "").lower() not in ("submit", "button", "image", "reset"):
+                fields[name] = val
+        endpoints.append((endpoint_url, method, fields))
+
+    # Also probe the current page URL if it looks like a REST API endpoint
+    parsed_page = urlparse(page_url)
+    if any(seg in parsed_page.path for seg in ("/api/", "/v1/", "/v2/", "/v3/", "/rest/")):
+        endpoints.append((page_url, "POST", {}))
+
+    for endpoint_url, method, base_fields in endpoints:
+        if endpoint_url in _mass_assign_tested:
+            continue
+        _mass_assign_tested.add(endpoint_url)
+
+        # Build payload: existing fields + all injected sensitive fields
+        payload = dict(base_fields)
+        injected = {}
+        for field in _MASS_ASSIGN_FIELDS:
+            if field not in payload:
+                # Use truthy values to maximise chance of reflection
+                injected[field] = True if ("is_" in field or field in ("admin", "verified")) else 1
+        payload.update(injected)
+
+        try:
+            stealth_delay(domain)
+            resp = requests.request(
+                method,
+                endpoint_url,
+                json=payload,
+                headers={**create_request_header(), "Content-Type": "application/json"},
+                timeout=6,
+                allow_redirects=False,
+                verify=False,
+            )
+            body             = resp.text
+            resp_headers_str = str(dict(resp.headers))
+            reflected = [f for f in injected if f in body or f in resp_headers_str]
+            if reflected:
+                alert(
+                    "MASS ASSIGNMENT CANDIDATE",
+                    "HIGH",
+                    endpoint_url,
+                    f"{method} {endpoint_url} reflected injected field(s): "
+                    f"{', '.join(reflected)} — verify manually whether the server "
+                    f"accepted and processed these privileged fields"
+                )
+                print(timestamp() + f" [!!] Mass assignment candidate: {endpoint_url} "
+                                    f"reflected: {', '.join(reflected)}")
+        except Exception as e:
+            print_error(f"check_mass_assignment failed for {endpoint_url}: {e}")
+
+
+# ─────────────────────────────────────────────
+# API version enumeration
+# ─────────────────────────────────────────────
+
+_API_VERSION_RE   = re.compile(r'/(v\d+)(?=/|$)', re.I)
+_api_version_tested = set()
+
+def check_api_versioning(page_url):
+    """
+    For any URL with a versioned path segment (/v1/, /v2/, etc.), probe
+    adjacent versions to find older endpoints that may lack the security
+    controls present in the current version.
+
+    Versions tested: current-2, current-1, current+1.
+    A 404 or 401/403 on the alternate version is silently skipped.
+
+    Severity:
+      HIGH   — alternate version returns 200 where current requires auth (401/403)
+      MEDIUM — alternate version returns 200 (different accessibility, verify manually)
+
+    Only runs when --active-probes is enabled. Deduplicates per (host, path) pattern.
+    """
+    parsed = urlparse(page_url)
+    match  = _API_VERSION_RE.search(parsed.path)
+    if not match:
+        return
+
+    current_ver_str = match.group(1).lower()       # e.g. "v2"
+    current_ver_num = int(current_ver_str[1:])     # e.g. 2
+
+    pattern_key = (parsed.netloc, parsed.path)
+    if pattern_key in _api_version_tested:
+        return
+    _api_version_tested.add(pattern_key)
+
+    domain = parsed.netloc
+    base   = parsed.scheme + "://" + parsed.netloc
+
+    # Fetch current version's status to use as comparison baseline
+    try:
+        stealth_delay(domain)
+        current_resp   = requests.get(
+            page_url,
+            headers=create_request_header(),
+            timeout=6,
+            allow_redirects=False,
+            verify=False,
+        )
+        current_status = current_resp.status_code
+    except Exception:
+        return
+
+    for delta in (-2, -1, 1):
+        alt_ver_num = current_ver_num + delta
+        if alt_ver_num < 1:
+            continue
+        alt_ver_str = f"v{alt_ver_num}"
+        alt_path    = _API_VERSION_RE.sub(f"/{alt_ver_str}", parsed.path, count=1)
+        alt_url     = base + alt_path + (("?" + parsed.query) if parsed.query else "")
+
+        try:
+            stealth_delay(domain)
+            alt_resp   = requests.get(
+                alt_url,
+                headers=create_request_header(),
+                timeout=6,
+                allow_redirects=False,
+                verify=False,
+            )
+            alt_status = alt_resp.status_code
+
+            # 404 → doesn't exist; 401/403 → protected — both fine, skip
+            if alt_status in (404, 401, 403):
+                continue
+
+            if alt_status == 200 and current_status in (401, 403):
+                alert(
+                    "API VERSION AUTHENTICATION BYPASS",
+                    "HIGH",
+                    alt_url,
+                    f"API {alt_ver_str} at {alt_url} returns {alt_status} where "
+                    f"current {current_ver_str} requires auth ({current_status}) — "
+                    f"authentication controls may be absent on the older version"
+                )
+                print(timestamp() + f" [!!] API version auth bypass: {alt_url} "
+                                    f"({alt_status}) vs {current_ver_str} ({current_status})")
+            elif alt_status == 200:
+                alert(
+                    "OLDER API VERSION ACCESSIBLE",
+                    "MEDIUM",
+                    alt_url,
+                    f"API {alt_ver_str} at {alt_url} returned {alt_status} — "
+                    f"older versions may lack security controls present in "
+                    f"{current_ver_str}; verify response structure manually"
+                )
+                print(timestamp() + f" [!] Older API version accessible: "
+                                    f"{alt_url} ({alt_status})")
+        except Exception as e:
+            print_error(f"check_api_versioning failed for {alt_url}: {e}")
 
 
 # ─────────────────────────────────────────────

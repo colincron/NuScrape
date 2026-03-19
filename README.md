@@ -243,6 +243,24 @@ Parses all links on every crawled page looking for 30 common redirect parameter 
 
 ---
 
+#### Mass Assignment Detection
+For each POST/PUT form endpoint found on crawled pages, sends the normal form fields plus a set of 13 privileged field names (`role`, `admin`, `is_admin`, `isAdmin`, `user_role`, `permissions`, `is_superuser`, `verified`, `balance`, `credits`, `group_id`, etc.) in a JSON body. If any injected field name appears in the response body or headers, the server reflected it — strong indicator that the field was bound to a model object. Also probes the current URL directly when the path contains `/api/`, `/v1/`, `/v2/`, or `/rest/`. Requires `--active-probes`. Deduplicated per endpoint URL. **HIGH** — manual verification required to confirm the server processed (not just echoed) the field.
+
+---
+
+#### API Version Enumeration
+For any crawled URL with a versioned path segment (`/v1/`, `/v2/`, etc.), probes the two prior versions and one future version by substituting the version number in place. Compares HTTP response codes to the current version's response.
+
+| Finding | Severity |
+|---|---|
+| Older version returns 200 where current requires auth (401/403) | HIGH — auth controls may be absent |
+| Older version returns 200 (different accessibility from current) | MEDIUM — verify manually |
+| Older version returns 404 or 401/403 | skipped |
+
+Requires `--active-probes`. Deduplicated per `(host, path)` pattern.
+
+---
+
 #### SSRF Candidate Parameters
 Scans page links and form inputs for URL-accepting parameter names (`url`, `endpoint`, `webhook`, `callback`, `fetch`, `proxy`, `dest`, etc.). Flags them for manual follow-up. Downgraded to LOW when a WAF fingerprint is detected on the page. **MEDIUM** (no WAF) / **LOW** (WAF detected).
 
@@ -576,7 +594,9 @@ Start scan
     │       │     ├─ SSRF candidate parameter detection (WAF-downgraded)
     │       │     ├─ Host header injection
     │       │     ├─ Open redirect detection (WAF-suppressed)  ┐
-    │       │     ├─ GraphQL introspection (per-page URL)      │ requires --active-probes
+    │       │     ├─ GraphQL introspection (per-page URL)      │
+    │       │     ├─ Mass assignment (POST/PUT form endpoints)  │ requires --active-probes
+    │       │     ├─ API version enumeration                    │
     │       │     ├─ Path traversal                            │
     │       │     ├─ SSTI                                      │
     │       │     ├─ CRLF injection                            ┘
