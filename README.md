@@ -91,6 +91,7 @@ python3 main.py -D <url> [options]
 | `--no-skip-google-tracking` | off | Crawl Google Play and analytics URLs (skipped by default) |
 | `--stealth` | `LOUD` | Stealth profile: `LOUD` (fast), `NORMAL` (moderate delays), `GHOST` (slow, rotated UAs, randomised) |
 | `--bug-bounty-header` | — | Injects `X-Bug-Bounty: <value>` into all requests — required by some bug bounty programs |
+| `--active-probes` | off | Enable payload-injecting checks: path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, and dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT). **Only use against targets you are authorised to test.** |
 
 **Examples:**
 
@@ -109,11 +110,14 @@ python3 main.py -D https://example.com --resume
 
 # Ghost mode for low-noise scanning with bug bounty header
 python3 main.py -D https://example.com --stealth GHOST --bug-bounty-header "HackerOne-username"
+
+# Full active scan with payload-injecting checks (authorised targets only)
+python3 main.py -D https://example.com --active-probes
 ```
 
 ### Web UI
 
-Start `app.py` and open `http://localhost:5000`. The control panel sidebar lets you configure all scan options including stealth profile, bug bounty header, social media filter, and Google tracking filter. All views update live as the crawler runs.
+Start `app.py` and open `http://localhost:5000`. The control panel sidebar lets you configure all scan options including stealth profile, bug bounty header, social media filter, Google tracking filter, and active probes. All views update live as the crawler runs.
 
 **Views available in the UI:**
 
@@ -290,6 +294,20 @@ Inspects every `Set-Cookie` header observed during crawling. Each missing flag g
 | Missing `Secure` | MEDIUM | HTTPS pages only — expected on plain HTTP |
 | `SameSite=None` without `Secure` | HIGH | Cross-site requests include the cookie over plain HTTP |
 | Missing `SameSite` | LOW | Cookie not protected against CSRF |
+
+---
+
+#### Dangerous HTTP Methods
+Sends `TRACE`, `PUT`, `DELETE`, `CONNECT`, and `PATCH` to the root path of each base URL. A 2xx response means the server accepted the method; a 405 is flagged for TRACE only (server parsed it, possible XST even if ultimately rejected). Requires `--active-probes`.
+
+| Method | Severity | Risk |
+|---|---|---|
+| `TRACE` accepted (2xx) | HIGH | Cross-site tracing — can expose session cookies to attacker-controlled scripts |
+| `PUT` accepted (2xx) | HIGH | File write — attacker may be able to upload arbitrary content |
+| `DELETE` accepted (2xx) | HIGH | File deletion — destructive write access to the server |
+| `CONNECT` accepted (2xx) | MEDIUM | Open proxy abuse |
+| `PATCH` accepted (2xx) | LOW | Partial write access |
+| `TRACE` responded with 405 | MEDIUM | Server parsed TRACE; verify header reflection for XST |
 
 ---
 
@@ -521,6 +539,8 @@ Several measures are in place to reduce noise:
 
 NuScrape is designed for **responsible disclosure research only**. All active probes (backup files, credential testing, open redirect injection, IDOR verification) are limited to confirming the existence of a vulnerability and do not exfiltrate data, maintain persistence, or cause service disruption.
 
+> **Note:** Payload-injecting checks (path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests) are **disabled by default** and must be explicitly enabled with `--active-probes`. A warning is printed at startup and displayed in the UI whenever this flag is active. Only enable it against targets you are authorised to test.
+
 **When reporting findings:**
 
 1. Check the target's security policy at `/.well-known/security.txt` or their website
@@ -545,9 +565,9 @@ Start scan
     │       │     ├─ Open redirect detection (WAF-suppressed)
     │       │     ├─ SSRF candidate parameter detection (WAF-downgraded)
     │       │     ├─ Host header injection
-    │       │     ├─ Path traversal
-    │       │     ├─ SSTI
-    │       │     ├─ CRLF injection (header reflection confirmation)
+    │       │     ├─ Path traversal          ┐
+    │       │     ├─ SSTI                    │ requires --active-probes
+    │       │     ├─ CRLF injection          ┘
     │       │     ├─ IDOR candidate collection + verification
     │       │     ├─ JS bundle analysis (endpoints, secrets, staging URLs, JWTs, S3 refs, TODO comments)
     │       │     ├─ JS source map exposure check
@@ -570,8 +590,10 @@ Start scan
     │                   ├─ Directory listing
     │                   ├─ Backup file exposure
     │                   ├─ Admin panel detection (59 paths)
-    │                   ├─ CORS misconfiguration
-    │                   ├─ Default credentials
+    │                   ├─ CORS misconfiguration       ┐
+    │                   ├─ Default credentials         │ requires --active-probes
+    │                   └─ Dangerous HTTP methods      ┘
+    │                        (TRACE/PUT/DELETE/CONNECT)
     │                   ├─ GraphQL introspection
     │                   ├─ Spring Boot Actuator
     │                   ├─ WAF fingerprinting

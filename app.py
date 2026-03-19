@@ -150,6 +150,7 @@ def api_start():
     if not isinstance(bug_bounty_header, str):
         bug_bounty_header = ""
     bug_bounty_header = bug_bounty_header.strip()
+    active_probes = bool(data.get("active_probes", False))
 
     if not domain:
         return jsonify({"ok": False, "error": "No domain provided"}), 400
@@ -181,6 +182,8 @@ def api_start():
             cmd.extend(["--stealth", stealth_profile])
         if bug_bounty_header:
             cmd.extend(["--bug-bounty-header", bug_bounty_header])
+        if active_probes:
+            cmd.append("--active-probes")
 
         with log_lock:
             log_buffer.clear()
@@ -692,6 +695,15 @@ td a:hover{text-decoration:underline}
         <label>Skip Google Tracking/Play URLs</label>
         <label class="toggle"><input type="checkbox" id="skipGoogleTracking" checked><span class="toggle-slider"></span></label>
       </div>
+      <div class="toggle-row" style="margin-top:.6rem">
+        <label style="color:var(--yellow)">Active Probes</label>
+        <label class="toggle"><input type="checkbox" id="activeProbes" onchange="toggleActiveProbesWarning(this)"><span class="toggle-slider"></span></label>
+      </div>
+      <div id="activeProbesWarning" style="display:none;background:rgba(255,200,0,.08);border:1px solid rgba(255,200,0,.35);border-radius:4px;padding:.45rem .6rem;margin-bottom:.5rem;font-family:var(--mono);font-size:.65rem;color:var(--yellow);line-height:1.6">
+        ⚠ Active probes ON — payload-injecting checks enabled:<br>
+        path traversal · SSTI · CRLF injection · CORS evil-origin · default credentials · dangerous HTTP methods (TRACE/PUT/DELETE)<br>
+        <strong>Only scan targets you are authorised to test.</strong>
+      </div>
       <div id="resumeInfo" style="display:none;font-family:var(--mono);font-size:.68rem;color:var(--yellow);margin-bottom:.6rem;line-height:1.6"></div>
       <div style="margin-bottom:.7rem">
         <div style="font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.4rem">Stealth Profile</div>
@@ -1185,6 +1197,11 @@ function switchTab(name){
     report:loadReport})[name]?.();
 }
 
+// ── Active probes warning toggle ───────────────────────
+function toggleActiveProbesWarning(cb){
+  document.getElementById('activeProbesWarning').style.display=cb.checked?'block':'none';
+}
+
 // ── Bug bounty header toggle ───────────────────────────
 function toggleBugBounty(cb){
   const inp=document.getElementById('bugBountyValue');
@@ -1227,6 +1244,7 @@ async function startCrawler(){
       playwright:document.getElementById('usePW').checked,
       no_social:document.getElementById('noSocial').checked,
       skip_google_tracking:document.getElementById('skipGoogleTracking').checked,
+      active_probes:document.getElementById('activeProbes').checked,
       stealth_profile:document.querySelector('input[name="stealthProfile"]:checked')?.value||'LOUD',
       ...(document.getElementById('bugBountyToggle').checked && document.getElementById('bugBountyValue').value.trim()
         ? {bug_bounty_header: document.getElementById('bugBountyValue').value.trim()}

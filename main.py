@@ -49,10 +49,11 @@ COMMON_PORTS    = [21, 22, 23, 25, 53, 80, 443, 8080, 8443, 3306, 5432, 6379, 27
 # Stealth profile system
 # ─────────────────────────────────────────────
 
-STEALTH_PROFILE = "LOUD"   # overridden by --stealth CLI arg
+STEALTH_PROFILE  = "LOUD"  # overridden by --stealth CLI arg
 BUG_BOUNTY_HEADER = None   # Set via --bug-bounty-header CLI arg. None = disabled.
 SAME_DOMAIN_ONLY = False   # overridden by --same-domain-only CLI arg
-START_URL = ""             # set at crawler startup; used by is_in_scope()
+START_URL        = ""      # set at crawler startup; used by is_in_scope()
+ACTIVE_PROBES    = False   # overridden by --active-probes CLI arg; gates payload-injecting checks
 
 UA_POOL = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -2684,6 +2685,82 @@ def check_cors_misconfiguration(base_url, domain):
         print_error("check_cors_misconfiguration failed for " + domain + ": " + str(e))
 
 # ─────────────────────────────────────────────
+# Dangerous HTTP method testing
+# ─────────────────────────────────────────────
+
+# Methods beyond GET/POST/HEAD that servers should not accept on web endpoints.
+# TRACE enables XST (cross-site tracing) cookie theft.
+# PUT/DELETE allow file creation/deletion if misconfigured.
+# CONNECT can be abused as an open proxy.
+_DANGEROUS_METHODS = ["TRACE", "PUT", "DELETE", "CONNECT", "PATCH"]
+
+_dangerous_method_checked = set()
+
+def check_dangerous_http_methods(base_url, domain):
+    """
+    Send each dangerous HTTP method to the root path and flag any that return
+    a 2xx or 405 response (405 = Method Not Allowed confirms the server
+    processes the method even if it rejects it for this path).
+
+    Severities:
+      TRACE                → HIGH  (enables XST — credentials readable cross-origin)
+      PUT / DELETE         → HIGH  (file write/delete if misconfigured)
+      CONNECT              → MEDIUM (potential open-proxy abuse)
+      PATCH                → LOW   (generally low risk unless write access confirmed)
+    """
+    if base_url in _dangerous_method_checked:
+        return
+    _dangerous_method_checked.add(base_url)
+
+    _method_severity = {
+        "TRACE":   "HIGH",
+        "PUT":     "HIGH",
+        "DELETE":  "HIGH",
+        "CONNECT": "MEDIUM",
+        "PATCH":   "LOW",
+    }
+
+    for method in _DANGEROUS_METHODS:
+        try:
+            stealth_delay(domain)
+            resp = requests.request(
+                method,
+                base_url,
+                headers=create_request_header(),
+                timeout=6,
+                allow_redirects=False,
+                verify=False,
+            )
+            # 2xx = method accepted; 405 = server acknowledged it but rejected for this path.
+            # Either indicates the server is processing the method.
+            # 501 = not implemented (server actively refuses) — not reportable.
+            if resp.status_code in range(200, 300):
+                severity = _method_severity.get(method, "LOW")
+                alert(
+                    f"DANGEROUS HTTP METHOD ACCEPTED: {method}",
+                    severity,
+                    domain,
+                    f"{method} {base_url} returned {resp.status_code} — "
+                    f"server accepted the request"
+                )
+                print(timestamp() + f" [!] {method} accepted on {base_url} ({resp.status_code})")
+            elif resp.status_code == 405:
+                # 405 is a weaker signal — server parsed the method but denied it.
+                # Only flag TRACE here since XST risk is confirmed even with 405
+                # (some frameworks reflect headers before sending 405).
+                if method == "TRACE":
+                    alert(
+                        "DANGEROUS HTTP METHOD: TRACE ENABLED (405)",
+                        "MEDIUM",
+                        domain,
+                        f"TRACE {base_url} returned 405 — server parsed the TRACE request; "
+                        f"verify whether response headers are reflected (XST risk)"
+                    )
+                    print(timestamp() + f" [!] TRACE 405 on {base_url} — possible XST risk")
+        except Exception as e:
+            print_error(f"check_dangerous_http_methods: {method} {base_url}: {e}")
+
+# ─────────────────────────────────────────────
 # WAF / security appliance fingerprinting
 # ─────────────────────────────────────────────
 
@@ -3192,8 +3269,6 @@ def enrich_domain(domain_name, response_headers=None, html_content=None):
                 (check_env_exposure,           (base, clean_domain)),
                 (check_directory_listing,      (base, clean_domain)),
                 (check_backup_exposure,        (base, clean_domain)),
-                (check_cors_misconfiguration,  (base, clean_domain)),
-                (check_default_credentials,    (base, clean_domain)),
                 (check_graphql_introspection,  (base, clean_domain)),
                 (check_actuator_exposure,      (base, clean_domain)),
                 (check_sensitive_files,        (base, clean_domain)),
@@ -3203,6 +3278,13 @@ def enrich_domain(domain_name, response_headers=None, html_content=None):
                 (check_admin_panels,                (base, clean_domain)),
                 (check_security_headers,            (base, clean_domain)),
             ]
+            # Active probe checks — only run when --active-probes is enabled
+            if ACTIVE_PROBES:
+                _exposure_tasks += [
+                    (check_cors_misconfiguration,    (base, clean_domain)),
+                    (check_default_credentials,      (base, clean_domain)),
+                    (check_dangerous_http_methods,   (base, clean_domain)),
+                ]
             with _TPE(max_workers=8) as _ex:
                 _futs = {_ex.submit(fn, *args): fn for fn, args in _exposure_tasks}
                 for _f in _ac(_futs):
@@ -4632,12 +4714,14 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
             flag_ssrf_candidates(url, html)
             # Open redirect detection — checks URL params on every page
             check_open_redirects(url, html)
-            # Path traversal detection — probes file-like parameters
-            check_path_traversal(url, html)
-            # SSTI detection — probes URL params with arithmetic template expressions
-            check_ssti(url, html)
-            # CRLF injection detection — probes URL params for header injection
-            check_crlf_injection(url, html)
+            # Active probe checks — only run when --active-probes is enabled
+            if ACTIVE_PROBES:
+                # Path traversal detection — probes file-like parameters
+                check_path_traversal(url, html)
+                # SSTI detection — probes URL params with arithmetic template expressions
+                check_ssti(url, html)
+                # CRLF injection detection — probes URL params for header injection
+                check_crlf_injection(url, html)
             # IDOR candidate detection — runs in background thread with timeout
             # to prevent hung verification requests stalling the crawl
             _idor_thread = threading.Thread(
@@ -6696,6 +6780,10 @@ if __name__ == "__main__":
                         help="Stealth profile: LOUD (fast, default), NORMAL (moderate delays), GHOST (slow, randomised)")
     parser.add_argument("--bug-bounty-header", type=str, default=None,
                         help="Value for X-Bug-Bounty header e.g. 'HackerOne-chr0nic'. Omit to disable.")
+    parser.add_argument("--active-probes", action="store_true",
+                        help="Enable payload-injecting checks: path traversal, SSTI, CRLF injection, "
+                             "CORS evil-origin probes, default credential tests, and dangerous HTTP method testing. "
+                             "Only use against targets you are authorised to test.")
 
     args = parser.parse_args()
 
@@ -6706,6 +6794,17 @@ if __name__ == "__main__":
     BUG_BOUNTY_HEADER = args.bug_bounty_header
     if BUG_BOUNTY_HEADER:
         print(f"[*] Bug bounty header enabled: X-Bug-Bounty: {BUG_BOUNTY_HEADER}")
+
+    ACTIVE_PROBES = args.active_probes
+    if ACTIVE_PROBES:
+        print("=" * 60)
+        print("[!] WARNING: Active probes enabled.")
+        print("[!] Payload-injecting checks are ON:")
+        print("[!]   path traversal, SSTI, CRLF injection,")
+        print("[!]   CORS evil-origin probes, default credential tests,")
+        print("[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)")
+        print("[!] Only scan targets you are authorised to test.")
+        print("=" * 60)
 
     if args.rate_min:    RATE_LIMIT_MIN = args.rate_min
     if args.rate_max:    RATE_LIMIT_MAX = args.rate_max
