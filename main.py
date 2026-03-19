@@ -1373,6 +1373,23 @@ def check_mysql_auth(host):
 
     return result
 
+_HTTP_PORTS = {80, 443, 8080, 8443, 8008, 8888}
+
+def _http_waf_check(domain, port):
+    """
+    Fetch the root path on an HTTP port and return the WAF provider name if
+    a WAF intercept is detected, or None if the response looks like a real
+    application. Only called for ports that speak HTTP.
+    """
+    scheme = "https" if port in (443, 8443) else "http"
+    url = f"{scheme}://{domain}:{port}/"
+    try:
+        r = requests.get(url, headers=create_request_header(),
+                         timeout=5, allow_redirects=True, verify=False)
+        return _response_waf_provider(r)
+    except Exception:
+        return None
+
 def port_scan(domain):
     try:
         ip = socket.gethostbyname(domain)
@@ -1397,12 +1414,22 @@ def port_scan(domain):
                 # These services are dangerous just by being exposed
                 svc = CRITICAL_PORTS[port]
                 severity = "CRITICAL" if port in {6379, 27017, 23} else "HIGH"
-                alert(
-                    f"EXPOSED SERVICE: port {port} ({svc})",
-                    severity,
-                    domain,
-                    f"Port {port} ({svc}) is open on {ip}"
-                )
+                # HTTP-capable ports may be fronted by a WAF — check before alerting
+                waf = _http_waf_check(domain, port) if port in _HTTP_PORTS else None
+                if waf:
+                    alert(
+                        f"EXPOSED SERVICE (UNCONFIRMED — {waf} WAF): port {port} ({svc})",
+                        "LOW",
+                        domain,
+                        f"Port {port} ({svc}) appears open on {ip} but responses show {waf} WAF fingerprint — may be a WAF intercept, not a real service"
+                    )
+                else:
+                    alert(
+                        f"EXPOSED SERVICE: port {port} ({svc})",
+                        severity,
+                        domain,
+                        f"Port {port} ({svc}) is open on {ip}"
+                    )
 
             elif port == 3306:
                 # MySQL — probe before alerting
@@ -2739,20 +2766,62 @@ def detect_waf(base_url, domain):
     else:
         print(timestamp() + f" No WAF detected on {domain}")
 
-def _is_akamai_block(resp):
+def _response_waf_provider(resp):
     """
-    Return True if the response is an Akamai edge block rather than a real
-    application response. Findings against Akamai-blocked responses are
-    suppressed to avoid false positives.
+    Inspect an HTTP response for WAF fingerprints.
+    Returns the WAF provider name string if detected, or None if clean.
+
+    Covers:
+      - Akamai:             edgesuite.net in headers or body
+      - Incapsula/Imperva:  Incapsula incident or _Incapsula_Resource_ in body,
+                            or x-iinfo header
+      - Cloudflare:         cf-ray / cf-cache-status header, or
+                            "cloudflare" in Server header or body
     """
     if resp is None:
-        return False
-    for v in resp.headers.values():
-        if "edgesuite.net" in v.lower():
-            return True
-    if resp.text and "edgesuite.net" in resp.text.lower():
-        return True
-    return False
+        return None
+    header_keys  = {k.lower() for k in resp.headers}
+    header_vals  = " ".join(v.lower() for v in resp.headers.values())
+    body         = (resp.text or "")[:4000].lower()
+
+    # Akamai
+    if "edgesuite.net" in header_vals or "edgesuite.net" in body:
+        return "Akamai"
+
+    # Incapsula / Imperva
+    if "x-iinfo" in header_keys:
+        return "Incapsula/Imperva"
+    if "incapsula incident" in body or "_incapsula_resource_" in body:
+        return "Incapsula/Imperva"
+
+    # Cloudflare
+    if "cf-ray" in header_keys or "cf-cache-status" in header_keys:
+        return "Cloudflare"
+    server = resp.headers.get("Server", "").lower()
+    if "cloudflare" in server or "cloudflare" in body:
+        return "Cloudflare"
+
+    return None
+
+def _response_waf_provider_from_text(body_text):
+    """
+    Same WAF fingerprinting as _response_waf_provider() but works on a plain
+    HTML string when no requests.Response object is available (e.g. SSRF page body).
+    """
+    if not body_text:
+        return None
+    body = body_text[:4000].lower()
+    if "edgesuite.net" in body:
+        return "Akamai"
+    if "incapsula incident" in body or "_incapsula_resource_" in body:
+        return "Incapsula/Imperva"
+    if "cloudflare" in body:
+        return "Cloudflare"
+    return None
+
+def _is_akamai_block(resp):
+    """Legacy shim — use _response_waf_provider() for new code."""
+    return _response_waf_provider(resp) == "Akamai"
 
 def write_to_waf_database(domain, waf_vendor, detected_by):
     conn = sqlite3.connect("ScrapeDB", isolation_level=None)
@@ -4998,12 +5067,23 @@ def flag_ssrf_candidates(page_url, html_content):
     if found:
         _ssrf_flagged.add(domain)
         param_list = ", ".join(sorted(found))
-        alert(
-            "SSRF CANDIDATE PARAMETERS DETECTED",
-            "MEDIUM",
-            page_url,
-            f"URL-accepting parameters found — manually test for SSRF: {param_list}"
-        )
+        # If the page itself is a WAF intercept, downgrade — the params are
+        # not reachable application inputs, they are WAF-generated artifacts
+        waf = _response_waf_provider_from_text(text)
+        if waf:
+            alert(
+                "SSRF CANDIDATE PARAMETERS DETECTED (UNCONFIRMED — WAF)",
+                "LOW",
+                page_url,
+                f"URL-accepting parameters found but {waf} WAF fingerprint detected on page — may not reach real application: {param_list}"
+            )
+        else:
+            alert(
+                "SSRF CANDIDATE PARAMETERS DETECTED",
+                "MEDIUM",
+                page_url,
+                f"URL-accepting parameters found — manually test for SSRF: {param_list}"
+            )
         print(timestamp() + f" SSRF candidates on {domain}: {param_list}")
 
 
