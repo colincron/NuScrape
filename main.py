@@ -3269,7 +3269,6 @@ def enrich_domain(domain_name, response_headers=None, html_content=None):
                 (check_env_exposure,           (base, clean_domain)),
                 (check_directory_listing,      (base, clean_domain)),
                 (check_backup_exposure,        (base, clean_domain)),
-                (check_graphql_introspection,  (base, clean_domain)),
                 (check_actuator_exposure,      (base, clean_domain)),
                 (check_sensitive_files,        (base, clean_domain)),
                 (detect_waf,                        (base, clean_domain)),
@@ -3281,6 +3280,7 @@ def enrich_domain(domain_name, response_headers=None, html_content=None):
             # Active probe checks — only run when --active-probes is enabled
             if ACTIVE_PROBES:
                 _exposure_tasks += [
+                    (check_graphql_introspection,    (base, clean_domain)),
                     (check_cors_misconfiguration,    (base, clean_domain)),
                     (check_default_credentials,      (base, clean_domain)),
                     (check_dangerous_http_methods,   (base, clean_domain)),
@@ -4712,10 +4712,12 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
             scan_for_jwts(url, html, response_headers=headers)
             # SSRF candidate parameter flagging — informational, no HTTP requests
             flag_ssrf_candidates(url, html)
-            # Open redirect detection — checks URL params on every page
-            check_open_redirects(url, html)
             # Active probe checks — only run when --active-probes is enabled
             if ACTIVE_PROBES:
+                # Open redirect detection — probes URL params with canary URL
+                check_open_redirects(url, html)
+                # GraphQL introspection — probe if this URL looks like a GraphQL endpoint
+                probe_graphql_url(url)
                 # Path traversal detection — probes file-like parameters
                 check_path_traversal(url, html)
                 # SSTI detection — probes URL params with arithmetic template expressions
@@ -5233,13 +5235,119 @@ GRAPHQL_INTROSPECTION_INDICATORS = [
     "types", "directives",
 ]
 
-_graphql_checked = set()
+_graphql_checked    = set()
+_graphql_url_probed = set()   # dedup for per-page URL probing
+
+# Error messages returned when introspection is present but explicitly disabled.
+_GRAPHQL_DISABLED_INDICATORS = [
+    "introspection is disabled",
+    "IntrospectionDisabled",
+    "GraphQL introspection is not allowed",
+    "not allowed to run introspection queries",
+    "Introspection queries are not allowed",
+    "introspection not allowed",
+    "introspection has been disabled",
+]
+
+# URL path fragments that suggest a GraphQL endpoint
+_GRAPHQL_PATH_HINTS = ("graphql", "graph", "/api")
+
+def _probe_graphql_endpoint(url, domain):
+    """
+    Send an introspection query to a single URL and return the verdict:
+      'enabled'  — schema data confirmed (HIGH)
+      'disabled' — endpoint exists but introspection is off (MEDIUM)
+      None       — not a GraphQL endpoint or no response
+    """
+    try:
+        stealth_delay(domain)
+        resp = requests.post(
+            url,
+            data=GRAPHQL_INTROSPECTION_QUERY,
+            headers={**create_request_header(), "Content-Type": "application/json"},
+            timeout=6,
+            allow_redirects=False,
+        )
+        if resp.status_code not in (200, 201, 400):
+            return None
+        body = resp.text
+        ct   = resp.headers.get("Content-Type", "")
+
+        # Check for introspection-disabled error first (often a 400 or 200 with error body)
+        if any(ind.lower() in body.lower() for ind in _GRAPHQL_DISABLED_INDICATORS):
+            return "disabled"
+
+        if resp.status_code not in (200, 201):
+            return None
+        if "json" not in ct and "__schema" not in body:
+            return None
+
+        matched = [ind for ind in GRAPHQL_INTROSPECTION_INDICATORS if ind in body]
+        if len(matched) >= 2:
+            return "enabled"
+    except Exception as e:
+        print_error(f"GraphQL probe failed for {url}: {e}")
+    return None
+
+
+def probe_graphql_url(page_url):
+    """
+    Called per crawled page. If the URL path contains a GraphQL hint
+    ('graphql', 'graph', '/api'), probe that specific URL with an
+    introspection query. Deduplicates via _graphql_url_probed.
+    """
+    try:
+        parsed = urlparse(page_url)
+        path   = parsed.path.lower()
+        if not any(hint in path for hint in _GRAPHQL_PATH_HINTS):
+            return
+        probe_url = parsed.scheme + "://" + parsed.netloc + parsed.path
+        if probe_url in _graphql_url_probed:
+            return
+        _graphql_url_probed.add(probe_url)
+
+        domain = parsed.netloc
+        verdict = _probe_graphql_endpoint(probe_url, domain)
+        if verdict == "enabled":
+            type_count = 0
+            try:
+                resp = requests.post(
+                    probe_url,
+                    data=GRAPHQL_INTROSPECTION_QUERY,
+                    headers={**create_request_header(), "Content-Type": "application/json"},
+                    timeout=6,
+                    allow_redirects=False,
+                )
+                type_count = resp.text.count('"name"')
+            except Exception:
+                pass
+            alert(
+                "GRAPHQL INTROSPECTION ENABLED",
+                "HIGH",
+                probe_url,
+                f"Full API schema exposed at crawled endpoint — {type_count} name fields visible"
+            )
+            print(timestamp() + f" [!!] GraphQL introspection enabled: {probe_url}")
+        elif verdict == "disabled":
+            alert(
+                "GRAPHQL ENDPOINT FOUND: INTROSPECTION DISABLED",
+                "MEDIUM",
+                probe_url,
+                f"GraphQL endpoint exists at {probe_url} but introspection is disabled — "
+                f"API is present, manual probing may still be possible"
+            )
+            print(timestamp() + f" [!] GraphQL endpoint (introspection disabled): {probe_url}")
+    except Exception as e:
+        print_error(f"probe_graphql_url failed for {page_url}: {e}")
+
 
 def check_graphql_introspection(base_url, domain):
     """
-    Probe common GraphQL paths and test whether introspection is enabled.
+    Probe common GraphQL paths on a host and test whether introspection is enabled.
     Introspection in production exposes the full API schema to unauthenticated
-    attackers. Alerts HIGH when confirmed.
+    attackers. Alerts HIGH when confirmed, MEDIUM when endpoint exists but
+    introspection is explicitly disabled.
+    Only called when --active-probes is enabled.
     """
     if domain in _graphql_checked:
         return
@@ -5247,35 +5355,40 @@ def check_graphql_introspection(base_url, domain):
 
     for path in GRAPHQL_PATHS:
         url = base_url.rstrip("/") + path
-        try:
-            stealth_delay(domain)
-            resp = requests.post(
-                url,
-                data=GRAPHQL_INTROSPECTION_QUERY,
-                headers={**create_request_header(), "Content-Type": "application/json"},
-                timeout=6,
-                allow_redirects=False,
-            )
-            if resp.status_code not in (200, 201):
-                continue
-            body = resp.text
-            ct   = resp.headers.get("Content-Type", "")
-            if "json" not in ct and "__schema" not in body:
-                continue
-            matched = [ind for ind in GRAPHQL_INTROSPECTION_INDICATORS if ind in body]
-            if len(matched) >= 2:
-                type_count = body.count('"name"')
-                alert(
-                    "GRAPHQL INTROSPECTION ENABLED",
-                    "HIGH",
+        if url in _graphql_url_probed:
+            continue   # already probed by per-page path check
+        _graphql_url_probed.add(url)
+
+        verdict = _probe_graphql_endpoint(url, domain)
+        if verdict == "enabled":
+            try:
+                resp = requests.post(
                     url,
-                    f"Full API schema exposed — {type_count} name fields visible. "
-                    f"Indicators: {', '.join(matched[:4])}"
+                    data=GRAPHQL_INTROSPECTION_QUERY,
+                    headers={**create_request_header(), "Content-Type": "application/json"},
+                    timeout=6,
+                    allow_redirects=False,
                 )
-                print(timestamp() + f" [!!] GraphQL introspection enabled: {url}")
-                return
-        except Exception as e:
-            print_error(f"check_graphql_introspection failed for {url}: {e}")
+                type_count = resp.text.count('"name"')
+            except Exception:
+                type_count = 0
+            alert(
+                "GRAPHQL INTROSPECTION ENABLED",
+                "HIGH",
+                url,
+                f"Full API schema exposed — {type_count} name fields visible"
+            )
+            print(timestamp() + f" [!!] GraphQL introspection enabled: {url}")
+            return   # one confirmed endpoint is enough to alert per host
+        elif verdict == "disabled":
+            alert(
+                "GRAPHQL ENDPOINT FOUND: INTROSPECTION DISABLED",
+                "MEDIUM",
+                url,
+                f"GraphQL endpoint exists at {url} but introspection is disabled — "
+                f"API is present, manual probing may still be possible"
+            )
+            print(timestamp() + f" [!] GraphQL endpoint (introspection disabled): {url}")
 
 
 # ─────────────────────────────────────────────

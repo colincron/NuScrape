@@ -239,7 +239,7 @@ For each URL parameter found on crawled pages, appends a URL-encoded `%0d%0a` (C
 ---
 
 #### Open Redirect
-Parses all links on every crawled page looking for 30 common redirect parameter names (`next`, `url`, `redirect`, `return_to`, `goto`, `callback`, etc.). Injects an external canary URL and checks for a 3xx response pointing to it. Suppresses findings where the response shows a WAF fingerprint (Akamai, Cloudflare, Incapsula). **HIGH** when confirmed.
+Parses all links on every crawled page looking for 30 common redirect parameter names (`next`, `url`, `redirect`, `return_to`, `goto`, `callback`, etc.). Injects the canary URL `https://example.com/nuscrape-redirect-test` and checks whether the `Location` header in the response points to it. Does not follow the redirect. Suppresses findings where the response shows a WAF fingerprint. Deduplicated per `(path, parameter)` pair. Requires `--active-probes`. **HIGH** when confirmed.
 
 ---
 
@@ -349,7 +349,18 @@ Confirms findings via body signature matching before alerting to avoid false pos
 ---
 
 #### GraphQL Introspection
-Probes 10 common GraphQL paths (`/graphql`, `/api/graphql`, `/gql`, `/graphiql`, `/playground`, etc.) with a full introspection query. If the schema is returned, the complete API surface — all types, queries, mutations, and field names — is exposed to unauthenticated attackers. **HIGH.**
+Two-pronged check. Requires `--active-probes`.
+
+**Per-host path probing** — Probes 10 common GraphQL paths (`/graphql`, `/api/graphql`, `/v1/graphql`, `/v2/graphql`, `/gql`, `/graphiql`, `/playground`, etc.) on every enriched host with the standard introspection query `{"query":"{__schema{types{name fields{name}}}}"}`.
+
+**Per-page URL detection** — During crawling, any URL whose path contains `graphql`, `graph`, or `/api` is probed directly. This catches non-standard GraphQL paths that the fixed wordlist would miss.
+
+Both paths share a URL-level dedup set to avoid double-probing the same endpoint.
+
+| Finding | Severity |
+|---|---|
+| Introspection enabled — schema returned | HIGH (includes visible type count) |
+| Endpoint exists but introspection disabled | MEDIUM |
 
 ---
 
@@ -562,12 +573,13 @@ Start scan
     │       ├─ Per page response
     │       │     ├─ Cookie security flag auditing (per-flag, per-cookie-name dedup)
     │       │     ├─ JWT scan (HTML + headers)
-    │       │     ├─ Open redirect detection (WAF-suppressed)
     │       │     ├─ SSRF candidate parameter detection (WAF-downgraded)
     │       │     ├─ Host header injection
-    │       │     ├─ Path traversal          ┐
-    │       │     ├─ SSTI                    │ requires --active-probes
-    │       │     ├─ CRLF injection          ┘
+    │       │     ├─ Open redirect detection (WAF-suppressed)  ┐
+    │       │     ├─ GraphQL introspection (per-page URL)      │ requires --active-probes
+    │       │     ├─ Path traversal                            │
+    │       │     ├─ SSTI                                      │
+    │       │     ├─ CRLF injection                            ┘
     │       │     ├─ IDOR candidate collection + verification
     │       │     ├─ JS bundle analysis (endpoints, secrets, staging URLs, JWTs, S3 refs, TODO comments)
     │       │     ├─ JS source map exposure check
@@ -590,12 +602,12 @@ Start scan
     │                   ├─ Directory listing
     │                   ├─ Backup file exposure
     │                   ├─ Admin panel detection (59 paths)
-    │                   ├─ CORS misconfiguration       ┐
-    │                   ├─ Default credentials         │ requires --active-probes
-    │                   └─ Dangerous HTTP methods      ┘
-    │                        (TRACE/PUT/DELETE/CONNECT)
-    │                   ├─ GraphQL introspection
     │                   ├─ Spring Boot Actuator
+    │                   ├─ GraphQL introspection (common paths) ┐
+    │                   ├─ CORS misconfiguration                │ requires --active-probes
+    │                   ├─ Default credentials                  │
+    │                   └─ Dangerous HTTP methods               ┘
+    │                        (TRACE/PUT/DELETE/CONNECT)
     │                   ├─ WAF fingerprinting
     │                   └─ /.well-known/ enumeration
     │
