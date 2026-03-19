@@ -229,6 +229,11 @@ Injects template expression payloads (`{{7*7}}`, `${7*7}`, `<%= 7*7 %>`) into UR
 
 ---
 
+#### CRLF Injection
+For each URL parameter found on crawled pages, appends a URL-encoded `%0d%0a` (CR+LF) sequence followed by a canary header (`X-CRLF-Test: nuscrape-crlf-canary`) to the parameter value. Checks whether the injected header appears in the response headers — body reflection is not sufficient. Only tests parameters on in-scope URLs. Stops probing a domain after the first confirmed finding. Exploitable for response splitting, log poisoning, cache poisoning, and cookie injection. **HIGH** when confirmed.
+
+---
+
 #### Open Redirect
 Parses all links on every crawled page looking for 30 common redirect parameter names (`next`, `url`, `redirect`, `return_to`, `goto`, `callback`, etc.). Injects an external canary URL and checks for a 3xx response pointing to it. Suppresses findings where the response shows a WAF fingerprint (Akamai, Cloudflare, Incapsula). **HIGH** when confirmed.
 
@@ -255,14 +260,16 @@ Checks DNS for SPF and DMARC records. Flags:
 
 ---
 
-#### Insecure Session Cookies
-Inspects `Set-Cookie` headers on every page response for session-identifying cookies (`session`, `auth`, `token`, `jwt`, `sid`, etc.) missing `HttpOnly`, `Secure`, or `SameSite` flags.
+#### Cookie Security Flag Auditing
+Inspects every `Set-Cookie` header observed during crawling. Each missing flag generates its own alert, deduplicated per `(domain, cookie name, flag)` so each unique problem fires exactly once.
 
-- Missing `HttpOnly` — cookie readable by JavaScript, enabling theft via XSS
-- Missing `Secure` — cookie transmitted over HTTP, interceptable
-- Missing `SameSite` — vulnerable to CSRF attacks
-
-**MEDIUM** (one flag missing) / **HIGH** (two or more missing).
+| Issue | Severity | Condition |
+|---|---|---|
+| Missing `HttpOnly` | HIGH | Cookie name contains `session`, `token`, `auth`, `jwt`, `sid`, or `login` |
+| Missing `HttpOnly` | MEDIUM | Any other session-identifying cookie name |
+| Missing `Secure` | MEDIUM | HTTPS pages only — expected on plain HTTP |
+| `SameSite=None` without `Secure` | HIGH | Cross-site requests include the cookie over plain HTTP |
+| Missing `SameSite` | LOW | Cookie not protected against CSRF |
 
 ---
 
@@ -513,13 +520,14 @@ Start scan
     ├─ Crawl pages (async, rate-limited)
     │       │
     │       ├─ Per page response
-    │       │     ├─ Cookie security flags
+    │       │     ├─ Cookie security flag auditing (per-flag, per-cookie-name dedup)
     │       │     ├─ JWT scan (HTML + headers)
     │       │     ├─ Open redirect detection (WAF-suppressed)
     │       │     ├─ SSRF candidate parameter detection (WAF-downgraded)
     │       │     ├─ Host header injection
     │       │     ├─ Path traversal
     │       │     ├─ SSTI
+    │       │     ├─ CRLF injection (header reflection confirmation)
     │       │     ├─ IDOR candidate collection + verification
     │       │     ├─ JS bundle analysis (endpoints, secrets, staging URLs, JWTs, S3 refs, TODO comments)
     │       │     ├─ JS source map exposure check

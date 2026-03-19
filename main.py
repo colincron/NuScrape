@@ -4547,6 +4547,8 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
             check_path_traversal(url, html)
             # SSTI detection — probes URL params with arithmetic template expressions
             check_ssti(url, html)
+            # CRLF injection detection — probes URL params for header injection
+            check_crlf_injection(url, html)
             # IDOR candidate detection — runs in background thread with timeout
             # to prevent hung verification requests stalling the crawl
             _idor_thread = threading.Thread(
@@ -4594,76 +4596,106 @@ SESSION_COOKIE_PATTERNS = re.compile(
     re.I
 )
 
-_cookie_checked = set()
+# Cookie names that strongly indicate session/auth data — HIGH for missing HttpOnly
+_SENSITIVE_COOKIE_NAMES = re.compile(
+    r'(session|token|auth|jwt|sid|login)',
+    re.I
+)
+
+# Per-domain, per-cookie-name dedup so each unique (domain, name, issue) fires once
+_cookie_seen: dict = {}  # domain -> set of (name, issue_key)
 
 def check_cookie_security(url, response_headers):
     """
-    Parse Set-Cookie headers from a response and flag session cookies
-    that are missing HttpOnly, Secure, or SameSite flags.
+    Parse Set-Cookie headers from a response and flag cookies missing
+    security flags. Deduplicates per (domain, cookie name, issue) so
+    each unique problem fires exactly once per domain.
 
-    Only alerts on cookies that look like session/auth tokens.
-    Deduplicates per domain so we don't spam the same finding.
+    Severity per issue type:
+      - Missing HttpOnly on sensitive cookie: HIGH
+      - Missing HttpOnly on other session cookie: MEDIUM
+      - Missing Secure on HTTPS page: MEDIUM
+      - SameSite=None without Secure: HIGH
+      - Missing SameSite: LOW
     """
-    domain = urlparse(url).netloc
-    if domain in _cookie_checked:
-        return
-    
-    raw_cookies = response_headers.get("Set-Cookie", "")
-    if not raw_cookies:
-        # aiohttp may give multiple Set-Cookie as a single combined header
-        # or as a list — handle both
-        raw_cookies = response_headers.get("set-cookie", "")
+    domain  = urlparse(url).netloc
+    is_https = url.startswith("https://")
+
+    raw_cookies = response_headers.get("Set-Cookie", "") or \
+                  response_headers.get("set-cookie", "")
     if not raw_cookies:
         return
 
-    # Normalise to list
-    if isinstance(raw_cookies, str):
-        cookie_list = [raw_cookies]
-    else:
-        cookie_list = list(raw_cookies)
-
-    findings = []
+    cookie_list = [raw_cookies] if isinstance(raw_cookies, str) else list(raw_cookies)
+    seen = _cookie_seen.setdefault(domain, set())
 
     for raw in cookie_list:
-        # Cookie name is the first part before =
         parts = [p.strip() for p in raw.split(";")]
         if not parts:
             continue
-        name_val = parts[0]
-        name = name_val.split("=")[0].strip()
+        name = parts[0].split("=")[0].strip()
 
-        # Only care about session-looking cookies
         if not SESSION_COOKIE_PATTERNS.search(name):
             continue
 
-        flags  = raw.lower()
-        issues = []
+        flags = raw.lower()
+        is_sensitive = bool(_SENSITIVE_COOKIE_NAMES.search(name))
 
+        # ── Missing HttpOnly ──────────────────────────────────────
         if "httponly" not in flags:
-            issues.append("missing HttpOnly (XSS can steal cookie)")
-        if "secure" not in flags:
-            issues.append("missing Secure (transmitted over HTTP)")
-        # SameSite absent or set to None without Secure is a CSRF risk
-        if "samesite" not in flags:
-            issues.append("missing SameSite (CSRF risk)")
-        elif "samesite=none" in flags and "secure" not in flags:
-            issues.append("SameSite=None without Secure")
+            key = (name, "httponly")
+            if key not in seen:
+                seen.add(key)
+                severity = "HIGH" if is_sensitive else "MEDIUM"
+                alert(
+                    "INSECURE COOKIE: MISSING HttpOnly",
+                    severity,
+                    url,
+                    f"Cookie '{name}' has no HttpOnly flag — readable by JavaScript, "
+                    f"enabling theft via XSS"
+                )
+                print(timestamp() + f" Cookie issue [{severity}]: '{name}' missing HttpOnly on {url}")
 
-        if issues:
-            findings.append((name, issues))
+        # ── Missing Secure (HTTPS pages only) ────────────────────
+        if is_https and "secure" not in flags:
+            key = (name, "secure")
+            if key not in seen:
+                seen.add(key)
+                alert(
+                    "INSECURE COOKIE: MISSING Secure",
+                    "MEDIUM",
+                    url,
+                    f"Cookie '{name}' has no Secure flag on an HTTPS page — "
+                    f"may be transmitted over HTTP"
+                )
+                print(timestamp() + f" Cookie issue [MEDIUM]: '{name}' missing Secure on {url}")
 
-    if findings:
-        _cookie_checked.add(domain)
-        for name, issues in findings:
-            detail = f"Cookie '{name}': {'; '.join(issues)}"
-            severity = "HIGH" if len(issues) >= 2 else "MEDIUM"
-            alert(
-                "INSECURE SESSION COOKIE",
-                severity,
-                url,
-                detail
-            )
-            print(timestamp() + f" Cookie issue [{severity}]: {detail} on {url}")
+        # ── SameSite=None without Secure ─────────────────────────
+        if "samesite=none" in flags and "secure" not in flags:
+            key = (name, "samesite_none_insecure")
+            if key not in seen:
+                seen.add(key)
+                alert(
+                    "INSECURE COOKIE: SameSite=None WITHOUT Secure",
+                    "HIGH",
+                    url,
+                    f"Cookie '{name}' sets SameSite=None without Secure — "
+                    f"cross-site requests will include this cookie over plain HTTP"
+                )
+                print(timestamp() + f" Cookie issue [HIGH]: '{name}' SameSite=None without Secure on {url}")
+
+        # ── Missing SameSite ──────────────────────────────────────
+        elif "samesite" not in flags:
+            key = (name, "samesite")
+            if key not in seen:
+                seen.add(key)
+                alert(
+                    "INSECURE COOKIE: MISSING SameSite",
+                    "LOW",
+                    url,
+                    f"Cookie '{name}' has no SameSite flag — vulnerable to CSRF"
+                )
+                print(timestamp() + f" Cookie issue [LOW]: '{name}' missing SameSite on {url}")
 
 
 # ─────────────────────────────────────────────
@@ -5829,6 +5861,102 @@ def check_ssti(page_url, html_content):
                     return
             except Exception as e:
                 print_error(f"SSTI probe failed for {test_url}: {e}")
+
+
+# ─────────────────────────────────────────────
+# CRLF injection detection
+# ─────────────────────────────────────────────
+
+_CRLF_CANARY_HEADER = "X-CRLF-Test"
+_CRLF_CANARY_VALUE  = "nuscrape-crlf-canary"
+# URL-encoded CR+LF followed by the injected header
+_CRLF_PAYLOAD       = f"%0d%0a{_CRLF_CANARY_HEADER}:%20{_CRLF_CANARY_VALUE}"
+
+_crlf_tested  = set()   # (endpoint, param) pairs already probed
+_crlf_domains = set()   # domains with a confirmed finding — stop after first
+
+def check_crlf_injection(page_url, html_content):
+    """
+    For each URL parameter found on the page, append a CRLF payload and
+    check whether the canary header appears in the response headers.
+    Only tests parameters on in-scope URLs. Deduplicates per (endpoint, param).
+    Stops after one confirmed finding per domain.
+    """
+    domain = urlparse(page_url).netloc
+    if domain in _crlf_domains:
+        return
+    if not is_in_scope(page_url):
+        return
+
+    try:
+        text = html_content if isinstance(html_content, str) \
+               else html_content.decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(text, "lxml")
+    except Exception:
+        return
+
+    all_urls = [page_url]
+    for tag in soup.find_all(["a", "form", "link"]):
+        href = tag.get("href") or tag.get("action") or ""
+        if href and href.startswith("http"):
+            all_urls.append(href)
+
+    for raw_url in all_urls:
+        if domain in _crlf_domains:
+            break
+        if not is_in_scope(raw_url):
+            continue
+        try:
+            parsed = urlparse(raw_url)
+            if not parsed.query:
+                continue
+            base = parsed.scheme + "://" + parsed.netloc + parsed.path
+            params = {}
+            for pair in parsed.query.split("&"):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    params[k] = v
+        except Exception:
+            continue
+
+        for param, value in params.items():
+            if domain in _crlf_domains:
+                break
+            test_key = (base, param)
+            if test_key in _crlf_tested:
+                continue
+            _crlf_tested.add(test_key)
+
+            injected_value = value + _CRLF_PAYLOAD
+            new_query = "&".join(
+                f"{k}={injected_value}" if k == param else f"{k}={v}"
+                for k, v in params.items()
+            )
+            test_url = base + "?" + new_query
+            try:
+                stealth_delay(domain)
+                resp = requests.get(
+                    test_url,
+                    headers=create_request_header(),
+                    timeout=5,
+                    allow_redirects=False,
+                )
+                # Check if canary header was reflected in the response
+                if _CRLF_CANARY_VALUE in resp.headers.get(_CRLF_CANARY_HEADER, ""):
+                    _crlf_domains.add(domain)
+                    alert(
+                        "CRLF INJECTION",
+                        "HIGH",
+                        test_url,
+                        f"Parameter '{param}' reflects injected CRLF sequence — "
+                        f"'{_CRLF_CANARY_HEADER}: {_CRLF_CANARY_VALUE}' appeared in response headers. "
+                        f"Exploitable for header injection, log poisoning, and response splitting."
+                    )
+                    print(timestamp() + f" [!!] CRLF injection confirmed: {base} param='{param}'")
+            except requests.exceptions.Timeout:
+                pass
+            except Exception as e:
+                print_error(f"CRLF probe failed for {test_url}: {e}")
 
 
 # ─────────────────────────────────────────────
