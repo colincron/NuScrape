@@ -471,7 +471,11 @@ If either condition is not met the finding is suppressed entirely.
 ---
 
 #### DNS Zone Transfer (AXFR)
-Resolves all authoritative nameservers for the root domain, then attempts a zone transfer (`AXFR`) against each. A misconfigured nameserver that permits AXFR dumps the entire DNS zone in a single query — every subdomain, internal hostname, and IP address. **CRITICAL** when successful. All transferred records are stored in the `ZoneTransfer` table.
+Resolves all authoritative nameservers for the root domain, then attempts a zone transfer (`AXFR`) against each using a 5-second timeout. A misconfigured nameserver that permits AXFR dumps the entire DNS zone in a single query — every subdomain, internal hostname, and IP address. REFUSED responses and timeouts are skipped silently (expected behaviour for correctly configured servers).
+
+**CRITICAL** when successful. The alert includes the total record count and a sample of up to 8 discovered hostnames. All transferred records are stored in the `ZoneTransfer` table.
+
+On success, every A and CNAME hostname from the zone is fed back into the subdomain enumeration pipeline: DNS liveness confirmation, HTTP HEAD probe, wildcard filtering, high-value subdomain alerting, takeover checking, and full domain enrichment — the same pipeline used by wordlist brute-force and CT log discovery.
 
 ---
 
@@ -607,7 +611,8 @@ Start scan
     │       │
     │       └─ Per new domain discovered
     │             ├─ DNS / MX / SSL / WHOIS
-    │             ├─ Zone transfer attempt (AXFR against all NSes)
+    │             ├─ Zone transfer attempt (AXFR against all NSes, 5s timeout)
+    │             │     └─ On success: all A/CNAME hostnames → subdomain pipeline
     │             ├─ ASN lookup
     │             ├─ Technology fingerprinting
     │             ├─ Port scan (WAF check on HTTP ports)

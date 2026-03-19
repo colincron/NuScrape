@@ -1056,7 +1056,11 @@ def attempt_zone_transfer(domain):
     host, and IP address — in a single query. Misconfigured nameservers that
     allow this are a CRITICAL finding.
 
-    Uses dnspython's dns.query.xfr() with a hard timeout so it never hangs.
+    On success, all discovered A/CNAME hostnames are fed back into the
+    subdomain enumeration pipeline for liveness checking and enrichment.
+
+    REFUSED responses and timeouts are skipped silently — this is expected
+    behaviour for correctly configured nameservers.
     """
     root = extract_root_domain(domain)
     if root in _zone_transfer_checked:
@@ -1064,7 +1068,7 @@ def attempt_zone_transfer(domain):
     _zone_transfer_checked.add(root)
 
     try:
-        ns_records = dns.resolver.resolve(root, 'NS')
+        ns_records  = dns.resolver.resolve(root, 'NS')
         nameservers = [str(r.target).rstrip('.') for r in ns_records]
     except Exception as e:
         print_error(f"NS lookup failed for {root}: {e}")
@@ -1074,32 +1078,83 @@ def attempt_zone_transfer(domain):
 
     for ns in nameservers:
         try:
-            zone = dns.zone.from_xfr(dns.query.xfr(ns, root, timeout=10, lifetime=15))
-            # Successful transfer — enumerate all records
-            records = []
+            zone = dns.zone.from_xfr(dns.query.xfr(ns, root, timeout=5, lifetime=5))
+
+            # ── Enumerate all records ──────────────────────────────
+            records   = []
+            hostnames = []   # FQDNs with A or CNAME records for pipeline feeding
             for name, node in zone.nodes.items():
                 for rdataset in node.rdatasets:
-                    rdtype = dns.rdatatype.to_text(rdataset.rdtype)
+                    rdtype     = dns.rdatatype.to_text(rdataset.rdtype)
+                    name_str   = str(name)
+                    fqdn       = root if name_str in ("@", "") else f"{name_str}.{root}"
                     for rdata in rdataset:
-                        record_str = f"{name}.{root} {rdtype} {rdata}"
+                        record_str = f"{fqdn} {rdtype} {rdata}"
                         records.append(record_str)
                         write_to_zone_transfer_database(root, ns, record_str)
+                    if rdtype in ("A", "CNAME") and fqdn != root:
+                        hostnames.append(fqdn)
+
+            # Sample up to 8 hostnames for the alert detail
+            sample = hostnames[:8]
+            sample_str = ", ".join(sample) + ("…" if len(hostnames) > 8 else "")
 
             alert(
                 "DNS ZONE TRANSFER ALLOWED (AXFR)",
                 "CRITICAL",
                 root,
-                f"Nameserver {ns} allowed AXFR — {len(records)} records exposed. "
+                f"Nameserver {ns} allowed AXFR — {len(records)} records exposed, "
+                f"{len(hostnames)} hostnames: {sample_str}. "
                 f"Full DNS zone is publicly downloadable."
             )
-            print(timestamp() + f" [!!] Zone transfer succeeded: {ns} → {len(records)} records for {root}")
+            print(timestamp() + f" [!!] Zone transfer succeeded: {ns} → "
+                                f"{len(records)} records, {len(hostnames)} hostnames for {root}")
+
+            # ── Feed hostnames into the subdomain pipeline ─────────
+            wildcard_ips = detect_wildcard(root)
+            for fqdn in hostnames:
+                if fqdn in _subdomain_enriched:
+                    continue
+                try:
+                    ip = socket.gethostbyname(fqdn)
+                    if wildcard_ips and ip in wildcard_ips:
+                        continue
+                    resp_h = safe_get("https://" + fqdn, timeout=4, method="head")
+                    if not resp_h:
+                        resp_h = safe_get("http://" + fqdn, timeout=4, method="head")
+                    status = resp_h.status_code if resp_h else None
+                    if wildcard_ips and ip in wildcard_ips:
+                        continue
+
+                    print(timestamp() + f" AXFR subdomain live: {fqdn} -> {ip}"
+                                        + (f" [{status}]" if status else ""))
+                    write_to_subdomains_database(root, fqdn, ip, status)
+                    _subdomain_enriched.add(fqdn)
+
+                    label = fqdn.split(".")[0].lower()
+                    if label in HIGH_VALUE_SUBDOMAINS and status and status < 400:
+                        _alert_high_value_subdomain(fqdn, label, ip, status,
+                                                     source="zone transfer")
+                    check_subdomain_takeover(fqdn)
+                    enrich_domain("https://" + fqdn)
+
+                except (socket.gaierror, socket.timeout):
+                    pass
+                except Exception as e:
+                    print_error(f"AXFR subdomain probe error for {fqdn}: {e}")
+
             return  # One success is definitive — stop probing other NSes
 
-        except (dns.exception.FormError, EOFError, ConnectionResetError):
-            # Refused — expected, not an error
-            print(timestamp() + f" Zone transfer refused by {ns} for {root}")
+        except (dns.exception.FormError, dns.exception.Timeout,
+                EOFError, ConnectionResetError, OSError):
+            # REFUSED or timeout — expected for correctly configured servers, skip silently
+            pass
         except Exception as e:
-            print_error(f"Zone transfer probe failed for {root} via {ns}: {e}")
+            err_str = str(e).lower()
+            if any(w in err_str for w in ("refused", "timeout", "timed out")):
+                pass  # silently skip
+            else:
+                print_error(f"Zone transfer probe failed for {root} via {ns}: {e}")
 
 def write_to_zone_transfer_database(root_domain, nameserver, record):
     conn = sqlite3.connect("ScrapeDB", isolation_level=None)
