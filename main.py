@@ -3908,8 +3908,30 @@ def check_js_source_map(page_url, js_url, js_response=None):
 # Playwright JS rendering
 # ─────────────────────────────────────────────
 
-# Each call gets its own browser instance — avoids cross-thread sharing
+# Per-thread persistent browser — each thread owns one browser for its lifetime
 _pw_semaphore = threading.Semaphore(PLAYWRIGHT_MAX_CONC)
+_pw_local     = threading.local()
+
+
+def _get_pw_thread_browser():
+    """Return the per-thread Playwright browser, launching it on first use."""
+    if not getattr(_pw_local, 'browser', None):
+        import os
+        exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", None)
+        pw  = sync_playwright().start()
+        browser = pw.chromium.launch(
+            executable_path=exe,
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--single-process",
+            ],
+        )
+        _pw_local.pw      = pw
+        _pw_local.browser = browser
+    return _pw_local.browser
 
 # JS frameworks that definitely need Playwright
 JS_FRAMEWORKS = {"React", "Angular", "Vue.js", "Next.js", "Nuxt.js", "Gatsby", "Svelte"}
@@ -3961,8 +3983,9 @@ def write_to_xhr_database(page_url, endpoint, method):
 
 def playwright_fetch(url):
     """
-    Render a page with Playwright using a per-call browser instance.
-    Each call launches and closes its own browser to avoid cross-thread sharing.
+    Render a page with Playwright using a per-thread persistent browser instance.
+    Each thread initializes its own browser on first use and reuses it for all
+    subsequent calls, avoiding the 5-8s cold-start per page.
     Returns (html_bytes, xhr_endpoints).
     """
     if not PLAYWRIGHT_AVAILABLE:
@@ -3973,67 +3996,65 @@ def playwright_fetch(url):
     html_bytes    = None
 
     with _pw_semaphore:
-        browser = None
-        ctx     = None
-        page    = None
+        ctx  = None
+        page = None
         try:
-            import os
-            exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", None)
-            with sync_playwright() as pw:
-                browser = pw.chromium.launch(
-                    executable_path=exe,
-                    headless=True,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                        "--single-process",
-                    ]
-                )
-                print(timestamp() + " Playwright rendering: " + url)
-                _ctx_headers = stealth_headers({})
-                _ctx_extra = {k: v for k, v in _ctx_headers.items() if k != "User-Agent"}
-                if BUG_BOUNTY_HEADER:
-                    _ctx_extra["X-Bug-Bounty"] = BUG_BOUNTY_HEADER
-                ctx  = browser.new_context(
-                    user_agent=random.choice(UA_POOL),
-                    extra_http_headers=_ctx_extra,
-                    ignore_https_errors=True,
-                    java_script_enabled=True,
-                )
-                page = ctx.new_page()
-                if PLAYWRIGHT_STEALTH_AVAILABLE:
-                    Stealth().apply_stealth_sync(page)
+            browser = _get_pw_thread_browser()
+            print(timestamp() + " Playwright rendering: " + url)
+            _ctx_headers = stealth_headers({})
+            _ctx_extra = {k: v for k, v in _ctx_headers.items() if k != "User-Agent"}
+            if BUG_BOUNTY_HEADER:
+                _ctx_extra["X-Bug-Bounty"] = BUG_BOUNTY_HEADER
+            ctx  = browser.new_context(
+                user_agent=random.choice(UA_POOL),
+                extra_http_headers=_ctx_extra,
+                ignore_https_errors=True,
+                java_script_enabled=True,
+            )
+            page = ctx.new_page()
+            if PLAYWRIGHT_STEALTH_AVAILABLE:
+                Stealth().apply_stealth_sync(page)
 
-                def on_request(req):
-                    if req.resource_type in ("xhr", "fetch"):
-                        skip = ["google-analytics", "googletagmanager", "facebook",
-                                "doubleclick", "hotjar", "segment", "mixpanel",
-                                "amplitude", "intercom", "hubspot", "clarity.ms"]
-                        if not any(s in req.url for s in skip):
-                            xhr_endpoints.append((req.url, req.method))
-                            print(timestamp() + " XHR: " + req.method + " " + req.url)
+            def on_request(req):
+                if req.resource_type in ("xhr", "fetch"):
+                    skip = ["google-analytics", "googletagmanager", "facebook",
+                            "doubleclick", "hotjar", "segment", "mixpanel",
+                            "amplitude", "intercom", "hubspot", "clarity.ms"]
+                    if not any(s in req.url for s in skip):
+                        xhr_endpoints.append((req.url, req.method))
+                        print(timestamp() + " XHR: " + req.method + " " + req.url)
 
-                page.on("request", on_request)
+            page.on("request", on_request)
 
-                page.goto(url, timeout=PLAYWRIGHT_TIMEOUT, wait_until="domcontentloaded")
-                try:
-                    page.wait_for_load_state("networkidle", timeout=4000)
-                except PlaywrightTimeout:
-                    pass
+            page.goto(url, timeout=PLAYWRIGHT_TIMEOUT, wait_until="domcontentloaded")
+            try:
+                page.wait_for_load_state("networkidle", timeout=4000)
+            except PlaywrightTimeout:
+                pass
 
-                for _ in range(4):
-                    page.evaluate("window.scrollBy(0, window.innerHeight)")
-                    page.wait_for_timeout(500)
-                page.evaluate("window.scrollTo(0, 0)")
+            for _ in range(4):
+                page.evaluate("window.scrollBy(0, window.innerHeight)")
+                page.wait_for_timeout(500)
+            page.evaluate("window.scrollTo(0, 0)")
 
-                html_bytes = page.content().encode("utf-8", errors="ignore")
-                print(timestamp() + " Playwright got " + str(len(html_bytes)) + " bytes from " + url)
+            html_bytes = page.content().encode("utf-8", errors="ignore")
+            print(timestamp() + " Playwright got " + str(len(html_bytes)) + " bytes from " + url)
 
         except PlaywrightTimeout:
             print_error("Playwright page timeout: " + url)
         except Exception as e:
             print_error("Playwright page error on " + url + ": " + str(e))
+        finally:
+            if page:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+            if ctx:
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
 
     return html_bytes, xhr_endpoints
 
@@ -4554,9 +4575,12 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
             anchors     = parse_anchors_from_html(html)
             new_domains = get_domain_names(anchors, url_queue, url_seen, base_netloc, same_domain_only)
 
+            _base_root = base_netloc.lstrip("www.")
             for domain in new_domains:
                 if domain not in visited:
-                    enrich_domain(domain, response_headers=headers, html_content=html)
+                    _d_netloc = urlparse(domain).netloc.lstrip("www.")
+                    if _d_netloc == _base_root or _d_netloc.endswith("." + _base_root):
+                        enrich_domain(domain, response_headers=headers, html_content=html)
 
         if i % QUEUE_SAVE_INTERVAL == 0 and i > 0:
             save_state(start_url, url_queue, url_seen, visited, i, same_domain_only)
@@ -5803,7 +5827,8 @@ def check_ssti(page_url, html_content):
                 # Skip URL-accepting params — not template contexts
                 if k.lower() in _SSTI_URL_PARAMS:
                     continue
-                candidates.append((base, parsed.query, k, v))
+                v_clean = re.sub(r'^https?://', '', v)
+                candidates.append((base, parsed.query, k, v_clean))
         except Exception:
             continue
 
