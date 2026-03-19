@@ -214,7 +214,18 @@ Audits every domain for missing defensive headers and leaking server headers:
 ---
 
 #### CORS Misconfiguration
-Tests whether the server reflects arbitrary `Origin` headers with `Access-Control-Allow-Origin` and `Access-Control-Allow-Credentials: true`. Enables cross-origin data theft when combined with an XSS. **HIGH.**
+Runs four distinct Origin probes against each base URL. Requires `--active-probes`. Deduplication is handled by the per-base-URL exposure check gate.
+
+| Probe | Origin sent | Flag condition | Severity |
+|---|---|---|---|
+| Arbitrary reflection | `https://evil-cors-probe.com` | Reflected + `Allow-Credentials: true` | CRITICAL |
+| Arbitrary reflection | `https://evil-cors-probe.com` | Reflected, no credentials | HIGH |
+| Wildcard + credentials | `https://evil-cors-probe.com` | `ACAO: *` + `Allow-Credentials: true` | HIGH |
+| Null origin bypass | `null` | `ACAO: null` + `Allow-Credentials: true` | HIGH — browsers send null from sandboxed iframes |
+| Pre-domain prefix match | `https://evil<domain>` | Injected origin reflected + credentials | HIGH — server is prefix-matching, not exact-matching |
+| Subdomain wildcard trust | `https://evil.<domain>` | Injected origin reflected + credentials | HIGH — any compromised subdomain can steal cookies |
+
+All bypass tests (null, pre-domain, subdomain) only flag when `Access-Control-Allow-Credentials: true` is also present — without credentials the cross-origin impact is minimal. The reflected origin value is included in the finding detail.
 
 ---
 

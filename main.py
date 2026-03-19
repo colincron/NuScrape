@@ -2679,21 +2679,43 @@ def check_spf_dmarc(domain):
 
 def check_cors_misconfiguration(base_url, domain):
     """
-    Send a request with a hostile Origin header and check if the server
-    reflects it back in Access-Control-Allow-Origin.
+    Test for CORS misconfigurations using four distinct Origin probes.
 
-    The dangerous combination is:
-      Access-Control-Allow-Origin: <reflected evil origin>
-      Access-Control-Allow-Credentials: true
+    Test 1 — Arbitrary origin reflection:
+      Origin: https://evil-cors-probe.com
+      Flags CRITICAL if reflected with credentials, HIGH if reflected alone.
 
-    Either alone is lower severity — together they allow cross-origin
-    requests with cookies, enabling account takeover from an attacker page.
+    Test 2 — Null origin bypass:
+      Origin: null
+      Browsers send this from sandboxed iframes. Flags HIGH if ACAO=null
+      and credentials are allowed.
+
+    Test 3 — Pre-domain prefix match:
+      Origin: https://evil<domain> (e.g. https://evilexample.com)
+      Indicates the server matches by prefix instead of exact string.
+      Flags HIGH if reflected with credentials.
+
+    Test 4 — Subdomain wildcard trust:
+      Origin: https://evil.<domain>
+      Indicates the server trusts all subdomains. Flags HIGH if reflected
+      with credentials — any compromised subdomain can steal cookies.
+
+    Tests 2-4 only flag when Allow-Credentials: true is also present.
+    All four probes run in a single call — deduplication is handled by
+    the caller via _exposure_checked.
     """
     try:
+        root = extract_root_domain(domain)
+
+        # ── Test 1: Arbitrary origin ───────────────────────────────
         evil_origin = "https://evil-cors-probe.com"
         stealth_delay(domain)
-        headers = {**create_request_header(), "Origin": evil_origin}
-        resp = requests.get(base_url, headers=headers, timeout=8, allow_redirects=True)
+        resp = requests.get(
+            base_url,
+            headers={**create_request_header(), "Origin": evil_origin},
+            timeout=8,
+            allow_redirects=True,
+        )
         if not resp:
             return
 
@@ -2706,35 +2728,100 @@ def check_cors_misconfiguration(base_url, domain):
         allows_credentials = acac == "true"
 
         if reflects_origin and allows_credentials:
-            # Most severe — cross-origin requests with cookies allowed
             alert(
                 "CORS MISCONFIGURATION: ORIGIN REFLECTION + CREDENTIALS",
                 "CRITICAL",
                 domain,
-                f"Server reflects arbitrary Origin and sets Allow-Credentials: true — cross-origin requests with cookies are permitted. ACAO: {acao}"
+                f"Server reflects arbitrary Origin and sets Allow-Credentials: true — "
+                f"cross-origin requests with cookies are permitted. ACAO: {acao}"
             )
             print(timestamp() + " [!!] Critical CORS misconfiguration on " + domain)
-
         elif reflects_origin:
-            # Reflects origin but no credentials — still reportable
             alert(
                 "CORS MISCONFIGURATION: ORIGIN REFLECTION",
                 "HIGH",
                 domain,
-                f"Server reflects arbitrary Origin header. ACAO: {acao}, Methods: {acam or 'not specified'}"
+                f"Server reflects arbitrary Origin header. ACAO: {acao}, "
+                f"Methods: {acam or 'not specified'}"
             )
             print(timestamp() + " [!] CORS reflects origin on " + domain)
-
         elif wildcard and allows_credentials:
-            # Wildcard + credentials is technically invalid per spec but
-            # some frameworks implement it anyway
             alert(
                 "CORS MISCONFIGURATION: WILDCARD + CREDENTIALS",
                 "HIGH",
                 domain,
-                f"Access-Control-Allow-Origin: * combined with Allow-Credentials: true — non-standard but potentially exploitable"
+                f"Access-Control-Allow-Origin: * combined with Allow-Credentials: true — "
+                f"non-standard but potentially exploitable"
             )
             print(timestamp() + " [!] CORS wildcard+credentials on " + domain)
+
+        # ── Test 2: Null origin bypass ─────────────────────────────
+        stealth_delay(domain)
+        null_resp = requests.get(
+            base_url,
+            headers={**create_request_header(), "Origin": "null"},
+            timeout=8,
+            allow_redirects=True,
+        )
+        if null_resp:
+            null_acao = null_resp.headers.get("Access-Control-Allow-Origin", "")
+            null_acac = null_resp.headers.get("Access-Control-Allow-Credentials", "").lower()
+            if null_acao == "null" and null_acac == "true":
+                alert(
+                    "CORS BYPASS: NULL ORIGIN + CREDENTIALS",
+                    "HIGH",
+                    domain,
+                    f"Server trusts Origin: null with Allow-Credentials: true — browsers send "
+                    f"null origin from sandboxed iframes, enabling cross-origin credential theft. "
+                    f"ACAO: {null_acao}"
+                )
+                print(timestamp() + f" [!] CORS null origin bypass on {domain}")
+
+        # ── Test 3: Pre-domain prefix match bypass ─────────────────
+        pre_origin = f"https://evil{root}"
+        stealth_delay(domain)
+        pre_resp = requests.get(
+            base_url,
+            headers={**create_request_header(), "Origin": pre_origin},
+            timeout=8,
+            allow_redirects=True,
+        )
+        if pre_resp:
+            pre_acao = pre_resp.headers.get("Access-Control-Allow-Origin", "")
+            pre_acac = pre_resp.headers.get("Access-Control-Allow-Credentials", "").lower()
+            if pre_acao == pre_origin and pre_acac == "true":
+                alert(
+                    "CORS BYPASS: PRE-DOMAIN PREFIX MATCH + CREDENTIALS",
+                    "HIGH",
+                    domain,
+                    f"Server reflects pre-domain origin '{pre_acao}' with Allow-Credentials: true — "
+                    f"indicates prefix rather than exact origin matching; an attacker controlling "
+                    f"a domain prefixed with '{root}' can steal credentials"
+                )
+                print(timestamp() + f" [!] CORS pre-domain prefix bypass on {domain}: {pre_acao}")
+
+        # ── Test 4: Subdomain wildcard trust bypass ────────────────
+        sub_origin = f"https://evil.{root}"
+        stealth_delay(domain)
+        sub_resp = requests.get(
+            base_url,
+            headers={**create_request_header(), "Origin": sub_origin},
+            timeout=8,
+            allow_redirects=True,
+        )
+        if sub_resp:
+            sub_acao = sub_resp.headers.get("Access-Control-Allow-Origin", "")
+            sub_acac = sub_resp.headers.get("Access-Control-Allow-Credentials", "").lower()
+            if sub_acao == sub_origin and sub_acac == "true":
+                alert(
+                    "CORS BYPASS: SUBDOMAIN WILDCARD TRUST + CREDENTIALS",
+                    "HIGH",
+                    domain,
+                    f"Server reflects subdomain origin '{sub_acao}' with Allow-Credentials: true — "
+                    f"any compromised or attacker-controlled subdomain of '{root}' can steal "
+                    f"session cookies cross-origin"
+                )
+                print(timestamp() + f" [!] CORS subdomain wildcard bypass on {domain}: {sub_acao}")
 
     except Exception as e:
         print_error("check_cors_misconfiguration failed for " + domain + ": " + str(e))
