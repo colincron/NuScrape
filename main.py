@@ -3376,6 +3376,30 @@ SOCIAL_MEDIA_DOMAINS = {
 # Mutable flag set by --no-social at runtime
 SOCIAL_FILTER_FLAGS = {"enabled": False}
 
+# Google tracking / Play Store domains — skipped by default, disable with --no-skip-google-tracking
+SKIP_GOOGLE_TRACKING = True
+_GOOGLE_TRACKING_DOMAINS = {
+    "play.google.com",
+    "google-analytics.com",
+    "analytics.google.com",
+    "googletagmanager.com",
+    "googleadservices.com",
+    "doubleclick.net",
+}
+
+def is_google_tracking_url(url):
+    """Return True if the URL is a Google tracking or Play Store domain."""
+    try:
+        netloc = urlparse(url).netloc.lower()
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        for blocked in _GOOGLE_TRACKING_DOMAINS:
+            if netloc == blocked or netloc.endswith("." + blocked):
+                return True
+    except Exception:
+        pass
+    return False
+
 def is_social_media_domain(url):
     """Return True if the URL belongs to a known social media domain."""
     try:
@@ -4060,6 +4084,8 @@ def get_domain_names(anchors, url_queue, url_seen, base_netloc, same_domain_only
                 continue
             if SOCIAL_FILTER_FLAGS["enabled"] and is_social_media_domain(href):
                 continue
+            if SKIP_GOOGLE_TRACKING and is_google_tracking_url(href):
+                continue
             url_seen.add(href)
             url_queue.append(href)
             if href.endswith((".com", ".gov/", ".net/", ".edu/", ".org/",
@@ -4403,6 +4429,8 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
             if url in visited:
                 continue
             if SOCIAL_FILTER_FLAGS["enabled"] and is_social_media_domain(url):
+                continue
+            if SKIP_GOOGLE_TRACKING and is_google_tracking_url(url):
                 continue
             if not ignore_robots and not is_allowed_by_robots(rp, url):
                 print(timestamp() + " Skipping (robots.txt): " + url)
@@ -6188,6 +6216,41 @@ def check_subdomain_takeover(fqdn):
             body = resp.text
             matched_fp = [fp for fp in body_fingerprints if fp.lower() in body.lower()]
             if matched_fp:
+                if service == "github-pages":
+                    # Require BOTH conditions before alerting:
+                    # 1. github.com/<orgname> returns non-200 (org doesn't exist)
+                    # 2. <orgname>.github.io returns 404
+                    # If the org exists GitHub protects its namespace — suppress entirely.
+                    org = cname_target.split(".")[0]  # "orgname" from "orgname.github.io"
+                    org_exists = False
+                    pages_404 = False
+                    try:
+                        org_resp = requests.get(
+                            f"https://github.com/{org}",
+                            headers=create_request_header(),
+                            timeout=6,
+                            allow_redirects=True,
+                        )
+                        org_exists = (org_resp.status_code == 200)
+                    except Exception:
+                        pass  # network error — treat org as unknown
+                    if org_exists:
+                        print(timestamp() + f" GitHub org '{org}' exists — suppressing Pages takeover FP for {fqdn}")
+                        return
+                    try:
+                        pages_resp = requests.get(
+                            f"https://{org}.github.io",
+                            headers=create_request_header(),
+                            timeout=6,
+                            allow_redirects=True,
+                        )
+                        pages_404 = (pages_resp.status_code == 404)
+                    except Exception:
+                        pass  # network error — treat as unknown
+                    if not pages_404:
+                        print(timestamp() + f" {org}.github.io did not return 404 — suppressing Pages takeover FP for {fqdn}")
+                        return
+
                 alert(
                     "SUBDOMAIN TAKEOVER VULNERABLE",
                     "CRITICAL",
@@ -6298,6 +6361,8 @@ if __name__ == "__main__":
     parser.add_argument("--ignore-robots", action="store_true",  help="Ignore robots.txt restrictions")
     parser.add_argument("--playwright",    action="store_true",  help="Enable Playwright JS rendering for JS-heavy pages")
     parser.add_argument("--no-social",     action="store_true",  help="Skip crawling into social media domains (Facebook, Twitter, YouTube, etc.)")
+    parser.add_argument("--no-skip-google-tracking", action="store_true",
+                        help="Crawl Google Play and analytics URLs (default: skip them)")
     parser.add_argument("--stealth",        default="LOUD",       choices=["LOUD", "NORMAL", "GHOST"],
                         help="Stealth profile: LOUD (fast, default), NORMAL (moderate delays), GHOST (slow, randomised)")
     parser.add_argument("--bug-bounty-header", type=str, default=None,
@@ -6319,6 +6384,9 @@ if __name__ == "__main__":
     if args.no_social:
         SOCIAL_FILTER_FLAGS["enabled"] = True
         print("[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.")
+    if args.no_skip_google_tracking:
+        SKIP_GOOGLE_TRACKING = False
+        print("[*] Google tracking filter disabled — Play Store and analytics URLs will be crawled")
     if args.playwright:
         PLAYWRIGHT_FLAGS["enabled"] = True
         if not PLAYWRIGHT_AVAILABLE:

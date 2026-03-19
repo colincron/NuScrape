@@ -141,7 +141,8 @@ def api_start():
     resume        = bool(data.get("resume", False))
     ignore_robots = bool(data.get("ignore_robots", False))
     use_playwright = bool(data.get("playwright", False))
-    no_social      = bool(data.get("no_social", False))
+    no_social           = bool(data.get("no_social", False))
+    skip_google_tracking = bool(data.get("skip_google_tracking", True))
     stealth_profile = data.get("stealth_profile", "LOUD").upper()
     if stealth_profile not in ("LOUD", "NORMAL", "GHOST"):
         stealth_profile = "LOUD"
@@ -174,6 +175,8 @@ def api_start():
             cmd.append("--playwright")
         if no_social:
             cmd.append("--no-social")
+        if not skip_google_tracking:
+            cmd.append("--no-skip-google-tracking")
         if stealth_profile != "LOUD":
             cmd.extend(["--stealth", stealth_profile])
         if bug_bounty_header:
@@ -684,6 +687,10 @@ td a:hover{text-decoration:underline}
       <div class="toggle-row">
         <label>Skip Social Media</label>
         <label class="toggle"><input type="checkbox" id="noSocial"><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label>Skip Google Tracking/Play URLs</label>
+        <label class="toggle"><input type="checkbox" id="skipGoogleTracking" checked><span class="toggle-slider"></span></label>
       </div>
       <div id="resumeInfo" style="display:none;font-family:var(--mono);font-size:.68rem;color:var(--yellow);margin-bottom:.6rem;line-height:1.6"></div>
       <div style="margin-bottom:.7rem">
@@ -1219,6 +1226,7 @@ async function startCrawler(){
       ignore_robots:document.getElementById('ignoreRobots').checked,
       playwright:document.getElementById('usePW').checked,
       no_social:document.getElementById('noSocial').checked,
+      skip_google_tracking:document.getElementById('skipGoogleTracking').checked,
       stealth_profile:document.querySelector('input[name="stealthProfile"]:checked')?.value||'LOUD',
       ...(document.getElementById('bugBountyToggle').checked && document.getElementById('bugBountyValue').value.trim()
         ? {bug_bounty_header: document.getElementById('bugBountyValue').value.trim()}
