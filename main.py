@@ -3133,6 +3133,9 @@ def enrich_domain(domain_name, response_headers=None, html_content=None):
         # SPF/DMARC — DNS-based, run once per root domain
         check_spf_dmarc(clean_domain)
 
+        # S3 permutation scan — guesses common bucket names from the root domain
+        probe_s3_permutations(clean_domain)
+
         write_to_domain_database(str(domain_name), ip, server, content_type, title)
 
     except Exception as err:
@@ -6491,13 +6494,23 @@ def check_s3_bucket(bucket_name, source_url=""):
             )
             print(timestamp() + f" [!!] S3 bucket listable: {bucket_name} ({key_count} keys)")
 
+        elif resp.status_code == 200:
+            # Bucket exists and responds publicly but listing is not enabled
+            alert(
+                "S3 BUCKET PUBLICLY ACCESSIBLE",
+                "HIGH",
+                bucket_name,
+                f"{bucket_url} — bucket is publicly readable (HTTP 200, no listing). Source: {source_url}"
+            )
+            print(timestamp() + f" [!!] S3 bucket public (no listing): {bucket_name}")
+
         elif resp.status_code == 403:
             # Bucket exists but is private — log quietly, no alert
             print(timestamp() + f" S3 bucket exists (private/403): {bucket_name}")
 
         elif resp.status_code == 404 and "NoSuchBucket" in resp.text:
-            # Bucket doesn't exist — check if name is claimable (same name pattern)
-            print(timestamp() + f" S3 bucket does not exist (claimable?): {bucket_name}")
+            # Bucket doesn't exist
+            pass
 
     except Exception as e:
         print_error(f"check_s3_bucket failed for {bucket_name}: {e}")
@@ -6518,6 +6531,49 @@ def extract_and_probe_s3_buckets(content, source_url):
                 found.add(bucket)
                 print(timestamp() + f" S3 bucket reference found: {bucket} (from {source_url})")
                 check_s3_bucket(bucket, source_url=source_url)
+
+_s3_permutation_checked = set()  # root domains already permutation-scanned
+
+def probe_s3_permutations(root_domain):
+    """
+    Generate common S3 bucket name patterns derived from the root domain
+    and probe each one for public access.
+
+    Only the bare name (no TLD) is used — e.g. "example" from "example.com".
+    Skips domains already scanned this session. Adds a short delay between
+    probes to avoid AWS throttling.
+    """
+    if root_domain in _s3_permutation_checked:
+        return
+    _s3_permutation_checked.add(root_domain)
+
+    # Strip TLD: "example.com" → "example", "sub.example.co.uk" → "example"
+    parts = root_domain.rstrip(".").split(".")
+    name = parts[-2] if len(parts) >= 2 else parts[0]
+    name = name.lower()
+
+    candidates = [
+        name,
+        f"{name}-assets",
+        f"{name}-backup",
+        f"{name}-prod",
+        f"{name}-staging",
+        f"{name}-dev",
+        f"{name}-static",
+        f"{name}-media",
+        f"{name}-uploads",
+        f"{name}-logs",
+        f"{name}-data",
+        f"{name}-files",
+        f"assets-{name}",
+        f"backup-{name}",
+        f"static-{name}",
+    ]
+
+    print(timestamp() + f" S3 permutation scan: {len(candidates)} candidates for '{name}' ({root_domain})")
+    for bucket in candidates:
+        time.sleep(0.5)
+        check_s3_bucket(bucket, source_url=f"permutation scan of {root_domain}")
 
 
 if __name__ == "__main__":
