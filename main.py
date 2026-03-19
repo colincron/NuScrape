@@ -7,7 +7,7 @@ import aiohttp
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
-import urllib3.exceptions
+import urllib3
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 import warnings
 import requests
@@ -16,6 +16,7 @@ import whois
 import threading
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Playwright is optional — gracefully disabled if not installed
 try:
@@ -806,38 +807,9 @@ def enumerate_subdomains(domain):
             with found_lock:
                 found[0] += 1
 
-            # Alert if this subdomain name matches a high-value target.
-            # Secondary content fetch confirms a real service is listening:
-            # short bodies (<100 chars) are likely TCP-accepts-but-no-content
-            # placeholders; timeouts mean DNS resolves but nothing is serving.
             label = sub.lower()
             if label in HIGH_VALUE_SUBDOMAINS and status and status < 400:
-                try:
-                    content_resp = requests.get(
-                        ("https://" if status else "http://") + fqdn,
-                        headers=create_request_header(),
-                        timeout=6,
-                        allow_redirects=True,
-                        verify=False,
-                    )
-                    if len(content_resp.text) < 100:
-                        print(timestamp() + f" {fqdn} body too short ({len(content_resp.text)} chars) — suppressing high-value subdomain alert")
-                    else:
-                        alert(
-                            f"HIGH-VALUE SUBDOMAIN EXPOSED: {label}",
-                            "HIGH",
-                            fqdn,
-                            f"{fqdn} resolves to {ip} and returns HTTP {status}"
-                        )
-                except requests.exceptions.Timeout:
-                    print(timestamp() + f" {fqdn} timed out on content fetch — suppressing high-value subdomain alert (DNS resolves, no service confirmed)")
-                except Exception:
-                    alert(
-                        f"HIGH-VALUE SUBDOMAIN EXPOSED: {label}",
-                        "HIGH",
-                        fqdn,
-                        f"{fqdn} resolves to {ip} and returns HTTP {status}"
-                    )
+                _alert_high_value_subdomain(fqdn, label, ip, status)
 
             # Subdomain takeover check on every confirmed live subdomain
             check_subdomain_takeover(fqdn)
@@ -929,32 +901,7 @@ def query_ct_logs(domain):
 
             label = fqdn.split(".")[0].lower()
             if label in HIGH_VALUE_SUBDOMAINS and status and status < 400:
-                try:
-                    content_resp = requests.get(
-                        ("https://" if status else "http://") + fqdn,
-                        headers=create_request_header(),
-                        timeout=6,
-                        allow_redirects=True,
-                        verify=False,
-                    )
-                    if len(content_resp.text) < 100:
-                        print(timestamp() + f" {fqdn} body too short ({len(content_resp.text)} chars) — suppressing high-value subdomain alert")
-                    else:
-                        alert(
-                            f"HIGH-VALUE SUBDOMAIN EXPOSED: {label}",
-                            "HIGH",
-                            fqdn,
-                            f"{fqdn} -> {ip} HTTP {status} (discovered via CT logs)"
-                        )
-                except requests.exceptions.Timeout:
-                    print(timestamp() + f" {fqdn} timed out on content fetch — suppressing high-value subdomain alert (DNS resolves, no service confirmed)")
-                except Exception:
-                    alert(
-                        f"HIGH-VALUE SUBDOMAIN EXPOSED: {label}",
-                        "HIGH",
-                        fqdn,
-                        f"{fqdn} -> {ip} HTTP {status} (discovered via CT logs)"
-                    )
+                _alert_high_value_subdomain(fqdn, label, ip, status, source="CT logs")
 
             check_subdomain_takeover(fqdn)
 
@@ -3370,6 +3317,46 @@ INFORMATIONAL_PORTS = {
     22:   "SSH",
     3306: "MySQL",
 }
+
+# Tracks FQDNs already alerted to prevent duplicate alerts from the
+# wordlist prober and the CT log path discovering the same subdomain.
+_alerted_subdomains: set = set()
+
+def _alert_high_value_subdomain(fqdn, label, ip, status, source=""):
+    """
+    Fire a HIGH-VALUE SUBDOMAIN EXPOSED alert, but only once per FQDN.
+    Performs the secondary content fetch to confirm a real service is
+    listening before alerting. Suppresses if the body is under 100 chars
+    or the connection times out.
+    """
+    if fqdn in _alerted_subdomains:
+        return
+    scheme = "https://" if (status and status < 400) else "http://"
+    source_note = f" (discovered via {source})" if source else ""
+    try:
+        content_resp = requests.get(
+            scheme + fqdn,
+            headers=create_request_header(),
+            timeout=6,
+            allow_redirects=True,
+            verify=False,
+        )
+        if len(content_resp.text) < 100:
+            print(timestamp() + f" {fqdn} body too short ({len(content_resp.text)} chars) — suppressing high-value subdomain alert")
+            return
+    except requests.exceptions.Timeout:
+        print(timestamp() + f" {fqdn} timed out on content fetch — suppressing high-value subdomain alert (DNS resolves, no service confirmed)")
+        return
+    except Exception:
+        pass  # network error — alert conservatively
+
+    _alerted_subdomains.add(fqdn)
+    alert(
+        f"HIGH-VALUE SUBDOMAIN EXPOSED: {label}",
+        "HIGH",
+        fqdn,
+        f"{fqdn} resolves to {ip} and returns HTTP {status}{source_note}"
+    )
 
 # Subdomains that are high-value targets when exposed
 HIGH_VALUE_SUBDOMAINS = {
