@@ -158,7 +158,7 @@ NuScrape collects the following for every domain it encounters during crawling:
 - **robots.txt and sitemap.xml** — fetched and stored
 - **XHR/API endpoints** — extracted from JS bundles via regex pattern matching
 - **Security headers** — presence/absence of CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and leaking headers (Server version strings, X-Powered-By)
-- **SPF and DMARC** — DNS-based email authentication policy analysis including recursive lookup counting, `~all` softfail detection, missing `rua=` reporting addresses, and partial enforcement (`pct<100`)
+- **SPF, DMARC, and DKIM** — full DNS-based email authentication analysis: SPF mechanism audit (recursive lookup counting, `+all`/`?all`/`~all` detection), DMARC policy enforcement grading (`p=none/quarantine/reject`), aggregate/forensic reporting gaps (`rua=`/`ruf=`), partial enforcement (`pct<100`), subdomain policy weaker than parent (`sp=`), and DKIM selector probing against seven common selectors
 
 ---
 
@@ -244,19 +244,39 @@ Scans page links and form inputs for URL-accepting parameter names (`url`, `endp
 
 ---
 
-#### SPF / DMARC Analysis
-Checks DNS for SPF and DMARC records. Flags:
+#### SPF / DMARC / DKIM Analysis
+Checks DNS for SPF, DMARC, and DKIM records. All three checks run automatically via `check_spf_dmarc()` on every new domain enriched during the crawl.
+
+**SPF**
 
 | Issue | Severity |
 |---|---|
-| Missing SPF | HIGH |
-| SPF `+all` (accept all) | HIGH |
-| SPF `~all` (softfail) | LOW |
-| SPF lookup count > 10 | MEDIUM |
-| Missing DMARC | HIGH |
-| DMARC `p=none` | MEDIUM |
-| DMARC `p=reject/quarantine` with no `rua=` | MEDIUM/LOW |
-| DMARC `pct<100` | LOW |
+| Missing SPF record | HIGH |
+| SPF `+all` — any server permitted to send | HIGH |
+| SPF `?all` — neutral, provides no spoofing protection | HIGH |
+| SPF `~all` — softfail, not a hard reject | LOW |
+| SPF lookup count > 10 (RFC 7208 permerror) | MEDIUM |
+
+**DMARC**
+
+| Issue | Severity |
+|---|---|
+| Missing DMARC record | HIGH |
+| `p=none` — monitoring only, no enforcement | MEDIUM |
+| `p=quarantine` — partial enforcement, upgrade to `reject` | MEDIUM |
+| `p=reject` — correctly configured | ✓ pass |
+| `rua=` missing — no aggregate reporting | LOW |
+| `ruf=` missing — no forensic reporting | INFO |
+| `pct<100` — policy only partially applied | LOW |
+| `sp=` weaker than parent `p=` — subdomain spoofing less restricted | MEDIUM |
+
+**DKIM**
+
+Probes seven common selectors (`default`, `google`, `k1`, `mail`, `dkim`, `selector1`, `selector2`) at `<selector>._domainkey.<domain>`. Confirms a valid `v=DKIM1` or `p=` TXT record is present.
+
+| Issue | Severity |
+|---|---|
+| No DKIM selectors found at any standard selector | MEDIUM |
 
 ---
 
@@ -540,9 +560,11 @@ Start scan
     │             ├─ Technology fingerprinting
     │             ├─ Port scan (WAF check on HTTP ports)
     │             ├─ Subdomain enumeration (wordlist + CT log mining)
-    │             │     └─ Per subdomain: takeover check (GitHub org verification)
+    │             │     ├─ Per subdomain: DNS + HTTP liveness confirmation
+    │             │     ├─ Per subdomain: takeover check (GitHub org verification)
+    │             │     └─ CT-confirmed live subdomains → enrichment pipeline (deduplicated vs wordlist)
     │             ├─ Security header audit
-    │             ├─ SPF / DMARC
+    │             ├─ SPF / DMARC / DKIM
     │             └─ Exposure checks (once per base URL)
     │                   ├─ .git / .env exposure
     │                   ├─ Directory listing
