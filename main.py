@@ -804,6 +804,7 @@ def enumerate_subdomains(domain):
 
             print(timestamp() + " Subdomain found: " + fqdn + " -> " + ip + (" [" + str(status) + "]" if status else ""))
             write_to_subdomains_database(root, fqdn, ip, status)
+            _subdomain_enriched.add(fqdn)
             with found_lock:
                 found[0] += 1
 
@@ -830,7 +831,8 @@ def enumerate_subdomains(domain):
 # Certificate Transparency log mining
 # ─────────────────────────────────────────────
 
-_ct_queried = set()
+_ct_queried          = set()
+_subdomain_enriched  = set()   # tracks FQDNs enriched by any subdomain path (wordlist or CT)
 
 def query_ct_logs(domain):
     """
@@ -904,6 +906,12 @@ def query_ct_logs(domain):
                 _alert_high_value_subdomain(fqdn, label, ip, status, source="CT logs")
 
             check_subdomain_takeover(fqdn)
+
+            # Enrich confirmed live CT subdomains — only if not already found
+            # by the wordlist brute-force path to avoid duplicate enrichment.
+            if fqdn not in _subdomain_enriched:
+                _subdomain_enriched.add(fqdn)
+                enrich_domain("https://" + fqdn)
 
         except (socket.gaierror, socket.timeout):
             pass
@@ -2348,21 +2356,61 @@ def count_spf_lookups(domain, depth=0, visited=None):
     return count
 
 
+_DKIM_SELECTORS = ["default", "google", "k1", "mail", "dkim", "selector1", "selector2"]
+
+def check_dkim_selectors(root):
+    """
+    Probe common DKIM selector TXT records at <selector>._domainkey.<root>.
+    Reports MEDIUM if no selectors are found — indicates DKIM is not configured,
+    weakening email authentication alongside SPF/DMARC.
+    """
+    found = []
+    for sel in _DKIM_SELECTORS:
+        try:
+            answers = dns.resolver.resolve(f"{sel}._domainkey.{root}", "TXT")
+            for rr in answers:
+                val = rr.to_text().strip('"')
+                if "p=" in val or "v=DKIM1" in val:
+                    found.append(sel)
+                    break
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer,
+                dns.exception.Timeout, dns.resolver.NoNameservers):
+            pass
+        except Exception:
+            pass
+
+    if found:
+        print(timestamp() + f" DKIM selectors found for {root}: {', '.join(found)}")
+    else:
+        alert(
+            "NO DKIM SELECTORS FOUND",
+            "MEDIUM",
+            root,
+            f"No DKIM TXT records found at standard selectors "
+            f"({', '.join(_DKIM_SELECTORS)}) for {root} — "
+            f"emails cannot be DKIM-signed, weakening email authentication"
+        )
+        print(timestamp() + f" [!] No DKIM selectors found for {root}")
+
+
 def check_spf_dmarc(domain):
     """
-    Query DNS TXT records to check SPF and DMARC configuration.
+    Query DNS TXT records to check SPF, DMARC, and DKIM configuration.
 
     Reportable findings:
       - Missing SPF entirely     → anyone can spoof @domain email
       - SPF with +all            → explicitly allows any server to send
-      - SPF with ?all            → neutral/permissive, weak protection
+      - SPF with ?all            → neutral/permissive, no spoofing protection
       - SPF with ~all            → softfail, not a hard reject
       - SPF lookup count > 10   → permerror at receiving MTAs (RFC 7208)
       - Missing DMARC            → no policy enforcement even if SPF/DKIM fail
       - DMARC with p=none        → monitoring only, no rejection/quarantine
+      - DMARC with p=quarantine  → partial enforcement, upgrade to reject
       - DMARC missing rua=       → no aggregate reports, org is blind to spoofing
+      - DMARC missing ruf=       → no forensic reports on individual failures
       - DMARC pct < 100          → policy not applied to all mail
-      - DMARC p=quarantine + no rua= → quarantining but not monitoring
+      - DMARC sp= weaker than p= → subdomain spoofing less restricted than parent
+      - No DKIM selectors found  → DKIM not configured
     """
     root = extract_root_domain(domain)
 
@@ -2394,7 +2442,7 @@ def check_spf_dmarc(domain):
         elif "+all" in spf_record:
             alert(
                 "SPF MISCONFIGURATION: +all",
-                "CRITICAL",
+                "HIGH",
                 root,
                 f"SPF record uses +all — explicitly permits any server to send as {root}: {spf_record}"
             )
@@ -2402,9 +2450,9 @@ def check_spf_dmarc(domain):
         elif "?all" in spf_record:
             alert(
                 "SPF MISCONFIGURATION: ?all",
-                "MEDIUM",
+                "HIGH",
                 root,
-                f"SPF record uses ?all (neutral) — weak protection against spoofing: {spf_record}"
+                f"SPF record uses ?all (neutral) — provides no spoofing protection, receiving MTAs treat unauthenticated mail as neither pass nor fail: {spf_record}"
             )
             print(timestamp() + " [!] SPF ?all on " + root)
         elif "~all" in spf_record:
@@ -2492,30 +2540,41 @@ def check_spf_dmarc(domain):
                     f"DMARC exists but p=none — emails that fail SPF/DKIM are NOT rejected or quarantined: {dmarc_record}"
                 )
                 print(timestamp() + " [!] DMARC p=none on " + root)
+            elif policy == "quarantine":
+                alert(
+                    "DMARC POLICY: p=quarantine (partial enforcement)",
+                    "MEDIUM",
+                    root,
+                    f"DMARC p=quarantine — failing messages are quarantined rather than rejected; "
+                    f"upgrade to p=reject for full enforcement: {dmarc_record}"
+                )
+                print(timestamp() + " [!] DMARC p=quarantine on " + root)
+            elif policy == "reject":
+                print(timestamp() + " DMARC OK for " + root + " (p=reject — full enforcement)")
             else:
                 print(timestamp() + " DMARC OK for " + root + " (p=" + str(policy) + ")")
 
-            # rua= check — missing means org receives no aggregate failure reports
-            if not has_rua:
-                if policy == "quarantine":
-                    alert(
-                        "DMARC NO REPORTING: p=quarantine, rua= absent",
-                        "LOW",
-                        root,
-                        f"DMARC quarantines failing mail but has no rua= tag — "
-                        f"spoofing attempts are silently quarantined with no visibility: {dmarc_record}"
-                    )
-                    print(timestamp() + " [!] DMARC p=quarantine, no rua= on " + root)
-                elif policy != "none":
-                    # p=none already alerted above; p=reject or unknown without rua= is MEDIUM
-                    alert(
-                        "DMARC NO AGGREGATE REPORTING",
-                        "MEDIUM",
-                        root,
-                        f"DMARC record has no rua= tag — no aggregate reports will be sent, "
-                        f"organisation is blind to spoofing attempts against {root}: {dmarc_record}"
-                    )
-                    print(timestamp() + " [!] DMARC missing rua= on " + root)
+            # rua= check — missing means org receives no aggregate failure reports (LOW for any policy)
+            if not has_rua and policy != "none":
+                alert(
+                    "DMARC NO AGGREGATE REPORTING: rua= missing",
+                    "LOW",
+                    root,
+                    f"DMARC record has no rua= tag — no aggregate reports will be sent, "
+                    f"organisation is blind to spoofing attempts against {root}: {dmarc_record}"
+                )
+                print(timestamp() + " [!] DMARC missing rua= on " + root)
+
+            # ruf= check — missing means no per-message forensic reports
+            has_ruf = "ruf" in dmarc_tags and dmarc_tags["ruf"]
+            if not has_ruf:
+                alert(
+                    "DMARC NO FORENSIC REPORTING: ruf= missing",
+                    "INFO",
+                    root,
+                    f"DMARC record has no ruf= tag — no per-message forensic reports will be sent "
+                    f"on authentication failures: {dmarc_record}"
+                )
 
             # pct= check — partial policy application
             if "pct" in dmarc_tags:
@@ -2533,6 +2592,22 @@ def check_spf_dmarc(domain):
                 except ValueError:
                     pass
 
+            # sp= check — subdomain policy must not be weaker than parent
+            if "sp" in dmarc_tags:
+                sp_policy = dmarc_tags["sp"].strip().lower()
+                _policy_rank = {"reject": 2, "quarantine": 1, "none": 0}
+                parent_rank  = _policy_rank.get(policy or "none", 0)
+                sub_rank     = _policy_rank.get(sp_policy, 0)
+                if sub_rank < parent_rank:
+                    alert(
+                        "DMARC SUBDOMAIN POLICY WEAKER THAN PARENT",
+                        "MEDIUM",
+                        root,
+                        f"DMARC sp={sp_policy} is weaker than the parent policy p={policy} — "
+                        f"subdomain spoofing is less restricted than the main domain: {dmarc_record}"
+                    )
+                    print(timestamp() + f" [!] DMARC sp={sp_policy} weaker than p={policy} on {root}")
+
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer,
             dns.exception.Timeout, dns.resolver.NoNameservers):
         alert(
@@ -2542,6 +2617,9 @@ def check_spf_dmarc(domain):
             f"No DMARC record found for _dmarc.{root} — no enforcement policy"
         )
         print(timestamp() + " [!] No DMARC record for " + root)
+
+    # ── DKIM ─────────────────────────────────────────────────
+    check_dkim_selectors(root)
 
 def check_cors_misconfiguration(base_url, domain):
     """
