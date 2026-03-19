@@ -4506,7 +4506,7 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
         for t in pending:
             t.join(timeout=30)
 
-    probe_js_endpoints()
+    probe_js_endpoints(base_url=start_url)
 
     clear_state()
     print(timestamp() + " Done! Crawled " + str(i) + " pages.")
