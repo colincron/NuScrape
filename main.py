@@ -806,15 +806,38 @@ def enumerate_subdomains(domain):
             with found_lock:
                 found[0] += 1
 
-            # Alert if this subdomain name matches a high-value target
+            # Alert if this subdomain name matches a high-value target.
+            # Secondary content fetch confirms a real service is listening:
+            # short bodies (<100 chars) are likely TCP-accepts-but-no-content
+            # placeholders; timeouts mean DNS resolves but nothing is serving.
             label = sub.lower()
             if label in HIGH_VALUE_SUBDOMAINS and status and status < 400:
-                alert(
-                    f"HIGH-VALUE SUBDOMAIN EXPOSED: {label}",
-                    "HIGH",
-                    fqdn,
-                    f"{fqdn} resolves to {ip} and returns HTTP {status}"
-                )
+                try:
+                    content_resp = requests.get(
+                        ("https://" if status else "http://") + fqdn,
+                        headers=create_request_header(),
+                        timeout=6,
+                        allow_redirects=True,
+                        verify=False,
+                    )
+                    if len(content_resp.text) < 100:
+                        print(timestamp() + f" {fqdn} body too short ({len(content_resp.text)} chars) — suppressing high-value subdomain alert")
+                    else:
+                        alert(
+                            f"HIGH-VALUE SUBDOMAIN EXPOSED: {label}",
+                            "HIGH",
+                            fqdn,
+                            f"{fqdn} resolves to {ip} and returns HTTP {status}"
+                        )
+                except requests.exceptions.Timeout:
+                    print(timestamp() + f" {fqdn} timed out on content fetch — suppressing high-value subdomain alert (DNS resolves, no service confirmed)")
+                except Exception:
+                    alert(
+                        f"HIGH-VALUE SUBDOMAIN EXPOSED: {label}",
+                        "HIGH",
+                        fqdn,
+                        f"{fqdn} resolves to {ip} and returns HTTP {status}"
+                    )
 
             # Subdomain takeover check on every confirmed live subdomain
             check_subdomain_takeover(fqdn)
@@ -906,12 +929,32 @@ def query_ct_logs(domain):
 
             label = fqdn.split(".")[0].lower()
             if label in HIGH_VALUE_SUBDOMAINS and status and status < 400:
-                alert(
-                    f"HIGH-VALUE SUBDOMAIN EXPOSED: {label}",
-                    "HIGH",
-                    fqdn,
-                    f"{fqdn} -> {ip} HTTP {status} (discovered via CT logs)"
-                )
+                try:
+                    content_resp = requests.get(
+                        ("https://" if status else "http://") + fqdn,
+                        headers=create_request_header(),
+                        timeout=6,
+                        allow_redirects=True,
+                        verify=False,
+                    )
+                    if len(content_resp.text) < 100:
+                        print(timestamp() + f" {fqdn} body too short ({len(content_resp.text)} chars) — suppressing high-value subdomain alert")
+                    else:
+                        alert(
+                            f"HIGH-VALUE SUBDOMAIN EXPOSED: {label}",
+                            "HIGH",
+                            fqdn,
+                            f"{fqdn} -> {ip} HTTP {status} (discovered via CT logs)"
+                        )
+                except requests.exceptions.Timeout:
+                    print(timestamp() + f" {fqdn} timed out on content fetch — suppressing high-value subdomain alert (DNS resolves, no service confirmed)")
+                except Exception:
+                    alert(
+                        f"HIGH-VALUE SUBDOMAIN EXPOSED: {label}",
+                        "HIGH",
+                        fqdn,
+                        f"{fqdn} -> {ip} HTTP {status} (discovered via CT logs)"
+                    )
 
             check_subdomain_takeover(fqdn)
 
@@ -4949,8 +4992,10 @@ def check_actuator_exposure(base_url, domain):
                     print(timestamp() + f" Heapdump probe returned 200 but HPROF magic not found — likely WAF/CDN interference: {url}")
                 continue
 
-            # For JSON endpoints, confirm with body signatures
-            if "json" in ct or any(sig in body for sig in ACTUATOR_BODY_SIGNATURES):
+            # Require at least one body signature — a bare 200 with JSON
+            # content-type is not sufficient (CDNs and reverse proxies can
+            # return JSON error pages that match the content-type check).
+            if any(sig in body for sig in ACTUATOR_BODY_SIGNATURES):
                 alert(
                     "SPRING BOOT ACTUATOR EXPOSED",
                     severity,
