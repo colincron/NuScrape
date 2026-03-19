@@ -91,7 +91,7 @@ python3 main.py -D <url> [options]
 | `--no-skip-google-tracking` | off | Crawl Google Play and analytics URLs (skipped by default) |
 | `--stealth` | `LOUD` | Stealth profile: `LOUD` (fast), `NORMAL` (moderate delays), `GHOST` (slow, rotated UAs, randomised) |
 | `--bug-bounty-header` | — | Injects `X-Bug-Bounty: <value>` into all requests — required by some bug bounty programs |
-| `--active-probes` | off | Enable payload-injecting checks: path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, and dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT). **Only use against targets you are authorised to test.** |
+| `--active-probes` | off | Enable payload-injecting checks: path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT), and WebSocket security probes (origin validation, auth, scheme). **Only use against targets you are authorised to test.** |
 
 **Examples:**
 
@@ -269,6 +269,28 @@ For any crawled URL with a versioned path segment (`/v1/`, `/v2/`, etc.), probes
 | Older version returns 404 or 401/403 | skipped |
 
 Requires `--active-probes`. Deduplicated per `(host, path)` pattern.
+
+---
+
+#### WebSocket Endpoint Detection and Security Checks
+
+**Discovery (runs unconditionally on every crawled page):**
+- Scans page source for explicit `ws://` / `wss://` URL literals
+- Detects JavaScript WebSocket construction calls: `new WebSocket(...)`, `io(...)`, `socket.connect(...)`
+- Checks response headers for `Upgrade: websocket` and promotes the page URL to a WS endpoint
+- All discovered endpoints are stored in the `WebSockets` database table
+
+**Security checks (requires `--active-probes`):**
+
+| Check | Finding | Severity |
+|---|---|---|
+| Unencrypted scheme | Endpoint uses `ws://` — traffic transmitted in plaintext | MEDIUM |
+| Origin validation | Server accepts connection from `Origin: https://evil.com` — cross-site WebSocket hijacking (CSWSH) | HIGH |
+| Unauthenticated data | Server sends data to a client with no cookies or auth headers | HIGH |
+
+- Uses the `websockets` library (gracefully skipped if not installed)
+- 5-second connection and receive timeout per check
+- Deduplicated per unique WebSocket URL across the full scan session
 
 ---
 
@@ -583,7 +605,7 @@ Several measures are in place to reduce noise:
 
 NuScrape is designed for **responsible disclosure research only**. All active probes (backup files, credential testing, open redirect injection, IDOR verification) are limited to confirming the existence of a vulnerability and do not exfiltrate data, maintain persistence, or cause service disruption.
 
-> **Note:** Payload-injecting checks (path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests) are **disabled by default** and must be explicitly enabled with `--active-probes`. A warning is printed at startup and displayed in the UI whenever this flag is active. Only enable it against targets you are authorised to test.
+> **Note:** Payload-injecting checks (path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, WebSocket security probes) are **disabled by default** and must be explicitly enabled with `--active-probes`. A warning is printed at startup and displayed in the UI whenever this flag is active. Only enable it against targets you are authorised to test.
 
 **When reporting findings:**
 
@@ -608,10 +630,12 @@ Start scan
     │       │     ├─ JWT scan (HTML + headers)
     │       │     ├─ SSRF candidate parameter detection (WAF-downgraded)
     │       │     ├─ Host header injection
+    │       │     ├─ WebSocket endpoint discovery (ws://, JS calls, Upgrade header)
     │       │     ├─ Open redirect detection (WAF-suppressed)  ┐
     │       │     ├─ GraphQL introspection (per-page URL)      │
     │       │     ├─ Mass assignment (POST/PUT form endpoints)  │ requires --active-probes
     │       │     ├─ API version enumeration                    │
+    │       │     ├─ WebSocket security (origin, auth, scheme) │
     │       │     ├─ Path traversal                            │
     │       │     ├─ SSTI                                      │
     │       │     ├─ CRLF injection                            ┘

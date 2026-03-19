@@ -39,6 +39,14 @@ try:
 except ImportError:
     PYMYSQL_AVAILABLE = False
 
+# websockets is optional — enables WebSocket security probing
+try:
+    import websockets
+    import websockets.exceptions
+    WEBSOCKETS_AVAILABLE = True
+except ImportError:
+    WEBSOCKETS_AVAILABLE = False
+
 # ─────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────
@@ -4524,6 +4532,12 @@ def create_db(conn, table_name):
                                 content_snippet TEXT,
                                 found_at        TEXT NOT NULL
                              )''',
+        "WebSockets":      '''CREATE TABLE IF NOT EXISTS WebSockets (
+                                page_url        TEXT NOT NULL,
+                                ws_url          TEXT NOT NULL,
+                                encrypted       INTEGER DEFAULT 0,
+                                found_at        TEXT NOT NULL
+                             )''',
     }
     if table_name in table_creation_map:
         try:
@@ -4854,6 +4868,8 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
             scan_for_jwts(url, html, response_headers=headers)
             # SSRF candidate parameter flagging — informational, no HTTP requests
             flag_ssrf_candidates(url, html)
+            # WebSocket endpoint discovery — runs unconditionally, no active probing
+            discover_websockets(url, html, headers)
             # Active probe checks — only run when --active-probes is enabled
             if ACTIVE_PROBES:
                 # Open redirect detection — probes URL params with canary URL
@@ -5955,6 +5971,186 @@ def check_api_versioning(page_url):
                                     f"{alt_url} ({alt_status})")
         except Exception as e:
             print_error(f"check_api_versioning failed for {alt_url}: {e}")
+
+
+# ─────────────────────────────────────────────
+# WebSocket endpoint detection and security checks
+# ─────────────────────────────────────────────
+
+# Match explicit ws:// or wss:// URLs in page source
+_WS_URL_RE = re.compile(r'''\b(wss?://[^\s"'<>)]+)''', re.I)
+
+# Match JS patterns that establish WebSocket connections
+_WS_JS_PATTERNS = re.compile(
+    r'''(?:new\s+WebSocket\s*\(|io\s*\(|socket\.connect\s*\()\s*["']?(wss?://[^\s"'<>)]+)["']?''',
+    re.I
+)
+
+# Tracks WS URLs already security-tested this session
+_ws_security_tested: set = set()
+# Tracks WS URLs already stored in DB this session
+_ws_stored: set = set()
+
+
+def write_to_websockets_database(page_url: str, ws_url: str, encrypted: bool) -> None:
+    conn = sqlite3.connect("ScrapeDB", isolation_level=None)
+    try:
+        create_db(conn, "WebSockets")
+        conn.execute(
+            "INSERT INTO WebSockets (page_url, ws_url, encrypted, found_at) VALUES (?,?,?,?)",
+            (page_url, ws_url, int(encrypted), timestamp())
+        )
+    except Exception as e:
+        print_error("write_to_websockets_database: " + str(e))
+    finally:
+        conn.close()
+
+
+def discover_websockets(page_url: str, html_content: str, response_headers: dict) -> None:
+    """
+    Scan page source and response headers for WebSocket endpoints.
+    Runs unconditionally on every crawled page.
+    Discovered endpoints are stored in the WebSockets table and, if
+    --active-probes is enabled, passed to check_websocket_security().
+    """
+    found: set = set()
+
+    # 1. Explicit ws:// / wss:// literals in page source
+    for m in _WS_URL_RE.finditer(html_content):
+        found.add(m.group(1).strip())
+
+    # 2. JavaScript WebSocket construction calls
+    for m in _WS_JS_PATTERNS.finditer(html_content):
+        found.add(m.group(1).strip())
+
+    # 3. Response header: Upgrade: websocket — promote the page URL itself
+    upgrade = response_headers.get("Upgrade", "").lower()
+    if upgrade == "websocket":
+        # Convert the page URL scheme to wss:// or ws://
+        parsed = urlparse(page_url)
+        ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+        ws_url = parsed._replace(scheme=ws_scheme).geturl()
+        found.add(ws_url)
+
+    for ws_url in found:
+        if ws_url in _ws_stored:
+            continue
+        _ws_stored.add(ws_url)
+        encrypted = ws_url.lower().startswith("wss://")
+        write_to_websockets_database(page_url, ws_url, encrypted)
+        print(timestamp() + f" [WS] Discovered WebSocket endpoint: {ws_url}")
+
+        if ACTIVE_PROBES:
+            check_websocket_security(ws_url, page_url)
+
+
+def check_websocket_security(ws_url: str, page_url: str) -> None:
+    """
+    Run three security checks against a discovered WebSocket endpoint.
+    Only called when --active-probes is enabled.
+    Requires the 'websockets' library; silently skips if unavailable.
+    """
+    if not WEBSOCKETS_AVAILABLE:
+        return
+    if ws_url in _ws_security_tested:
+        return
+    _ws_security_tested.add(ws_url)
+
+    domain = urlparse(page_url).netloc
+
+    # ── Check 1: Unencrypted WebSocket ──────────────────────────────────────
+    if ws_url.lower().startswith("ws://"):
+        alert(
+            "UNENCRYPTED WEBSOCKET",
+            "MEDIUM",
+            ws_url,
+            f"WebSocket endpoint uses unencrypted ws:// scheme — traffic is "
+            f"transmitted in plaintext and susceptible to eavesdropping and "
+            f"manipulation by a network-level attacker"
+        )
+        print(timestamp() + f" [!] Unencrypted WebSocket: {ws_url}")
+
+    # Async helpers run in a dedicated event loop inside the calling thread
+    async def _origin_check() -> None:
+        """Connect with a foreign Origin header; flag if server accepts it."""
+        try:
+            extra_headers = {"Origin": "https://evil.com"}
+            async with websockets.connect(
+                ws_url,
+                additional_headers=extra_headers,
+                open_timeout=5,
+                close_timeout=5,
+                ssl=None,
+            ) as ws:
+                # If we connected successfully the server accepted the origin
+                alert(
+                    "WEBSOCKET ORIGIN VALIDATION MISSING",
+                    "HIGH",
+                    ws_url,
+                    f"WebSocket at {ws_url} accepted connection from arbitrary "
+                    f"Origin 'https://evil.com' — the server does not validate "
+                    f"the Origin header, enabling cross-site WebSocket hijacking "
+                    f"(CSWSH) from any malicious page"
+                )
+                print(timestamp() + f" [!!] WS accepts arbitrary origin: {ws_url}")
+        except (
+            websockets.exceptions.InvalidStatus,
+            websockets.exceptions.RejectHandshake,
+            ConnectionRefusedError,
+            OSError,
+            asyncio.TimeoutError,
+        ):
+            pass  # Rejected or unreachable — expected for a secure server
+        except Exception as e:
+            print_error(f"WS origin check error ({ws_url}): {e}")
+
+    async def _auth_check() -> None:
+        """Connect without credentials; flag if the server sends data."""
+        try:
+            async with websockets.connect(
+                ws_url,
+                additional_headers={},  # no cookies, no auth
+                open_timeout=5,
+                close_timeout=5,
+                ssl=None,
+            ) as ws:
+                try:
+                    msg = await asyncio.wait_for(ws.recv(), timeout=5)
+                    if msg:
+                        alert(
+                            "WEBSOCKET UNAUTHENTICATED DATA EXPOSURE",
+                            "HIGH",
+                            ws_url,
+                            f"WebSocket at {ws_url} returned data without "
+                            f"authentication credentials — unauthenticated clients "
+                            f"can receive server messages; first {min(200, len(str(msg)))} bytes: "
+                            f"{str(msg)[:200]!r}"
+                        )
+                        print(timestamp() + f" [!!] WS sends data without auth: {ws_url}")
+                except asyncio.TimeoutError:
+                    pass  # Server is waiting for client message — not necessarily a flaw
+        except (
+            websockets.exceptions.InvalidStatus,
+            websockets.exceptions.RejectHandshake,
+            ConnectionRefusedError,
+            OSError,
+            asyncio.TimeoutError,
+        ):
+            pass
+        except Exception as e:
+            print_error(f"WS auth check error ({ws_url}): {e}")
+
+    def _run_checks() -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_origin_check())
+            loop.run_until_complete(_auth_check())
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=_run_checks, daemon=True)
+    t.start()
+    t.join(timeout=30)
 
 
 # ─────────────────────────────────────────────
