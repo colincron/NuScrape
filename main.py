@@ -2739,6 +2739,21 @@ def detect_waf(base_url, domain):
     else:
         print(timestamp() + f" No WAF detected on {domain}")
 
+def _is_akamai_block(resp):
+    """
+    Return True if the response is an Akamai edge block rather than a real
+    application response. Findings against Akamai-blocked responses are
+    suppressed to avoid false positives.
+    """
+    if resp is None:
+        return False
+    for v in resp.headers.values():
+        if "edgesuite.net" in v.lower():
+            return True
+    if resp.text and "edgesuite.net" in resp.text.lower():
+        return True
+    return False
+
 def write_to_waf_database(domain, waf_vendor, detected_by):
     conn = sqlite3.connect("ScrapeDB", isolation_level=None)
     try:
@@ -3138,6 +3153,8 @@ JS_SECRET_PATTERNS = [
     (r'''(?i)(?:client[_-]?secret)\s*[:=]\s*["']([A-Za-z0-9_\-]{16,64})["']''', "client_secret"),
     (r'ghp_[A-Za-z0-9]{36}', "github_token"),
     (r'sk-[A-Za-z0-9]{48}', "openai_key"),
+    (r'sk\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+', "mapbox_secret_token"),
+    (r'pk\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+', "mapbox_public_token"),
 ]
 
 JS_STAGING_PATTERNS = [
@@ -3174,8 +3191,14 @@ PUBLIC_KEY_PREFIXES = [
     "1:",         # Firebase project number prefix
 ]
 
+# Mapbox public tokens (pk.eyJ…) are intentionally shipped in frontend code.
+# Only sk.eyJ… are secret tokens.
+_mapbox_pk_seen: set = set()
+
 def is_public_key(val):
     """Return True if the value matches a known public/client-side key format."""
+    if val.startswith("pk.eyJ"):
+        return True  # Mapbox public token — intentionally client-side
     return any(val.startswith(p) for p in PUBLIC_KEY_PREFIXES)
 
 def is_identifier_string(val):
@@ -3405,14 +3428,26 @@ def analyse_js_bundle(page_url, js_url):
         for pattern, secret_type in JS_SECRET_PATTERNS:
             for match in re.findall(pattern, js_text):
                 val = match if isinstance(match, str) else match[0]
-                if val and not is_secret_fp(val) and not is_public_key(val) and not is_identifier_string(val):
-                    print(timestamp() + " JS SECRET [" + secret_type + "] in " + js_url)
-                    ctx = _js_context(js_text, val)
-                    write_to_js_database(page_url, js_url, secret_type, val, ctx)
-                    findings += 1
-                    if secret_type in HIGH_SEVERITY_TYPES:
-                        severity = "CRITICAL" if secret_type in {"aws_access_key", "github_token", "openai_key", "private_key"} else "HIGH"
-                        alert(f"EXPOSED SECRET: {secret_type}", severity, js_url, val, redact_detail=True)
+                if not val:
+                    continue
+                # Mapbox public token — INFO only, deduplicate across JS files
+                if secret_type == "mapbox_public_token":
+                    if val not in _mapbox_pk_seen:
+                        _mapbox_pk_seen.add(val)
+                        ctx = _js_context(js_text, val)
+                        write_to_js_database(page_url, js_url, secret_type, val, ctx)
+                        alert("MAPBOX PUBLIC TOKEN", "INFO", js_url,
+                              "pk.eyJ token is a client-side public key — no server privilege", redact_detail=False)
+                    continue
+                if is_secret_fp(val) or is_public_key(val) or is_identifier_string(val):
+                    continue
+                print(timestamp() + " JS SECRET [" + secret_type + "] in " + js_url)
+                ctx = _js_context(js_text, val)
+                write_to_js_database(page_url, js_url, secret_type, val, ctx)
+                findings += 1
+                if secret_type in HIGH_SEVERITY_TYPES:
+                    severity = "CRITICAL" if secret_type in {"aws_access_key", "github_token", "openai_key", "private_key", "mapbox_secret_token"} else "HIGH"
+                    alert(f"EXPOSED SECRET: {secret_type}", severity, js_url, val, redact_detail=True)
 
         # Staging/internal URLs
         for pattern in JS_STAGING_PATTERNS:
@@ -3431,26 +3466,27 @@ def analyse_js_bundle(page_url, js_url):
         # Source map exposure — check header and .map path
         check_js_source_map(page_url, js_url, resp)
 
-        # JS comment / TODO scanning — security-relevant developer notes
-        _JS_COMMENT_PATTERNS = [
-            re.compile(r'//[^\n]*', re.IGNORECASE),         # single-line
-            re.compile(r'/\*.*?\*/', re.DOTALL),            # block
-        ]
-        _JS_COMMENT_KEYWORDS = re.compile(
-            r'\b(todo|fixme|hack|bug|workaround|insecure|unsafe|password|passwd|'
-            r'secret|key|token|auth|admin|bypass|skip|disable|vuln|cve|'
-            r'backdoor|hardcoded|hard[_-]coded|plaintext|plain[_-]text|'
-            r'no[_-]?auth|noauth|debug|temp|temporary|remove[_\s]+before|'
-            r'do[_\s]+not[_\s]+merge|dont[_\s]+merge)\b',
+        # JS comment / TODO scanning — first-party JS only, explicit keywords only
+        _JS_CDN_PATTERNS = re.compile(
+            r'cdnjs\.cloudflare\.com|unpkg\.com|cdn\.jsdelivr\.net|'
+            r'node_modules/|/vendor/|/bower_components/',
             re.IGNORECASE
         )
-        for cpat in _JS_COMMENT_PATTERNS:
-            for comment in cpat.findall(js_text):
-                if _JS_COMMENT_KEYWORDS.search(comment):
-                    clean = " ".join(comment.split())[:200]
-                    ctx = _js_context(js_text, comment[:40])
-                    write_to_js_database(page_url, js_url, "comment_todo", clean, ctx)
-                    findings += 1
+        _JS_COMMENT_REQUIRED = re.compile(
+            r'\b(TODO|FIXME|HACK|NOTE)\b'
+        )
+        if not _JS_CDN_PATTERNS.search(js_url):
+            _JS_COMMENT_PATTERNS = [
+                re.compile(r'//[^\n]*'),
+                re.compile(r'/\*.*?\*/', re.DOTALL),
+            ]
+            for cpat in _JS_COMMENT_PATTERNS:
+                for comment in cpat.findall(js_text):
+                    if _JS_COMMENT_REQUIRED.search(comment):
+                        clean = " ".join(comment.split())[:200]
+                        ctx = _js_context(js_text, comment[:40])
+                        write_to_js_database(page_url, js_url, "comment_todo", clean, ctx)
+                        findings += 1
 
         if findings:
             print(timestamp() + " JS analysis: " + str(findings) + " findings in " + js_url)
@@ -4509,7 +4545,8 @@ DEFAULT_CREDS = [
         ],
         "detect_path":   "/login",
         "detect_body":   ["jenkins", "j_username"],
-        "success_body":  ["dashboard", "build history", "manage jenkins"],
+        "success_body":  ["Dashboard [Jenkins]", "manage jenkins", "build history"],
+        "success_headers": ["X-Jenkins", "X-Powered-By:Jenkins"],
         "fail_redirect": "/loginError",
     },
     # Grafana
@@ -4568,7 +4605,7 @@ DEFAULT_CREDS = [
         ],
         "detect_path":   None,  # detection is path-based
         "detect_body":   ["adminer", "login - adminer"],
-        "success_body":  ["create database", "select database"],
+        "success_body":  ["adminer.org", ">Adminer<", "adminer-login", "select database", "Select database"],
         "fail_body":     ["Invalid credentials", "Access denied"],
     },
     # phpMyAdmin
@@ -4697,9 +4734,15 @@ def check_default_credentials(base_url, domain):
                     if fail_redir and fail_redir in resp.url:
                         continue
 
-                    # Check for success
+                    # Check for success — require body or header confirmation, never bare 200
                     success_sigs = panel.get("success_body", [])
-                    if any(s.lower() in body for s in success_sigs) or resp.status_code == 200:
+                    success_hdrs = panel.get("success_headers", [])
+                    header_match = any(
+                        (h.split(":")[0] in resp.headers and
+                         (len(h.split(":")) == 1 or h.split(":", 1)[1].lower() in resp.headers.get(h.split(":")[0], "").lower()))
+                        for h in success_hdrs
+                    )
+                    if (success_sigs and any(s.lower() in body for s in success_sigs)) or header_match:
                         cred_str = str(creds)
                         alert(
                             f"DEFAULT CREDENTIALS ACCEPTED: {service}",
@@ -5071,6 +5114,8 @@ def check_open_redirects(page_url, html_content):
                     allow_redirects=False,
                 )
                 location = resp.headers.get("Location", "")
+                if _is_akamai_block(resp):
+                    continue
                 if resp.status_code in (301, 302, 303, 307, 308) and \
                    _redirect_to_canary(location):
                     _redirect_domains.add(domain)
@@ -5356,6 +5401,19 @@ JWT_WEAK_SECRETS = [
     "x", "xx", "xxx", "secret1", "Secret1", "Secret123",
 ]
 
+# jwt.io demo token — shown on the jwt.io homepage and in tutorials everywhere
+_JWT_DEMO_TOKEN = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+    ".eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ"
+    ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+)
+_JWT_DEMO_SIG = _JWT_DEMO_TOKEN.split(".")[-1]
+
+# Cracked secrets that are known documentation placeholders — not real leaks
+_JWT_PLACEHOLDER_SECRETS = {
+    "your-256-bit-secret", "your-512-bit-secret", "secret", "your-secret",
+}
+
 _jwt_seen    = set()   # deduplicate by token signature (last segment)
 _jwt_domains = set()   # domains already reported
 
@@ -5392,8 +5450,12 @@ def analyse_jwt(token, source_url):
     if len(parts) != 3:
         return
 
-    # Deduplicate by signature segment
+    # Suppress the jwt.io demo token — it appears in tutorials and examples everywhere
     sig = parts[2]
+    if sig == _JWT_DEMO_SIG:
+        return
+
+    # Deduplicate by signature segment
     if sig in _jwt_seen:
         return
     _jwt_seen.add(sig)
@@ -5427,6 +5489,9 @@ def analyse_jwt(token, source_url):
         for secret in JWT_WEAK_SECRETS:
             expected = _hmac_sign(secret, parts[0], parts[1])
             if expected == parts[2]:
+                # Suppress known documentation placeholders — not real findings
+                if secret.lower() in _JWT_PLACEHOLDER_SECRETS:
+                    break
                 alert(
                     "JWT WEAK SECRET",
                     "CRITICAL",
