@@ -6000,6 +6000,13 @@ def verify_idor_candidate(base_url, endpoint, param, value, kind):
     return True   # Responses differ meaningfully per ID on auth-gated endpoint — real candidate
 
 
+# Social media platforms use public numeric/UUID identifiers by design.
+# IDOR checks on these domains produce only noise.
+_IDOR_SKIP_DOMAINS = {
+    "facebook.com", "instagram.com", "twitter.com", "x.com",
+    "youtube.com", "linkedin.com", "tiktok.com", "pinterest.com", "reddit.com",
+}
+
 def check_idor_candidates(page_url, html_content):
     """
     Collect IDOR candidates from page links, then run full verification
@@ -6007,6 +6014,9 @@ def check_idor_candidates(page_url, html_content):
     Alerts only on confirmed auth-gated endpoints with per-object data.
     """
     domain = urlparse(page_url).netloc
+    base_domain = domain.lstrip("www.")
+    if any(base_domain == d or base_domain.endswith("." + d) for d in _IDOR_SKIP_DOMAINS):
+        return
 
     try:
         text = html_content if isinstance(html_content, str) \
