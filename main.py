@@ -4886,6 +4886,8 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                 check_ssti(url, html)
                 # CRLF injection detection — probes URL params for header injection
                 check_crlf_injection(url, html)
+                # XXE injection — probes XML-accepting and SOAP endpoints
+                check_xxe_injection(url, html, headers)
             # IDOR candidate detection — runs in background thread with timeout
             # to prevent hung verification requests stalling the crawl
             _idor_thread = threading.Thread(
@@ -6794,6 +6796,219 @@ def check_crlf_injection(page_url, html_content):
                 pass
             except Exception as e:
                 print_error(f"CRLF probe failed for {test_url}: {e}")
+
+
+# ─────────────────────────────────────────────
+# XXE injection detection
+# ─────────────────────────────────────────────
+
+# Safe canary — confirms entity processing without reading sensitive files.
+# The DOCTYPE declares a static string entity; if the parser resolves it and
+# reflects it in the response we know entity expansion is enabled.
+_XXE_CANARY      = "xxe-test-nuscrape"
+_XXE_PAYLOAD     = (
+    '<?xml version="1.0"?>\n'
+    '<!DOCTYPE test [\n'
+    '  <!ENTITY xxe "xxe-test-nuscrape">\n'
+    ']>\n'
+    '<test>&xxe;</test>'
+)
+_XXE_SOAP_PAYLOAD = (
+    '<?xml version="1.0"?>\n'
+    '<!DOCTYPE test [\n'
+    '  <!ENTITY xxe "xxe-test-nuscrape">\n'
+    ']>\n'
+    '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">\n'
+    '  <soapenv:Body>\n'
+    '    <test>&xxe;</test>\n'
+    '  </soapenv:Body>\n'
+    '</soapenv:Envelope>'
+)
+
+# Content-Type values that indicate the server accepts XML input
+_XML_CONTENT_TYPES = {
+    "text/xml",
+    "application/xml",
+    "application/soap+xml",
+    "application/xhtml+xml",
+}
+
+# URL path suffixes / segments that strongly suggest XML / SOAP endpoints
+_SOAP_PATH_RE = re.compile(
+    r'/(ws|soap|wsdl|service|services|xmlrpc|xml-rpc|rpc)(/|$|\?)',
+    re.I
+)
+
+# File upload inputs that accept .xml files
+_XML_UPLOAD_RE = re.compile(r'\.xml\b', re.I)
+
+# Tracks endpoints already tested this session
+_xxe_tested: set = set()
+
+
+def _collect_xxe_endpoints(page_url: str, html_content: str, response_headers: dict) -> list:
+    """
+    Return a list of (endpoint_url, is_soap) tuples that are candidates for
+    XXE testing, derived from:
+      1. The page URL itself if the server responded with an XML Content-Type
+      2. SOAP path patterns in the page URL
+      3. Form actions with file-upload inputs accepting .xml
+      4. Anchor hrefs matching SOAP path patterns
+    """
+    domain   = urlparse(page_url).netloc
+    ct       = response_headers.get("Content-Type", "").lower().split(";")[0].strip()
+    candidates = []
+
+    # 1. Server responded with XML — the endpoint itself accepts XML input
+    if ct in _XML_CONTENT_TYPES:
+        is_soap = "soap" in ct
+        candidates.append((page_url, is_soap))
+
+    # 2. SOAP path in the page URL
+    if _SOAP_PATH_RE.search(urlparse(page_url).path):
+        candidates.append((page_url, True))
+
+    try:
+        text = html_content if isinstance(html_content, str) \
+               else html_content.decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(text, "lxml")
+    except Exception:
+        return candidates
+
+    # 3. File upload forms accepting .xml
+    for form in soup.find_all("form"):
+        for inp in form.find_all("input", type="file"):
+            accept = inp.get("accept", "")
+            if _XML_UPLOAD_RE.search(accept):
+                action = form.get("action") or page_url
+                ep = urljoin(page_url, action)
+                if urlparse(ep).netloc == domain:
+                    candidates.append((ep, False))
+
+    # 4. SOAP-looking links on the page
+    for tag in soup.find_all(["a", "link"]):
+        href = tag.get("href") or ""
+        if not href:
+            continue
+        abs_href = urljoin(page_url, href)
+        if urlparse(abs_href).netloc != domain:
+            continue
+        if _SOAP_PATH_RE.search(urlparse(abs_href).path):
+            candidates.append((abs_href, True))
+
+    # Deduplicate while preserving order; prefer is_soap=True for duplicates
+    seen   = {}
+    result = []
+    for ep, is_soap in candidates:
+        if ep not in seen:
+            seen[ep] = is_soap
+            result.append((ep, is_soap))
+        elif is_soap:
+            seen[ep] = True
+    return [(ep, seen[ep]) for ep in seen]
+
+
+def check_xxe_injection(page_url: str, html_content: str, response_headers: dict) -> None:
+    """
+    Probe XML-accepting endpoints discovered on the current page for XXE.
+
+    For each endpoint:
+      - Send the safe static-entity payload as text/xml (POST)
+      - For SOAP endpoints additionally send a SOAP-wrapped payload
+      - If the canary string appears in the response body → HIGH
+      - WSDL / service-definition exposure without auth → MEDIUM
+
+    Only runs when --active-probes is enabled. Deduplicates per endpoint URL.
+    8-second timeout per probe.
+    """
+    if not is_in_scope(page_url):
+        return
+
+    endpoints = _collect_xxe_endpoints(page_url, html_content, response_headers)
+    if not endpoints:
+        return
+
+    domain = urlparse(page_url).netloc
+
+    for endpoint_url, is_soap in endpoints:
+        if endpoint_url in _xxe_tested:
+            continue
+        _xxe_tested.add(endpoint_url)
+
+        # ── WSDL / service definition exposure check ──────────────────────
+        # A WSDL exposes the full service contract (method names, param types,
+        # namespaces) — useful to an attacker even without XXE.
+        parsed_ep = urlparse(endpoint_url)
+        wsdl_url  = endpoint_url.rstrip("?") + "?wsdl"
+        if "wsdl" not in parsed_ep.query.lower() and "wsdl" not in parsed_ep.path.lower():
+            try:
+                stealth_delay(domain)
+                wsdl_resp = requests.get(
+                    wsdl_url,
+                    headers=create_request_header(),
+                    timeout=8,
+                    verify=False,
+                    allow_redirects=True,
+                )
+                wsdl_ct = wsdl_resp.headers.get("Content-Type", "").lower()
+                if wsdl_resp.status_code == 200 and (
+                    "xml" in wsdl_ct
+                    or "<wsdl:" in wsdl_resp.text.lower()
+                    or "<definitions" in wsdl_resp.text.lower()
+                ):
+                    alert(
+                        "WSDL SERVICE DEFINITION EXPOSED",
+                        "MEDIUM",
+                        wsdl_url,
+                        f"WSDL document accessible without authentication at {wsdl_url} — "
+                        f"exposes full service contract including method names, parameter "
+                        f"types, and namespace structure, aiding targeted XXE / SSRF attacks"
+                    )
+                    print(timestamp() + f" [!] WSDL exposed: {wsdl_url}")
+            except Exception:
+                pass
+
+        # ── XXE entity reflection probes ──────────────────────────────────
+        payloads = [("text/xml", _XXE_PAYLOAD)]
+        if is_soap:
+            payloads.append(("application/soap+xml", _XXE_SOAP_PAYLOAD))
+
+        for content_type, payload in payloads:
+            probe_key = (endpoint_url, content_type)
+            if probe_key in _xxe_tested:
+                continue
+            _xxe_tested.add(probe_key)
+
+            try:
+                stealth_delay(domain)
+                hdrs = create_request_header()
+                hdrs["Content-Type"] = content_type
+                resp = requests.post(
+                    endpoint_url,
+                    data=payload.encode("utf-8"),
+                    headers=hdrs,
+                    timeout=8,
+                    verify=False,
+                    allow_redirects=True,
+                )
+                if _XXE_CANARY in resp.text:
+                    label = "SOAP XXE" if "soap" in content_type else "XXE"
+                    alert(
+                        f"{label} INJECTION CONFIRMED",
+                        "HIGH",
+                        endpoint_url,
+                        f"XML entity expansion is enabled at {endpoint_url} — "
+                        f"the canary value '{_XXE_CANARY}' was reflected in the "
+                        f"response body, confirming the XML parser resolves "
+                        f"DOCTYPE entity declarations. An attacker can leverage "
+                        f"this to read local files, probe internal services (SSRF), "
+                        f"or cause denial of service via entity expansion."
+                    )
+                    print(timestamp() + f" [!!] XXE confirmed ({content_type}): {endpoint_url}")
+            except requests.exceptions.Timeout:
+                pass
+            except Exception as e:
+                print_error(f"XXE probe failed for {endpoint_url}: {e}")
 
 
 # ─────────────────────────────────────────────

@@ -91,7 +91,7 @@ python3 main.py -D <url> [options]
 | `--no-skip-google-tracking` | off | Crawl Google Play and analytics URLs (skipped by default) |
 | `--stealth` | `LOUD` | Stealth profile: `LOUD` (fast), `NORMAL` (moderate delays), `GHOST` (slow, rotated UAs, randomised) |
 | `--bug-bounty-header` | — | Injects `X-Bug-Bounty: <value>` into all requests — required by some bug bounty programs |
-| `--active-probes` | off | Enable payload-injecting checks: path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT), and WebSocket security probes (origin validation, auth, scheme). **Only use against targets you are authorised to test.** |
+| `--active-probes` | off | Enable payload-injecting checks: path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT), WebSocket security probes (origin validation, auth, scheme), and XXE injection (XML/SOAP entity expansion). **Only use against targets you are authorised to test.** |
 
 **Examples:**
 
@@ -291,6 +291,29 @@ Requires `--active-probes`. Deduplicated per `(host, path)` pattern.
 - Uses the `websockets` library (gracefully skipped if not installed)
 - 5-second connection and receive timeout per check
 - Deduplicated per unique WebSocket URL across the full scan session
+
+---
+
+#### XXE Injection Detection
+
+**Endpoint discovery** — identifies XML-accepting endpoints on each crawled page by:
+- Server `Content-Type` response header containing `text/xml`, `application/xml`, `application/soap+xml`, or `application/xhtml+xml`
+- URL path matching SOAP patterns: `/ws`, `/soap`, `/wsdl`, `/service`, `/services`, `/xmlrpc`, `/rpc`
+- File upload form inputs whose `accept` attribute includes `.xml`
+- Anchor hrefs on the page matching the same SOAP path patterns
+
+**Probes (requires `--active-probes`):**
+
+| Check | Method | Finding | Severity |
+|---|---|---|---|
+| Static-entity XXE | POST `text/xml` | Canary `xxe-test-nuscrape` reflected in response — entity processing confirmed | HIGH |
+| SOAP-wrapped XXE | POST `application/soap+xml` | Same canary reflected inside SOAP envelope | HIGH |
+| WSDL exposure | GET `?wsdl` | 200 response with XML/WSDL body without auth — exposes full service contract | MEDIUM |
+
+The test payload uses a safe static string entity (`<!ENTITY xxe "xxe-test-nuscrape">`) — no file reads, no network callbacks, no sensitive data access. Confirmation requires the canary to appear verbatim in the response body.
+
+- 8-second timeout per probe
+- Deduplicated per `(endpoint_url, content_type)` pair
 
 ---
 
@@ -605,7 +628,7 @@ Several measures are in place to reduce noise:
 
 NuScrape is designed for **responsible disclosure research only**. All active probes (backup files, credential testing, open redirect injection, IDOR verification) are limited to confirming the existence of a vulnerability and do not exfiltrate data, maintain persistence, or cause service disruption.
 
-> **Note:** Payload-injecting checks (path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, WebSocket security probes) are **disabled by default** and must be explicitly enabled with `--active-probes`. A warning is printed at startup and displayed in the UI whenever this flag is active. Only enable it against targets you are authorised to test.
+> **Note:** Payload-injecting checks (path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, WebSocket security probes, XXE injection) are **disabled by default** and must be explicitly enabled with `--active-probes`. A warning is printed at startup and displayed in the UI whenever this flag is active. Only enable it against targets you are authorised to test.
 
 **When reporting findings:**
 
@@ -636,6 +659,7 @@ Start scan
     │       │     ├─ Mass assignment (POST/PUT form endpoints)  │ requires --active-probes
     │       │     ├─ API version enumeration                    │
     │       │     ├─ WebSocket security (origin, auth, scheme) │
+    │       │     ├─ XXE injection (XML/SOAP endpoints)        │
     │       │     ├─ Path traversal                            │
     │       │     ├─ SSTI                                      │
     │       │     ├─ CRLF injection                            ┘
