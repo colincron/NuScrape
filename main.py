@@ -6021,6 +6021,9 @@ def discover_websockets(page_url: str, html_content: str, response_headers: dict
     Discovered endpoints are stored in the WebSockets table and, if
     --active-probes is enabled, passed to check_websocket_security().
     """
+    if isinstance(html_content, bytes):
+        html_content = html_content.decode("utf-8", errors="ignore")
+
     found: set = set()
 
     # 1. Explicit ws:// / wss:// literals in page source
