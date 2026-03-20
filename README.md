@@ -88,7 +88,7 @@ python3 main.py -D <url> [options]
 | `--ignore-robots` | off | Ignore `robots.txt` restrictions |
 | `--playwright` | off | Enable Chromium rendering for JS-heavy pages |
 | `--no-social` | off | Skip crawling into social media domains |
-| `--no-skip-google-tracking` | off | Crawl Google Play and analytics URLs (skipped by default) |
+| `--no-skip-google-tracking` | off | Crawl Google tracking, Maps, and Fonts CDN URLs (skipped by default) |
 | `--stealth` | `LOUD` | Stealth profile: `LOUD` (fast), `NORMAL` (moderate delays), `GHOST` (slow, rotated UAs, randomised) |
 | `--bug-bounty-header` | — | Injects `X-Bug-Bounty: <value>` into all requests — required by some bug bounty programs |
 | `--active-probes` | off | Enable payload-injecting checks: path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT), WebSocket security probes (origin validation, auth, scheme), XXE injection (XML/SOAP entity expansion), prototype pollution (server-side body/query probes + client-side JS sink detection), and HTTP request smuggling (CL.TE, TE.CL, TE.TE via raw sockets). **Only use against targets you are authorised to test.** |
@@ -117,7 +117,7 @@ python3 main.py -D https://example.com --active-probes
 
 ### Web UI
 
-Start `app.py` and open `http://localhost:5000`. The control panel sidebar lets you configure all scan options including stealth profile, bug bounty header, social media filter, Google tracking filter, and active probes. All views update live as the crawler runs.
+Start `app.py` and open `http://localhost:5000`. The control panel sidebar lets you configure all scan options including stealth profile, bug bounty header, social media filter, Google tracking/CDN filter, and active probes. All views update live as the crawler runs.
 
 **Views available in the UI:**
 
@@ -903,7 +903,7 @@ Several measures are in place to reduce noise:
 
 **Email false positive filter** — Email regex matches are validated before storing: domain part must not contain slashes (image path artifacts), TLD must not be a media extension (`.png`, `.jpg`, `.mp4`, etc.), and single generic addresses (`support@`, `info@`, `noreply@`, etc.) do not generate alerts.
 
-**Google tracking / Play Store URL filter** — `play.google.com`, `google-analytics.com`, `analytics.google.com`, `googletagmanager.com`, `googleadservices.com`, and `doubleclick.net` are skipped during crawling by default. Disable with `--no-skip-google-tracking`.
+**Google tracking / CDN URL filter** — `play.google.com`, `google-analytics.com`, `analytics.google.com`, `googletagmanager.com`, `googleadservices.com`, `doubleclick.net`, `maps.google.com`, `maps.googleapis.com`, `fonts.googleapis.com`, and `fonts.gstatic.com` are skipped during crawling by default. Disable with `--no-skip-google-tracking`.
 
 **TODO comment scope** — Comment scanning is restricted to first-party JS only (CDN and vendor URLs excluded) and requires explicit `TODO`, `FIXME`, `HACK`, or `NOTE` keywords — not arbitrary keyword matches.
 

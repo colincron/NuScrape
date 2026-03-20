@@ -4616,7 +4616,7 @@ SOCIAL_MEDIA_DOMAINS = {
 # Mutable flag set by --no-social at runtime
 SOCIAL_FILTER_FLAGS = {"enabled": False}
 
-# Google tracking / Play Store domains — skipped by default, disable with --no-skip-google-tracking
+# Google tracking / Play Store / CDN domains — skipped by default, disable with --no-skip-google-tracking
 SKIP_GOOGLE_TRACKING = True
 _GOOGLE_TRACKING_DOMAINS = {
     "play.google.com",
@@ -4625,10 +4625,16 @@ _GOOGLE_TRACKING_DOMAINS = {
     "googletagmanager.com",
     "googleadservices.com",
     "doubleclick.net",
+    # Maps
+    "maps.google.com",
+    "maps.googleapis.com",
+    # Fonts CDN
+    "fonts.googleapis.com",
+    "fonts.gstatic.com",
 }
 
 def is_google_tracking_url(url):
-    """Return True if the URL is a Google tracking or Play Store domain."""
+    """Return True if the URL is a Google tracking, Play Store, Maps, or Fonts CDN domain."""
     try:
         netloc = urlparse(url).netloc.lower()
         if netloc.startswith("www."):
@@ -11429,7 +11435,7 @@ if __name__ == "__main__":
     parser.add_argument("--playwright",    action="store_true",  help="Enable Playwright JS rendering for JS-heavy pages")
     parser.add_argument("--no-social",     action="store_true",  help="Skip crawling into social media domains (Facebook, Twitter, YouTube, etc.)")
     parser.add_argument("--no-skip-google-tracking", action="store_true",
-                        help="Crawl Google Play and analytics URLs (default: skip them)")
+                        help="Crawl Google tracking, Maps, and Fonts CDN URLs (default: skip them)")
     parser.add_argument("--stealth",        default="LOUD",       choices=["LOUD", "NORMAL", "GHOST"],
                         help="Stealth profile: LOUD (fast, default), NORMAL (moderate delays), GHOST (slow, randomised)")
     parser.add_argument("--bug-bounty-header", type=str, default=None,
@@ -11477,7 +11483,7 @@ if __name__ == "__main__":
         print("[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.")
     if args.no_skip_google_tracking:
         SKIP_GOOGLE_TRACKING = False
-        print("[*] Google tracking filter disabled — Play Store and analytics URLs will be crawled")
+        print("[*] Google tracking/CDN filter disabled — Play Store, Maps, Fonts, and analytics URLs will be crawled")
     if args.playwright:
         PLAYWRIGHT_FLAGS["enabled"] = True
         if not PLAYWRIGHT_AVAILABLE:

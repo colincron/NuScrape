@@ -737,7 +737,7 @@ td a:hover{text-decoration:underline}
         <label class="toggle"><input type="checkbox" id="noSocial"><span class="toggle-slider"></span></label>
       </div>
       <div class="toggle-row">
-        <label>Skip Google Tracking/Play URLs</label>
+        <label>Skip Google Tracking/CDN URLs</label>
         <label class="toggle"><input type="checkbox" id="skipGoogleTracking" checked><span class="toggle-slider"></span></label>
       </div>
       <div class="toggle-row" style="margin-top:.6rem">
