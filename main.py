@@ -5915,6 +5915,8 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                 check_sqli(url, html)
                 # Command injection — canary echo-based detection
                 check_cmdi(url, html)
+                # LDAP injection — error-based and auth bypass detection
+                check_ldap_injection(url, html)
             # IDOR candidate detection — runs in background thread with timeout
             # to prevent hung verification requests stalling the crawl
             _idor_thread = threading.Thread(
@@ -9099,6 +9101,312 @@ def check_cmdi(page_url: str, html_content) -> None:
                                 break
                 except Exception:
                     pass
+
+
+# ─────────────────────────────────────────────
+# LDAP Injection detection
+# ─────────────────────────────────────────────
+
+# Error strings that confirm server-side LDAP processing
+_LDAP_ERROR_STRINGS = [
+    "LDAP error",
+    "LDAPException",
+    "javax.naming",
+    "com.sun.jndi",
+    "Invalid DN",
+    "supplied argument is not a valid ldap",
+    "Bad search filter",
+    "ldap_search",
+    "LdapErr",
+    "DSA is unwilling to perform",
+    "No Such Object",
+]
+
+# Metacharacter payloads that trigger LDAP errors on unparameterised queries
+_LDAP_ERROR_PAYLOADS = [
+    "*",
+    ")(uid=*",
+    "*(uid=*)",
+    "*(|(uid=*))",
+    "*)(objectClass=*",
+    ")(objectClass=*",
+    "*(objectClass=*)",
+    "\\2a",
+    "\\28",
+    "\\29",
+]
+
+# Classic LDAP auth bypass pairs (username_payload, password_payload)
+_LDAP_BYPASS_PAIRS = [
+    ("*",          "*"),
+    ("admin)(&)",  "anything"),
+    ("*)(&",       "anything"),
+    ("*)(uid=*",   "anything"),
+]
+
+# Body phrases consistent with a successful login
+_LDAP_SUCCESS_BODY = frozenset({
+    "welcome", "logged in", "log out", "logout", "sign out", "signout",
+    "dashboard", "my account", "your account", "profile", "portal",
+    "you are now logged", "successfully authenticated",
+})
+
+# URL path segments that suggest a post-login landing page
+_LDAP_SUCCESS_PATHS = frozenset({
+    "dashboard", "admin", "home", "welcome", "profile", "account",
+    "portal", "main", "index", "overview", "panel",
+})
+
+# Input name/id values that identify a username field
+_LDAP_USER_NAMES = frozenset({
+    "user", "username", "login", "email", "mail", "uid", "name",
+    "account", "userid", "user_name", "user_email",
+    "loginname", "login_name", "uname",
+})
+
+# Input name/id values that identify a password field
+_LDAP_PASS_NAMES = frozenset({
+    "pass", "password", "passwd", "pwd", "secret",
+    "pass1", "password1", "userpass", "user_pass",
+})
+
+_ldapi_tested: set      = set()   # (base_url, param) URL-param pairs already probed
+_ldapi_form_tested: set = set()   # form action URLs already tested for auth bypass
+
+
+def _is_login_form(form) -> bool:
+    """Return True if the BeautifulSoup <form> element looks like an auth form."""
+    inputs     = form.find_all("input")
+    has_pass   = any(i.get("type", "").lower() == "password" for i in inputs)
+    has_user   = any(
+        i.get("name", "").lower() in _LDAP_USER_NAMES
+        or i.get("id",   "").lower() in _LDAP_USER_NAMES
+        for i in inputs
+    )
+    return has_pass and has_user
+
+
+def _ldap_login_success(resp, baseline_cookies: dict) -> bool:
+    """
+    Return True if *resp* looks like a successful login.
+
+    Three independent signals (any one is sufficient):
+      1. Final URL path contains a known post-login segment.
+      2. A new auth-related cookie appeared that was not in the baseline.
+      3. Response body contains a success phrase.
+    """
+    if resp is None:
+        return False
+
+    # Signal 1 — redirect to a success path
+    final_path = urlparse(resp.url).path.lower()
+    if any(seg in final_path for seg in _LDAP_SUCCESS_PATHS):
+        return True
+
+    # Signal 2 — new cookie with an auth-related name
+    new_cookies = set(resp.cookies) - set(baseline_cookies)
+    if new_cookies:
+        _AUTH_COOKIE_NAMES = {"session", "token", "auth", "jwt", "access", "user", "uid"}
+        if any(any(n in c.lower() for n in _AUTH_COOKIE_NAMES) for c in new_cookies):
+            return True
+
+    # Signal 3 — success phrase in body
+    body_lower = (resp.text or "").lower()
+    if any(phrase in body_lower for phrase in _LDAP_SUCCESS_BODY):
+        return True
+
+    return False
+
+
+def check_ldap_injection(page_url: str, html_content) -> None:
+    """
+    LDAP injection and authentication bypass detection.
+
+    Phase 1 — error-based parameter injection:
+      Appends LDAP metacharacter payloads to every URL query parameter
+      found on the page (links + form actions). Flags CRITICAL when a
+      known LDAP error string is reflected in the response.
+
+    Phase 2 — login form authentication bypass:
+      Identifies POST forms that contain both a user and password field.
+      Sends a baseline request with garbage credentials, then retries with
+      classic LDAP wildcard bypass payloads. Flags HIGH when the bypass
+      response contains a success signal that the baseline did not.
+
+    Only called when --active-probes is enabled.
+    Safe-mode only: no directory enumeration, no credential extraction,
+    no directory modifications.
+    8-second timeout per probe. Deduplicates per (base_url, param)
+    and per form action URL.
+    """
+    if not is_in_scope(page_url):
+        return
+    domain = urlparse(page_url).netloc
+    if is_third_party_cdn(domain):
+        return
+
+    try:
+        text = html_content if isinstance(html_content, str) \
+               else html_content.decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(text, "lxml")
+    except Exception:
+        return
+
+    waf_note = ""
+    waf_vendor = _waf_results.get(domain)
+    if waf_vendor:
+        waf_note = f" [WAF: {waf_vendor} detected — result may be a WAF block, not real injection]"
+
+    # ── Phase 1: URL parameter error-based injection ──────────────────────────
+    all_urls = [page_url]
+    for tag in soup.find_all(["a", "form"]):
+        href = tag.get("href") or tag.get("action") or ""
+        if href:
+            all_urls.append(href)
+
+    for raw_url in all_urls:
+        try:
+            resolved = urljoin(page_url, raw_url)
+            parsed   = urlparse(resolved)
+            if is_third_party_cdn(parsed.netloc):
+                continue
+            if not parsed.query:
+                continue
+            if _SQLI_STATIC_RE.search(parsed.path):   # reuse static-file filter
+                continue
+            base = parsed.scheme + "://" + parsed.netloc + parsed.path
+            params = {}
+            for pair in parsed.query.split("&"):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    params[k] = v
+        except Exception:
+            continue
+
+        for param, orig_val in params.items():
+            test_key = (base, param)
+            if test_key in _ldapi_tested:
+                continue
+            _ldapi_tested.add(test_key)
+
+            print(timestamp() + f" LDAPi probe: {base} param={param}")
+
+            for payload in _LDAP_ERROR_PAYLOADS:
+                new_query = "&".join(
+                    f"{k}={orig_val + payload}" if k == param else f"{k}={v}"
+                    for k, v in params.items()
+                )
+                test_url = base + "?" + new_query
+                try:
+                    stealth_delay(domain)
+                    resp = _get_session().get(
+                        test_url,
+                        headers=create_request_header(),
+                        timeout=8,
+                        allow_redirects=True,
+                    )
+                    body = resp.text or ""
+                    for err_str in _LDAP_ERROR_STRINGS:
+                        if err_str.lower() in body.lower():
+                            idx     = body.lower().find(err_str.lower())
+                            snippet = body[max(0, idx - 40):idx + 120].strip()
+                            alert(
+                                "LDAP INJECTION (ERROR-BASED)",
+                                "CRITICAL",
+                                domain,
+                                f"Parameter '{param}' on {base} reflects LDAP error "
+                                f"'{err_str}' with payload: {payload!r} | "
+                                f"Snippet: {snippet!r}{waf_note}",
+                            )
+                            break   # one alert per parameter is enough
+                except Exception:
+                    pass
+
+    # ── Phase 2: Login form authentication bypass ─────────────────────────────
+    for form in soup.find_all("form"):
+        if not _is_login_form(form):
+            continue
+        if form.get("method", "get").upper() != "POST":
+            continue
+
+        action     = form.get("action") or page_url
+        action_url = urljoin(page_url, action)
+        if is_third_party_cdn(urlparse(action_url).netloc):
+            continue
+        if action_url in _ldapi_form_tested:
+            continue
+        _ldapi_form_tested.add(action_url)
+
+        # Resolve username and password field names from the form DOM
+        field_defaults: dict = {}
+        user_field = pass_field = None
+        for inp in form.find_all(["input", "select", "textarea"]):
+            name = inp.get("name", "")
+            if not name:
+                continue
+            field_defaults[name] = inp.get("value", "")
+            itype = inp.get("type", "").lower()
+            if itype == "password":
+                pass_field = name
+            elif (name.lower() in _LDAP_USER_NAMES
+                  or inp.get("id", "").lower() in _LDAP_USER_NAMES):
+                user_field = name
+
+        if not user_field or not pass_field:
+            continue   # cannot identify credential fields; skip
+
+        print(timestamp() + f" LDAP auth bypass probe: {action_url}"
+              + f" [{user_field}={pass_field}]")
+
+        # Baseline with obviously invalid credentials
+        baseline_data = {
+            **field_defaults,
+            user_field: "nuscrape_ldap_baseline_user",
+            pass_field: "nuscrape_ldap_baseline_pass",
+        }
+        try:
+            stealth_delay(domain)
+            baseline_resp    = _get_session().post(
+                action_url,
+                data=baseline_data,
+                headers=create_request_header(),
+                timeout=8,
+                allow_redirects=True,
+            )
+            baseline_cookies = dict(baseline_resp.cookies)
+        except Exception:
+            continue   # cannot establish baseline; skip this form
+
+        # Try each bypass payload pair
+        for user_payload, pass_payload in _LDAP_BYPASS_PAIRS:
+            bypass_data = {
+                **field_defaults,
+                user_field: user_payload,
+                pass_field: pass_payload,
+            }
+            try:
+                stealth_delay(domain)
+                bypass_resp = _get_session().post(
+                    action_url,
+                    data=bypass_data,
+                    headers=create_request_header(),
+                    timeout=8,
+                    allow_redirects=True,
+                )
+                if _ldap_login_success(bypass_resp, baseline_cookies):
+                    body_snip = (bypass_resp.text or "")[:300].strip()
+                    alert(
+                        "LDAP AUTHENTICATION BYPASS",
+                        "HIGH",
+                        domain,
+                        f"Login form at {action_url} accepted LDAP wildcard bypass — "
+                        f"{user_field}={user_payload!r}, {pass_field}={pass_payload!r} | "
+                        f"Final URL: {bypass_resp.url} | "
+                        f"Snippet: {body_snip!r}{waf_note}",
+                    )
+                    break   # one alert per form
+            except Exception:
+                pass
 
 
 # ─────────────────────────────────────────────
