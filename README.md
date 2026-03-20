@@ -91,7 +91,7 @@ python3 main.py -D <url> [options]
 | `--no-skip-google-tracking` | off | Crawl Google Play and analytics URLs (skipped by default) |
 | `--stealth` | `LOUD` | Stealth profile: `LOUD` (fast), `NORMAL` (moderate delays), `GHOST` (slow, rotated UAs, randomised) |
 | `--bug-bounty-header` | — | Injects `X-Bug-Bounty: <value>` into all requests — required by some bug bounty programs |
-| `--active-probes` | off | Enable payload-injecting checks: path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT), WebSocket security probes (origin validation, auth, scheme), XXE injection (XML/SOAP entity expansion), and prototype pollution (server-side body/query probes + client-side JS sink detection). **Only use against targets you are authorised to test.** |
+| `--active-probes` | off | Enable payload-injecting checks: path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT), WebSocket security probes (origin validation, auth, scheme), XXE injection (XML/SOAP entity expansion), prototype pollution (server-side body/query probes + client-side JS sink detection), and HTTP request smuggling (CL.TE, TE.CL, TE.TE via raw sockets). **Only use against targets you are authorised to test.** |
 
 **Examples:**
 
@@ -430,6 +430,27 @@ Sends `TRACE`, `PUT`, `DELETE`, `CONNECT`, and `PATCH` to the root path of each 
 
 ---
 
+#### HTTP Request Smuggling Detection
+
+Probes the target host for CL.TE, TE.CL, and TE.TE desync vulnerabilities using **raw socket connections** (bypasses `requests` header normalisation). Detection is timing- and status-based only — no queue poisoning, no interference with other users. All findings are MEDIUM and require manual confirmation with Burp Suite's HTTP Request Smuggler. Requires `--active-probes`. Deduplicated per host.
+
+**CL.TE** — sends a request with `Content-Length` deliberately off by one and `Transfer-Encoding: chunked` with body `0\r\n\r\nX`. If the front-end uses Content-Length and the back-end uses Transfer-Encoding, the trailing `X` is left in the pipeline causing a stall.
+
+**TE.CL** — sends a valid chunked body (`8\r\nSMUGGLED\r\n0\r\n\r\n`) with `Content-Length: 3`. If the front-end uses TE and the back-end uses CL, only 3 bytes are consumed, leaving the rest in the pipeline.
+
+**TE.TE obfuscation** — tests five Transfer-Encoding variants (`xchunked`, duplicate header, trailing space, `CHUNKED`, `x`) to detect whether one layer processes and another ignores the header.
+
+| Signal | Severity | Interpretation |
+|---|---|---|
+| Probe times out (baseline did not) | MEDIUM | Back-end stalled waiting for more data |
+| Probe returns 400 or 408 (baseline did not) | MEDIUM | Ambiguous request rejected by one layer |
+
+- Baseline request sent first; probe is skipped if baseline itself times out
+- 10-second socket timeout per probe; TLS supported
+- At most one TE.TE signal per host (stops after first matching variant)
+
+---
+
 #### Default Credentials
 After fingerprinting admin panels via tech detection, attempts default credential pairs against login endpoints. Covers:
 
@@ -673,7 +694,7 @@ Several measures are in place to reduce noise:
 
 NuScrape is designed for **responsible disclosure research only**. All active probes (backup files, credential testing, open redirect injection, IDOR verification) are limited to confirming the existence of a vulnerability and do not exfiltrate data, maintain persistence, or cause service disruption.
 
-> **Note:** Payload-injecting checks (path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, WebSocket security probes, XXE injection, prototype pollution) are **disabled by default** and must be explicitly enabled with `--active-probes`. A warning is printed at startup and displayed in the UI whenever this flag is active. Only enable it against targets you are authorised to test.
+> **Note:** Payload-injecting checks (path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, WebSocket security probes, XXE injection, prototype pollution, HTTP request smuggling) are **disabled by default** and must be explicitly enabled with `--active-probes`. A warning is printed at startup and displayed in the UI whenever this flag is active. Only enable it against targets you are authorised to test.
 
 **When reporting findings:**
 
@@ -734,10 +755,10 @@ Start scan
     │                   ├─ Admin panel detection (59 paths)
     │                   ├─ Spring Boot Actuator
     │                   ├─ GraphQL introspection (common paths) ┐
-    │                   ├─ CORS misconfiguration                │ requires --active-probes
-    │                   ├─ Default credentials                  │
-    │                   └─ Dangerous HTTP methods               ┘
-    │                        (TRACE/PUT/DELETE/CONNECT)
+    │                   ├─ CORS misconfiguration                │
+    │                   ├─ Default credentials                  │ requires --active-probes
+    │                   ├─ Dangerous HTTP methods               │
+    │                   └─ HTTP request smuggling (CL.TE/TE.CL) ┘
     │                   ├─ WAF fingerprinting
     │                   └─ /.well-known/ enumeration
     │

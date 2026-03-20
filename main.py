@@ -2910,6 +2910,200 @@ def check_dangerous_http_methods(base_url, domain):
         except Exception as e:
             print_error(f"check_dangerous_http_methods: {method} {base_url}: {e}")
 
+
+# ─────────────────────────────────────────────
+# HTTP request smuggling detection
+# ─────────────────────────────────────────────
+
+_smuggling_tested: set = set()
+
+
+def _smuggling_raw_send(host: str, port: int, use_ssl: bool,
+                        raw: bytes, timeout: int = 10) -> tuple:
+    """
+    Open a raw TCP (or TLS) socket, send `raw`, and read the response.
+    Returns (response_bytes, timed_out).  Never raises — exceptions are
+    caught and treated as (b"", False).
+    """
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+        if use_ssl:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode    = ssl.CERT_NONE
+            sock = ctx.wrap_socket(sock, server_hostname=host)
+        sock.settimeout(timeout)
+        sock.sendall(raw)
+        buf = b""
+        try:
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+                # Stop once headers + a small body have arrived — we don't
+                # need the full response, just enough to read the status line.
+                if b"\r\n\r\n" in buf and len(buf) > 512:
+                    break
+        except socket.timeout:
+            return buf, True   # timeout while reading → server is waiting
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
+        return buf, False
+    except socket.timeout:
+        return b"", True
+    except Exception:
+        return b"", False
+
+
+def _smuggling_status(response_bytes: bytes) -> int:
+    """Parse the HTTP status code from a raw response, or 0 on failure."""
+    try:
+        first_line = response_bytes.split(b"\r\n", 1)[0]
+        return int(first_line.split(b" ", 2)[1])
+    except Exception:
+        return 0
+
+
+def check_http_smuggling(base_url: str, domain: str) -> None:
+    """
+    Probe the target host for CL.TE, TE.CL, and TE.TE request smuggling
+    desync vulnerabilities using raw socket connections.
+
+    Detection is timing- and status-based only — no queue poisoning, no
+    attempt to affect other users.  All findings are MEDIUM and require
+    manual confirmation with Burp Suite's HTTP Request Smuggler.
+
+    Only runs when --active-probes is enabled. Deduplicates per host.
+    10-second socket timeout per probe.
+    """
+    parsed   = urlparse(base_url)
+    host     = parsed.hostname or domain
+    use_ssl  = parsed.scheme == "https"
+    port     = parsed.port or (443 if use_ssl else 80)
+    dedup_key = f"{host}:{port}"
+
+    if dedup_key in _smuggling_tested:
+        return
+    _smuggling_tested.add(dedup_key)
+
+    # Helper: build a minimal raw HTTP/1.1 POST request
+    def _build(extra_headers: dict, body: bytes) -> bytes:
+        hdrs  = f"POST / HTTP/1.1\r\nHost: {host}\r\n"
+        for k, v in extra_headers.items():
+            hdrs += f"{k}: {v}\r\n"
+        hdrs += "Connection: close\r\n\r\n"
+        return hdrs.encode() + body
+
+    # ── Baseline: a normal POST so we know what a clean response looks like ──
+    baseline_raw  = _build({"Content-Length": "0"}, b"")
+    baseline_resp, baseline_timeout = _smuggling_raw_send(
+        host, port, use_ssl, baseline_raw, timeout=10)
+    baseline_status = _smuggling_status(baseline_resp)
+
+    # If baseline itself timed out the host is too slow to probe reliably.
+    if baseline_timeout:
+        return
+
+    def _flag(technique: str, detail: str) -> None:
+        alert(
+            f"HTTP REQUEST SMUGGLING — {technique}",
+            "MEDIUM",
+            base_url,
+            detail + (
+                f"  Technique: {technique}. "
+                f"Confirm exploitability with Burp Suite HTTP Request Smuggler "
+                f"before reporting."
+            )
+        )
+        print(timestamp() + f" [!] HTTP smuggling signal ({technique}): {host}:{port}")
+
+    # ── CL.TE — front-end honours Content-Length, back-end honours TE ────────
+    # Body: "0\r\n\r\nX" = 5 bytes, but CL=6 so front-end forwards all 6;
+    # back-end (chunked) reads "0\r\n\r\n" as end-of-body, then "X" is left
+    # in the pipeline — the back-end stalls waiting for the next request line.
+    cl_te_body = b"0\r\n\r\nX"
+    cl_te_raw  = _build({
+        "Content-Length":    str(len(cl_te_body) + 1),   # deliberately off by 1
+        "Transfer-Encoding": "chunked",
+    }, cl_te_body)
+    cl_te_resp, cl_te_timeout = _smuggling_raw_send(
+        host, port, use_ssl, cl_te_raw, timeout=10)
+    cl_te_status = _smuggling_status(cl_te_resp)
+
+    if cl_te_timeout or cl_te_status in (400, 408):
+        _flag("CL.TE",
+              f"Server at {host}:{port} {'timed out' if cl_te_timeout else f'returned {cl_te_status}'} "
+              f"on a request with Content-Length={len(cl_te_body) + 1} and "
+              f"Transfer-Encoding: chunked with body '0\\r\\n\\r\\nX' — "
+              f"possible CL.TE desync: front-end may use Content-Length while "
+              f"back-end uses Transfer-Encoding.  ")
+
+    # ── TE.CL — front-end honours TE, back-end honours Content-Length ────────
+    # Valid chunked body: 8-byte chunk "SMUGGLED" then terminator.
+    # CL=3 tells a CL-based back-end to read only 3 bytes ("8\r\n"),
+    # leaving the remainder in the pipeline.
+    te_cl_body = b"8\r\nSMUGGLED\r\n0\r\n\r\n"
+    te_cl_raw  = _build({
+        "Content-Length":    "3",
+        "Transfer-Encoding": "chunked",
+    }, te_cl_body)
+    te_cl_resp, te_cl_timeout = _smuggling_raw_send(
+        host, port, use_ssl, te_cl_raw, timeout=10)
+    te_cl_status = _smuggling_status(te_cl_resp)
+
+    if te_cl_timeout or te_cl_status in (400, 408):
+        _flag("TE.CL",
+              f"Server at {host}:{port} {'timed out' if te_cl_timeout else f'returned {te_cl_status}'} "
+              f"on a request with Content-Length=3 and Transfer-Encoding: chunked "
+              f"with body '8\\r\\nSMUGGLED\\r\\n0\\r\\n\\r\\n' — "
+              f"possible TE.CL desync: front-end may use Transfer-Encoding while "
+              f"back-end uses Content-Length.  ")
+
+    # ── TE.TE obfuscation — one layer processes, the other ignores the header ─
+    # For each variant, send a well-formed chunked body; if the server times out
+    # or errors when it previously responded cleanly to the baseline, the
+    # obfuscated header confused one layer.
+    _TE_VARIANTS = [
+        ("xchunked",          "Transfer-Encoding: xchunked"),
+        ("chunked (duplicate)", "Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked"),
+        ("trailing-space",    "Transfer-Encoding: chunked "),
+        ("CHUNKED (caps)",    "Transfer-Encoding: CHUNKED"),
+        ("x (invalid)",       "Transfer-Encoding: x"),
+    ]
+    # A minimal valid chunked body — nothing ambiguous in the body itself.
+    te_body = b"0\r\n\r\n"
+
+    for variant_name, raw_te_header in _TE_VARIANTS:
+        # Build the raw request manually so we can inject multi-line or
+        # malformed TE headers that requests.Session would strip/normalise.
+        raw_req = (
+            f"POST / HTTP/1.1\r\n"
+            f"Host: {host}\r\n"
+            f"{raw_te_header}\r\n"
+            f"Content-Length: {len(te_body)}\r\n"
+            f"Connection: close\r\n\r\n"
+        ).encode() + te_body
+
+        resp_bytes, timed_out = _smuggling_raw_send(
+            host, port, use_ssl, raw_req, timeout=10)
+        status = _smuggling_status(resp_bytes)
+
+        # Flag only if the result differs meaningfully from the clean baseline:
+        # baseline was non-error and this probe timed out or produced 400/408.
+        if (timed_out or status in (400, 408)) and baseline_status not in (400, 408):
+            _flag(f"TE.TE ({variant_name})",
+                  f"Server at {host}:{port} {'timed out' if timed_out else f'returned {status}'} "
+                  f"on Transfer-Encoding obfuscation variant '{variant_name}' "
+                  f"(baseline status: {baseline_status}) — "
+                  f"possible TE.TE desync: the obfuscated header may be processed "
+                  f"by one layer and ignored by another.  ")
+            break  # one TE.TE signal per host is sufficient
+
+
 # ─────────────────────────────────────────────
 # WAF / security appliance fingerprinting
 # ─────────────────────────────────────────────
@@ -3434,6 +3628,7 @@ def enrich_domain(domain_name, response_headers=None, html_content=None):
                     (check_cors_misconfiguration,    (base, clean_domain)),
                     (check_default_credentials,      (base, clean_domain)),
                     (check_dangerous_http_methods,   (base, clean_domain)),
+                    (check_http_smuggling,           (base, clean_domain)),
                 ]
             with _TPE(max_workers=8) as _ex:
                 _futs = {_ex.submit(fn, *args): fn for fn, args in _exposure_tasks}
