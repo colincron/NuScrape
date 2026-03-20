@@ -18,3 +18,5 @@ pymysql
 cryptography
 # Optional — deep TLS protocol/cipher suite analysis
 sslyze
+# Optional — JWT algorithm confusion detection
+pyjwt[crypto]

