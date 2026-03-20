@@ -90,6 +90,79 @@ def _sev_color(severity: str) -> str:
     return f"{code}{severity}{reset}" if code else severity
 
 # ─────────────────────────────────────────────
+# DNS cache (TTL-based, shared across threads)
+# ─────────────────────────────────────────────
+
+_DNS_CACHE: dict      = {}          # (host, family, type, proto) -> (addrs, expire_monotonic)
+_DNS_CACHE_TTL: float = 300.0       # seconds
+_DNS_CACHE_LOCK       = threading.Lock()
+_DNS_ORIG_GETADDRINFO = socket.getaddrinfo
+
+
+def _is_ip_literal(host: str) -> bool:
+    """Return True if *host* is already a resolved IPv4/IPv6 address."""
+    for family in (socket.AF_INET, socket.AF_INET6):
+        try:
+            socket.inet_pton(family, host)
+            return True
+        except OSError:
+            pass
+    return False
+
+
+def _cached_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):  # noqa: A002
+    """Drop-in replacement for socket.getaddrinfo that caches results for _DNS_CACHE_TTL seconds."""
+    if host is None or _is_ip_literal(host):
+        return _DNS_ORIG_GETADDRINFO(host, port, family, type, proto, flags)
+
+    cache_key = (host, family, type, proto)
+    now = time.monotonic()
+
+    with _DNS_CACHE_LOCK:
+        entry = _DNS_CACHE.get(cache_key)
+        if entry is not None:
+            addrs, expire = entry
+            if now < expire:
+                # Cache hit — no network round-trip needed
+                return addrs
+
+    result = _DNS_ORIG_GETADDRINFO(host, port, family, type, proto, flags)
+
+    with _DNS_CACHE_LOCK:
+        _DNS_CACHE[cache_key] = (result, now + _DNS_CACHE_TTL)
+
+    return result
+
+
+# Install the caching resolver globally — all socket-based I/O benefits automatically.
+socket.getaddrinfo = _cached_getaddrinfo  # type: ignore[assignment]
+
+# ─────────────────────────────────────────────
+# Thread-local connection pool (requests.Session per thread)
+# ─────────────────────────────────────────────
+
+_thread_local = threading.local()
+
+
+def _get_session() -> requests.Session:
+    """Return the requests.Session for the calling thread, creating it on first use.
+
+    Each session mounts an HTTPAdapter with connection pooling so TCP connections
+    to the same host are reused across calls within the same thread.
+    """
+    sess = getattr(_thread_local, "session", None)
+    if sess is None:
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=10,
+            pool_maxsize=20,
+        )
+        sess = requests.Session()
+        sess.mount("http://", adapter)
+        sess.mount("https://", adapter)
+        _thread_local.session = sess
+    return sess
+
+# ─────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────
 
@@ -639,7 +712,8 @@ def safe_get(url, timeout=REQUEST_TIMEOUT, method="get"):
     try:
         domain = urlparse(url).netloc
         stealth_delay(domain)
-        fn = requests.get if method == "get" else requests.head
+        sess = _get_session()
+        fn = sess.get if method == "get" else sess.head
         return fn(url, headers=create_request_header(), timeout=timeout, allow_redirects=True)
     except Exception:
         return None
@@ -1075,7 +1149,7 @@ def query_ct_logs(domain):
     print(timestamp() + " CT log query for " + root + " (crt.sh)...")
     try:
         stealth_delay("crt.sh")
-        resp = requests.get(
+        resp = _get_session().get(
             "https://crt.sh/",
             params={"q": f"%.{root}", "output": "json"},
             headers=stealth_headers({"Accept": "application/json"}),
@@ -1663,7 +1737,7 @@ def _http_waf_check(domain, port):
     scheme = "https" if port in (443, 8443) else "http"
     url = f"{scheme}://{domain}:{port}/"
     try:
-        r = requests.get(url, headers=create_request_header(),
+        r = _get_session().get(url, headers=create_request_header(),
                          timeout=5, allow_redirects=True, verify=False)
         return _response_waf_provider(r)
     except Exception:
@@ -1823,7 +1897,7 @@ def asn_lookup(ip):
         return _asn_cache[ip]
     try:
         stealth_delay("ipinfo.io")
-        resp = requests.get(
+        resp = _get_session().get(
             "https://ipinfo.io/" + ip + "/json",
             headers=stealth_headers({"Accept": "application/json"}),
             timeout=5
@@ -2262,7 +2336,7 @@ def check_sensitive_files(base_url, domain):
     canary = base_url.rstrip("/") + f"/nuscrape-canary-{random.randint(100000,999999)}.json"
     try:
         stealth_delay(domain)
-        cr = requests.get(canary, headers=create_request_header(),
+        cr = _get_session().get(canary, headers=create_request_header(),
                           timeout=3, allow_redirects=False)
         if cr and cr.status_code == 200:
             print(timestamp() + f" Sensitive file check skipped (catch-all 200): {domain}")
@@ -2274,7 +2348,7 @@ def check_sensitive_files(base_url, domain):
         url = base_url.rstrip("/") + path
         try:
             stealth_delay(domain)
-            resp = requests.get(url, headers=create_request_header(),
+            resp = _get_session().get(url, headers=create_request_header(),
                                 timeout=3, allow_redirects=False)
             if not resp or resp.status_code not in (200, 206):
                 return
@@ -2416,7 +2490,7 @@ def check_admin_panels(base_url, domain):
     canary = base_url.rstrip("/") + f"/nuscrape-canary-{random.randint(100000,999999)}.admin"
     catch_all_200 = False
     try:
-        cr = requests.get(canary, headers=create_request_header(),
+        cr = _get_session().get(canary, headers=create_request_header(),
                           timeout=4, allow_redirects=False)
         if cr and cr.status_code == 200:
             catch_all_200 = True
@@ -2428,7 +2502,7 @@ def check_admin_panels(base_url, domain):
         url = base_url.rstrip("/") + path
         try:
             stealth_delay(domain)
-            resp = requests.get(url, headers=create_request_header(),
+            resp = _get_session().get(url, headers=create_request_header(),
                                 timeout=4, allow_redirects=False)
             if not resp:
                 return
@@ -2935,7 +3009,7 @@ def check_cors_misconfiguration(base_url, domain):
         # ── Test 1: Arbitrary origin ───────────────────────────────
         evil_origin = "https://evil-cors-probe.com"
         stealth_delay(domain)
-        resp = requests.get(
+        resp = _get_session().get(
             base_url,
             headers={**create_request_header(), "Origin": evil_origin},
             timeout=8,
@@ -2982,7 +3056,7 @@ def check_cors_misconfiguration(base_url, domain):
 
         # ── Test 2: Null origin bypass ─────────────────────────────
         stealth_delay(domain)
-        null_resp = requests.get(
+        null_resp = _get_session().get(
             base_url,
             headers={**create_request_header(), "Origin": "null"},
             timeout=8,
@@ -3005,7 +3079,7 @@ def check_cors_misconfiguration(base_url, domain):
         # ── Test 3: Pre-domain prefix match bypass ─────────────────
         pre_origin = f"https://evil{root}"
         stealth_delay(domain)
-        pre_resp = requests.get(
+        pre_resp = _get_session().get(
             base_url,
             headers={**create_request_header(), "Origin": pre_origin},
             timeout=8,
@@ -3028,7 +3102,7 @@ def check_cors_misconfiguration(base_url, domain):
         # ── Test 4: Subdomain wildcard trust bypass ────────────────
         sub_origin = f"https://evil.{root}"
         stealth_delay(domain)
-        sub_resp = requests.get(
+        sub_resp = _get_session().get(
             base_url,
             headers={**create_request_header(), "Origin": sub_origin},
             timeout=8,
@@ -3090,7 +3164,7 @@ def check_dangerous_http_methods(base_url, domain):
     for method in _DANGEROUS_METHODS:
         try:
             stealth_delay(domain)
-            resp = requests.request(
+            resp = _get_session().request(
                 method,
                 base_url,
                 headers=create_request_header(),
@@ -3456,7 +3530,7 @@ def detect_waf(base_url, domain):
 
         # Pass 2 — WAF-triggering request (XSS payload in a query param)
         probe_url = base_url.rstrip("/") + "/?waf_probe=<script>alert(1)</script>"
-        r2 = requests.get(probe_url, headers=create_request_header(),
+        r2 = _get_session().get(probe_url, headers=create_request_header(),
                           timeout=6, allow_redirects=True)
         _check_response(r2, "probe")
 
@@ -3588,7 +3662,7 @@ def check_well_known(base_url, domain):
         url = base_url.rstrip("/") + path
         try:
             stealth_delay(domain)
-            resp = requests.get(url, headers=create_request_header(),
+            resp = _get_session().get(url, headers=create_request_header(),
                                 timeout=6, allow_redirects=False)
             if not resp or resp.status_code not in (200, 206):
                 continue
@@ -3723,7 +3797,7 @@ def check_host_header_injection(base_url, domain):
         test_headers = {**base_headers, header_name: header_value}
         try:
             stealth_delay(domain)
-            resp = requests.get(
+            resp = _get_session().get(
                 base_url,
                 headers=test_headers,
                 timeout=8,
@@ -4068,7 +4142,7 @@ def _alert_high_value_subdomain(fqdn, label, ip, status, source=""):
     scheme = "https://" if (status and status < 400) else "http://"
     source_note = f" (discovered via {source})" if source else ""
     try:
-        content_resp = requests.get(
+        content_resp = _get_session().get(
             scheme + fqdn,
             headers=create_request_header(),
             timeout=6,
@@ -4705,7 +4779,7 @@ def check_js_source_map(page_url, js_url, js_response=None):
         seen.add(map_url)
         try:
             stealth_delay(urlparse(map_url).netloc)
-            resp = requests.get(
+            resp = _get_session().get(
                 map_url, headers=create_request_header(),
                 timeout=6, allow_redirects=False,
             )
@@ -5775,21 +5849,21 @@ def check_default_credentials(base_url, domain):
                 try:
                     stealth_delay(domain)
                     if method == "POST":
-                        resp = requests.post(login_url, data=creds,
+                        resp = _get_session().post(login_url, data=creds,
                                              headers=create_request_header(),
                                              timeout=6, allow_redirects=True)
                     elif method == "POST_JSON":
-                        resp = requests.post(login_url, json=creds,
+                        resp = _get_session().post(login_url, json=creds,
                                              headers={**create_request_header(),
                                                       "Content-Type": "application/json"},
                                              timeout=6, allow_redirects=True)
                     elif method == "GET_BASIC":
-                        resp = requests.get(login_url,
+                        resp = _get_session().get(login_url,
                                             auth=(creds.get("username",""), creds.get("password","")),
                                             headers=create_request_header(),
                                             timeout=6)
                     else:  # GET
-                        resp = requests.get(login_url, headers=create_request_header(), timeout=6)
+                        resp = _get_session().get(login_url, headers=create_request_header(), timeout=6)
 
                     body = resp.text.lower()
 
@@ -5892,7 +5966,7 @@ def check_actuator_exposure(base_url, domain):
             # endpoint doesn't exist. CloudFront and nginx redirect unknown
             # paths rather than returning 404, causing false positives.
             stealth_delay(domain)
-            resp = requests.get(url, headers=create_request_header(),
+            resp = _get_session().get(url, headers=create_request_header(),
                                 timeout=5, allow_redirects=False)
             if not resp or resp.status_code not in (200, 401, 403):
                 continue
@@ -5949,7 +6023,7 @@ def check_actuator_exposure(base_url, domain):
     shutdown_url = base_url.rstrip("/") + "/actuator/shutdown"
     try:
         stealth_delay(domain)
-        shutdown_resp = requests.post(
+        shutdown_resp = _get_session().post(
             shutdown_url,
             headers=create_request_header(),
             timeout=5,
@@ -6035,7 +6109,7 @@ def check_technology_specific(base_url: str, domain: str,
         try:
             stealth_delay(domain)
             url = base_url.rstrip("/") + path
-            resp = requests.request(
+            resp = _get_session().request(
                 method, url,
                 headers=create_request_header(),
                 timeout=8,
@@ -6432,7 +6506,7 @@ def _probe_graphql_endpoint(url, domain):
     """
     try:
         stealth_delay(domain)
-        resp = requests.post(
+        resp = _get_session().post(
             url,
             data=GRAPHQL_INTROSPECTION_QUERY,
             headers={**create_request_header(), "Content-Type": "application/json"},
@@ -6482,7 +6556,7 @@ def probe_graphql_url(page_url):
         if verdict == "enabled":
             type_count = 0
             try:
-                resp = requests.post(
+                resp = _get_session().post(
                     probe_url,
                     data=GRAPHQL_INTROSPECTION_QUERY,
                     headers={**create_request_header(), "Content-Type": "application/json"},
@@ -6533,7 +6607,7 @@ def check_graphql_introspection(base_url, domain):
         verdict = _probe_graphql_endpoint(url, domain)
         if verdict == "enabled":
             try:
-                resp = requests.post(
+                resp = _get_session().post(
                     url,
                     data=GRAPHQL_INTROSPECTION_QUERY,
                     headers={**create_request_header(), "Content-Type": "application/json"},
@@ -6754,7 +6828,7 @@ def check_open_redirects(page_url, html_content):
 
             try:
                 stealth_delay(domain)
-                resp = requests.get(
+                resp = _get_session().get(
                     test_url,
                     headers=create_request_header(),
                     timeout=5,
@@ -6856,7 +6930,7 @@ def check_mass_assignment(page_url, html_content):
 
         try:
             stealth_delay(domain)
-            resp = requests.request(
+            resp = _get_session().request(
                 method,
                 endpoint_url,
                 json=payload,
@@ -6924,7 +6998,7 @@ def check_api_versioning(page_url):
     # Fetch current version's status to use as comparison baseline
     try:
         stealth_delay(domain)
-        current_resp   = requests.get(
+        current_resp   = _get_session().get(
             page_url,
             headers=create_request_header(),
             timeout=6,
@@ -6945,7 +7019,7 @@ def check_api_versioning(page_url):
 
         try:
             stealth_delay(domain)
-            alt_resp   = requests.get(
+            alt_resp   = _get_session().get(
                 alt_url,
                 headers=create_request_header(),
                 timeout=6,
@@ -7306,7 +7380,7 @@ def check_path_traversal(page_url, html_content):
                     test_url = base_endpoint + "?" + new_query
 
                     stealth_delay(domain)
-                    resp = requests.get(
+                    resp = _get_session().get(
                         test_url,
                         headers=create_request_header(),
                         timeout=6,
@@ -7695,7 +7769,7 @@ def check_ssti(page_url, html_content):
             test_url = base + "?" + new_query
             try:
                 stealth_delay(domain)
-                resp = requests.get(
+                resp = _get_session().get(
                     test_url,
                     headers=create_request_header(),
                     timeout=5,
@@ -7794,7 +7868,7 @@ def check_crlf_injection(page_url, html_content):
             test_url = base + "?" + new_query
             try:
                 stealth_delay(domain)
-                resp = requests.get(
+                resp = _get_session().get(
                     test_url,
                     headers=create_request_header(),
                     timeout=5,
@@ -7963,7 +8037,7 @@ def check_xxe_injection(page_url: str, html_content: str, response_headers: dict
         if "wsdl" not in parsed_ep.query.lower() and "wsdl" not in parsed_ep.path.lower():
             try:
                 stealth_delay(domain)
-                wsdl_resp = requests.get(
+                wsdl_resp = _get_session().get(
                     wsdl_url,
                     headers=create_request_header(),
                     timeout=8,
@@ -8003,7 +8077,7 @@ def check_xxe_injection(page_url: str, html_content: str, response_headers: dict
                 stealth_delay(domain)
                 hdrs = create_request_header()
                 hdrs["Content-Type"] = content_type
-                resp = requests.post(
+                resp = _get_session().post(
                     endpoint_url,
                     data=payload.encode("utf-8"),
                     headers=hdrs,
@@ -8090,7 +8164,7 @@ def _pp_baseline(endpoint_url: str, method: str, base_json: dict) -> tuple:
     """
     try:
         hdrs = {**create_request_header(), "Content-Type": "application/json"}
-        r = requests.request(
+        r = _get_session().request(
             method, endpoint_url,
             json=base_json,
             headers=hdrs,
@@ -8167,7 +8241,7 @@ def check_prototype_pollution(page_url: str, html_content: str) -> None:
             try:
                 stealth_delay(domain)
                 hdrs = {**create_request_header(), "Content-Type": "application/json"}
-                resp = requests.request(
+                resp = _get_session().request(
                     method, endpoint_url,
                     json=probe_body,
                     headers=hdrs,
@@ -8230,7 +8304,7 @@ def check_prototype_pollution(page_url: str, html_content: str) -> None:
             )
             try:
                 stealth_delay(domain)
-                resp = requests.get(
+                resp = _get_session().get(
                     test_url,
                     headers=create_request_header(),
                     timeout=8,
@@ -8365,7 +8439,7 @@ def _idor_requires_auth(url):
     try:
         # Use a clean session with no cookies
         stealth_delay(urlparse(url).netloc)
-        resp = requests.get(
+        resp = _get_session().get(
             url,
             headers=create_request_header(),
             cookies={},
@@ -8465,7 +8539,7 @@ def verify_idor_candidate(base_url, endpoint, param, value, kind):
     for label, test_url in variants:
         try:
             stealth_delay(urlparse(test_url).netloc)
-            resp = requests.get(
+            resp = _get_session().get(
                 test_url,
                 headers=create_request_header(),
                 cookies={},
@@ -8742,7 +8816,7 @@ def check_subdomain_takeover(fqdn):
                     org_exists = False
                     pages_404 = False
                     try:
-                        org_resp = requests.get(
+                        org_resp = _get_session().get(
                             f"https://github.com/{org}",
                             headers=create_request_header(),
                             timeout=6,
@@ -8755,7 +8829,7 @@ def check_subdomain_takeover(fqdn):
                         print(timestamp() + f" GitHub org '{org}' exists — suppressing Pages takeover FP for {fqdn}")
                         return
                     try:
-                        pages_resp = requests.get(
+                        pages_resp = _get_session().get(
                             f"https://{org}.github.io",
                             headers=create_request_header(),
                             timeout=6,
