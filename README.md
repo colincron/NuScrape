@@ -152,7 +152,7 @@ NuScrape collects the following for every domain it encounters during crawling:
 - **WHOIS** — registrar, creation date, expiration date
 - **ASN / IP intelligence** — autonomous system, organisation name, country, CDN detection
 - **Open ports** — scans common ports (21, 22, 25, 80, 443, 3306, 5432, 6379, 8080, 8443, 27017, etc.)
-- **Technology fingerprinting** — detects ~20 technologies from response headers and HTML signatures including WordPress, React, Vue, Angular, jQuery, Bootstrap, Cloudflare, nginx, Apache, PHP, Laravel, Django, Shopify, and others
+- **Technology fingerprinting** — detects 28 technologies from response headers, cookies, and HTML; automatically runs targeted security checks for WordPress, Laravel, Spring Boot, Django, Rails, Drupal, and Joomla once confirmed
 - **Subdomain enumeration** — probes a wordlist of common subdomain names against each root domain, with wildcard DNS detection to suppress false positives
 - **Certificate Transparency log mining** — queries `crt.sh` for all historical SSL certificate SANs matching the root domain, discovering subdomains that wordlist enumeration misses (historical certs, wildcard certs, unusual names)
 - **WAF / security appliance fingerprinting** — two-pass detection (passive header inspection + WAF-triggering probe) against signatures for Cloudflare, Akamai, Imperva Incapsula, AWS WAF, Sucuri, F5 BIG-IP ASM, Barracuda, Wordfence, ModSecurity, Fortinet FortiWeb, and Reblaze
@@ -469,13 +469,88 @@ Success requires a body or header confirmation signature — a bare 200 response
 
 ---
 
+#### Technology Fingerprinting and Technology-Specific Security Checks
+
+**Fingerprinting** runs on every enriched domain from response headers, cookies, HTML meta tags, and page source. Detected technologies are stored in the `Technologies` database table and logged alongside findings.
+
+Detected stacks: WordPress, Drupal, Joomla, Shopify, Wix, Squarespace, React, Next.js, Vue.js, Nuxt.js, Angular, Gatsby, jQuery, Bootstrap, Cloudflare, Nginx, Apache, IIS, LiteSpeed, CloudFront, Google Analytics, Tag Manager, PHP, ASP.NET, Laravel, Spring Boot, Django, Ruby on Rails.
+
+**Technology-specific checks** fire automatically once a CMS or framework is confirmed. Each check: uses a catch-all canary probe to avoid false positives, requires body/content-type confirmation before alerting, and deduplicates per domain.
+
+**WordPress**
+
+| Check | Severity | Signal |
+|---|---|---|
+| `/wp-login.php` accessible | MEDIUM | Login page exposed — enables brute force |
+| `/xmlrpc.php` accessible | MEDIUM | XML-RPC enabled — brute force amplification, SSRF vector |
+| `/wp-json/wp/v2/users` returns user list | HIGH | Unauthenticated user enumeration via REST API |
+| `/wp-content/debug.log` accessible | HIGH | PHP error log with paths, queries, and stack traces |
+
+**Laravel**
+
+| Check | Severity | Signal |
+|---|---|---|
+| `/storage/logs/laravel.log` accessible | HIGH | Application log with stack traces and SQL queries |
+| `/.env` accessible with APP_KEY/DB_PASSWORD | CRITICAL | Full credential exposure — rotate all secrets immediately |
+| `/telescope` accessible without auth | HIGH | Request/response history, SQL, queued jobs |
+| `/horizon` accessible without auth | HIGH | Queue worker config and job history |
+| 404 returns Whoops/Ignition error page | HIGH | Debug mode enabled — exposes source code and env vars |
+
+**Spring Boot**
+
+| Check | Severity | Signal |
+|---|---|---|
+| `/actuator/env` accessible | CRITICAL | All environment variables — passwords and API keys |
+| `/actuator/heapdump` accessible (HPROF magic confirmed) | CRITICAL | Full JVM heap dump |
+| `/actuator/shutdown` accepts POST | CRITICAL | Remote application shutdown |
+| `/actuator/httptrace` accessible | HIGH | Full HTTP history including auth headers |
+| `/actuator/mappings`, `/actuator/beans`, `/actuator/configprops` | HIGH | Internal architecture |
+| `/actuator/loggers`, `/actuator/metrics`, `/actuator/info` | MEDIUM | Informational endpoints |
+| Whitelabel error page on unknown path | INFO | Confirms Spring Boot identity |
+
+Spring Boot actuator checks require body signature confirmation before alerting. 401/403 responses are logged quietly. `/actuator/shutdown` is tested via POST only.
+
+**Django**
+
+| Check | Severity | Signal |
+|---|---|---|
+| 404 returns Django debug page with URL patterns | HIGH | Debug mode enabled — version and routing exposed |
+| `/admin/` accessible | MEDIUM | Admin panel publicly reachable |
+| `/__debug__/` accessible | MEDIUM | Django Debug Toolbar exposed |
+
+**Ruby on Rails**
+
+| Check | Severity | Signal |
+|---|---|---|
+| `/rails/info/properties` accessible | HIGH | Ruby/Rails versions, middleware stack |
+| `/rails/mailers` accessible | MEDIUM | Action Mailer email preview exposed |
+
+**Drupal**
+
+| Check | Severity | Signal |
+|---|---|---|
+| `/CHANGELOG.txt` accessible | LOW | Version disclosure — aids CVE targeting |
+| `/sites/default/settings.php` accessible | CRITICAL | Database credentials and config |
+| `/admin/` accessible | MEDIUM | Admin panel publicly reachable |
+
+**Joomla**
+
+| Check | Severity | Signal |
+|---|---|---|
+| `/administrator/` accessible | MEDIUM | Admin panel publicly reachable |
+| `/configuration.php.bak` accessible | CRITICAL | Database credentials and secret key |
+| `/README.txt` accessible | LOW | Version disclosure |
+
+---
+
 #### Spring Boot Actuator Exposure
-Probes 17 Spring Boot Actuator endpoints across both 2.x (`/actuator/*`) and legacy 1.x paths.
+Probes 18 Spring Boot Actuator endpoints across both 2.x (`/actuator/*`) and legacy 1.x paths.
 
 | Endpoint | Severity | Risk |
 |---|---|---|
 | `/actuator/env` | CRITICAL | All environment variables — may contain DB passwords, API keys |
 | `/actuator/heapdump` | CRITICAL | Full JVM memory dump — contains in-memory secrets and session tokens |
+| `/actuator/shutdown` | CRITICAL | Remote shutdown — POST terminates the JVM process |
 | `/actuator/httptrace` | HIGH | Full HTTP request/response history including auth headers |
 | `/actuator/mappings` | HIGH | Complete internal API route map |
 | `/actuator/beans` | HIGH | All Spring beans and internal architecture |
@@ -484,7 +559,7 @@ Probes 17 Spring Boot Actuator endpoints across both 2.x (`/actuator/*`) and leg
 | `/actuator/metrics` | MEDIUM | Performance metrics |
 | `/actuator/info` | MEDIUM | App version, git commit, build info |
 
-Confirms findings via body signature matching before alerting to avoid false positives. 401/403 responses are logged quietly (endpoint exists but protected).
+Confirms findings via body signature matching before alerting to avoid false positives. 401/403 responses are logged quietly (endpoint exists but protected). `/actuator/shutdown` is probed via POST only and never retried.
 
 ---
 
@@ -740,7 +815,12 @@ Start scan
     │             ├─ Zone transfer attempt (AXFR against all NSes, 5s timeout)
     │             │     └─ On success: all A/CNAME hostnames → subdomain pipeline
     │             ├─ ASN lookup
-    │             ├─ Technology fingerprinting
+    │             ├─ Technology fingerprinting (headers, cookies, HTML meta, page source)
+    │             │     └─ On detection: technology-specific checks
+    │             │           (WP login/xmlrpc/users/debug.log, Laravel log/.env/Telescope/Horizon/debug,
+    │             │            Spring Boot Whitelabel, Django debug/admin/toolbar,
+    │             │            Rails info/mailers, Drupal changelog/settings/admin,
+    │             │            Joomla admin/config.bak/readme)
     │             ├─ Port scan (WAF check on HTTP ports)
     │             ├─ Subdomain enumeration (wordlist + CT log mining)
     │             │     ├─ Per subdomain: DNS + HTTP liveness confirmation

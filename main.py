@@ -266,8 +266,9 @@ SECURITY_HEADERS_SENSITIVE = [
 TECH_SIGNATURES = {
     # ── CMS ───────────────────────────────────────────────────────────────
     "WordPress":      {
-        "headers": ["Link: wp-json"],
-        "html":    ["wp-content/", "wp-includes/", "wp-login.php", "xmlrpc.php", "wp-json"],
+        "headers": ["Link: wp-json", "X-Powered-By: WP Engine", "X-Powered-By: WordPress"],
+        "html":    ["wp-content/", "wp-includes/", "wp-login.php", "xmlrpc.php", "wp-json",
+                    'name="generator" content="WordPress'],
     },
     "Drupal":         {
         "headers": ["X-Generator: Drupal", "X-Drupal-Cache", "X-Drupal-Dynamic-Cache"],
@@ -275,7 +276,8 @@ TECH_SIGNATURES = {
     },
     "Joomla":         {
         "headers": [],
-        "html":    ["/components/com_", "joomla!", "/media/jui/", "joomla.org"],
+        "html":    ["/components/com_", "joomla!", "/media/jui/", "joomla.org",
+                    'name="generator" content="Joomla'],
     },
     "Shopify":        {
         "headers": ["X-ShopId", "X-ShopifyRequestId", "X-Sorting-Hat-ShopId"],
@@ -366,16 +368,20 @@ TECH_SIGNATURES = {
         "html":    ["__viewstate", "__eventvalidation", "webresource.axd", "scriptresource.axd"],
     },
     "Laravel":        {
-        "headers": ["Set-Cookie: laravel_session"],
-        "html":    ["laravel_session", 'name="csrf-token"'],
+        "headers": ["Set-Cookie: laravel_session", "X-Powered-By: PHP"],
+        "html":    ["laravel_session", 'name="csrf-token"', "laravel"],
+    },
+    "Spring Boot":    {
+        "headers": ["X-Application-Context", "X-Powered-By: Spring"],
+        "html":    ["whitelabel error page", "/actuator/", "spring boot"],
     },
     "Django":         {
-        "headers": ["Set-Cookie: csrftoken"],
+        "headers": ["Set-Cookie: csrftoken", "X-Frame-Options: SAMEORIGIN"],
         "html":    ["csrfmiddlewaretoken", "__admin_media_prefix__", "django"],
     },
     "Ruby on Rails":  {
-        "headers": ["X-Runtime", "Set-Cookie: _session_id"],
-        "html":    ["rails-ujs", "data-remote=\"true\"", "action-cable-consumer"],
+        "headers": ["X-Runtime", "Set-Cookie: _session_id", "X-Powered-By: Phusion Passenger"],
+        "html":    ["rails-ujs", "data-remote=\"true\"", "action-cable-consumer", "actiondispatch"],
     },
 }
 
@@ -3646,8 +3652,12 @@ def enrich_domain(domain_name, response_headers=None, html_content=None):
         # ASN lookup — identifies CDNs, hosting providers, and org ownership
         asn_info = asn_lookup(ip)
 
-        if html_content:
-            fingerprint_technologies(domain_name, response_headers or {}, html_content)
+        # Fingerprint technologies from headers + HTML (HTML optional).
+        # Always call so header-only signals (X-Powered-By, cookies) are caught
+        # even when the crawl loop doesn't provide html_content.
+        _fp_headers = response_headers or (dict(resp.headers) if resp else {})
+        detected_techs = fingerprint_technologies(
+            domain_name, _fp_headers, html_content or "")
 
         # ── Parallel I/O: DNS, SSL, WHOIS, port scan ─────────────
         from concurrent.futures import ThreadPoolExecutor as _TPE, as_completed as _ac
@@ -3690,6 +3700,11 @@ def enrich_domain(domain_name, response_headers=None, html_content=None):
                 (check_admin_panels,                (base, clean_domain)),
                 (check_security_headers,            (base, clean_domain)),
             ]
+            # Technology-specific checks — run when fingerprinting detected a known stack
+            if detected_techs:
+                _exposure_tasks.append(
+                    (check_technology_specific, (base, clean_domain, detected_techs))
+                )
             # Active probe checks — only run when --active-probes is enabled
             if ACTIVE_PROBES:
                 _exposure_tasks += [
@@ -5554,6 +5569,7 @@ def check_default_credentials(base_url, domain):
 ACTUATOR_ENDPOINTS = [
     ("/actuator/env",         "CRITICAL", "Exposes all environment variables and config — may contain passwords, API keys, DB credentials"),
     ("/actuator/heapdump",    "CRITICAL", "Full JVM heap dump download — contains in-memory secrets, session tokens, plaintext passwords"),
+    ("/actuator/shutdown",    "CRITICAL", "Remote application shutdown endpoint — POST request terminates the JVM process"),
     ("/actuator/httptrace",   "HIGH",     "Full HTTP request/response history including auth headers and cookies"),
     ("/actuator/mappings",    "HIGH",     "Exposes all Spring MVC route mappings — full internal API surface"),
     ("/actuator/beans",       "HIGH",     "Lists all Spring beans and their dependencies — internal architecture exposure"),
@@ -5596,6 +5612,10 @@ def check_actuator_exposure(base_url, domain):
     _actuator_checked.add(domain)
 
     for path, severity, description in ACTUATOR_ENDPOINTS:
+        # /actuator/shutdown must be tested via POST — skip it in the GET loop
+        # and handle it separately below to avoid accidentally triggering a shutdown.
+        if "shutdown" in path:
+            continue
         url = base_url.rstrip("/") + path
         try:
             # allow_redirects=False — a 301/302 to the homepage means the
@@ -5650,6 +5670,453 @@ def check_actuator_exposure(base_url, domain):
 
         except Exception as e:
             print_error(f"check_actuator_exposure failed for {url}: {e}")
+
+    # ── Shutdown endpoint — requires POST ─────────────────────────────────────
+    # We only check whether the endpoint *exists* by sending a POST and reading
+    # the response. We do NOT follow any redirect or retry. A 200 with a JSON
+    # body containing "message" confirms the endpoint is live; a 401/403 means
+    # it exists but is protected. We never call it twice (domain dedup above).
+    shutdown_url = base_url.rstrip("/") + "/actuator/shutdown"
+    try:
+        stealth_delay(domain)
+        shutdown_resp = requests.post(
+            shutdown_url,
+            headers=create_request_header(),
+            timeout=5,
+            allow_redirects=False,
+            verify=False,
+        )
+        if shutdown_resp.status_code == 200:
+            body = shutdown_resp.text
+            if "message" in body.lower() or "shutdown" in body.lower():
+                alert(
+                    "SPRING BOOT ACTUATOR SHUTDOWN EXPOSED",
+                    "CRITICAL",
+                    shutdown_url,
+                    "Spring Boot /actuator/shutdown accepted a POST request — "
+                    "the endpoint is enabled and unauthenticated; an attacker can "
+                    "remotely terminate the application process. Disable via "
+                    "management.endpoint.shutdown.enabled=false"
+                )
+                print(timestamp() + f" [!!] Actuator shutdown EXPOSED: {shutdown_url}")
+        elif shutdown_resp.status_code in (401, 403):
+            print(timestamp() + f" Actuator shutdown exists (protected): {shutdown_url} [{shutdown_resp.status_code}]")
+    except Exception as e:
+        print_error(f"check_actuator_exposure (shutdown) failed for {shutdown_url}: {e}")
+
+
+# ─────────────────────────────────────────────
+# Technology-specific security checks
+# ─────────────────────────────────────────────
+
+_tech_specific_checked: set = set()
+
+
+def _is_catch_all(base_url: str) -> bool:
+    """
+    Return True if the server returns 200 or a homepage redirect for a
+    guaranteed-nonexistent path — indicates catch-all routing that would
+    produce false positives on path-based probes.
+    """
+    canary = (base_url.rstrip("/")
+              + "/nuscrape-canary-" + str(random.randint(100000, 999999)))
+    try:
+        resp = safe_get(canary, timeout=6)
+        if not resp:
+            return False
+        if resp.status_code == 200:
+            return True
+        if resp.status_code in (301, 302, 303, 307, 308):
+            loc = resp.headers.get("Location", "").rstrip("/")
+            if loc in (base_url.rstrip("/"), "/", ""):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def check_technology_specific(base_url: str, domain: str,
+                               detected_techs: list) -> None:
+    """
+    Run targeted security checks once a CMS or framework is identified.
+
+    Each check:
+    - Uses the shared catch-all guard to avoid false positives
+    - Only fires for confirmed technologies
+    - Deduplicates per domain
+    - Confirms findings with body or content-type signatures before alerting
+
+    Covers: WordPress, Laravel, Spring Boot, Django, Ruby on Rails,
+            Drupal, Joomla.
+    """
+    if not detected_techs:
+        return
+    if domain in _tech_specific_checked:
+        return
+    _tech_specific_checked.add(domain)
+
+    tech_set = set(detected_techs)
+    catch_all = _is_catch_all(base_url)
+    if catch_all:
+        print(timestamp() + f" [tech] Catch-all server on {domain} — path probes will use body confirmation")
+
+    def _probe(path: str, method: str = "get") -> tuple:
+        """GET/POST a path; returns (status, body_text, content_type)."""
+        try:
+            stealth_delay(domain)
+            url = base_url.rstrip("/") + path
+            resp = requests.request(
+                method, url,
+                headers=create_request_header(),
+                timeout=8,
+                allow_redirects=False,
+                verify=False,
+            )
+            return resp.status_code, resp.text, resp.headers.get("Content-Type", "")
+        except Exception:
+            return 0, "", ""
+
+    # ── WordPress ─────────────────────────────────────────────────────────────
+    if "WordPress" in tech_set:
+        # /wp-login.php
+        status, body, ct = _probe("/wp-login.php")
+        if status == 200 and ("wp-login" in body.lower() or "wordpress" in body.lower()
+                              or "password" in body.lower()):
+            alert(
+                "WORDPRESS LOGIN PAGE EXPOSED",
+                "MEDIUM",
+                base_url + "/wp-login.php",
+                "WordPress login page is publicly accessible — enables credential "
+                "brute-force attacks. Consider restricting access by IP or adding "
+                "rate limiting and lockout policies."
+            )
+            print(timestamp() + f" [!] WordPress wp-login.php exposed: {domain}")
+
+        # /xmlrpc.php
+        status, body, ct = _probe("/xmlrpc.php")
+        if status == 200 and ("xmlrpc" in body.lower() or "xml" in ct.lower()):
+            alert(
+                "WORDPRESS XMLRPC ENABLED",
+                "MEDIUM",
+                base_url + "/xmlrpc.php",
+                "WordPress XML-RPC interface is accessible — enables brute-force "
+                "amplification via system.multicall, SSRF to internal services, "
+                "and denial of service. Disable unless required by a plugin."
+            )
+            print(timestamp() + f" [!] WordPress xmlrpc.php accessible: {domain}")
+
+        # /wp-json/wp/v2/users — unauthenticated user enumeration
+        status, body, ct = _probe("/wp-json/wp/v2/users")
+        if status == 200 and "application/json" in ct.lower():
+            try:
+                users = json.loads(body)
+                if isinstance(users, list) and users:
+                    names = [u.get("slug") or u.get("name", "?") for u in users[:5]]
+                    alert(
+                        "WORDPRESS USER ENUMERATION",
+                        "HIGH",
+                        base_url + "/wp-json/wp/v2/users",
+                        f"REST API returns {len(users)} user record(s) without "
+                        f"authentication: {', '.join(str(n) for n in names)}. "
+                        f"Disable the users endpoint or restrict to authenticated "
+                        f"requests via 'Disable REST API' plugin."
+                    )
+                    print(timestamp() + f" [!!] WordPress user enum ({len(users)} users): {domain}")
+            except Exception:
+                pass
+
+        # /wp-content/debug.log
+        status, body, ct = _probe("/wp-content/debug.log")
+        if status == 200 and (
+            "php" in body.lower() or "error" in body.lower()
+            or "warning" in body.lower() or "notice" in body.lower()
+        ):
+            alert(
+                "WORDPRESS DEBUG LOG EXPOSED",
+                "HIGH",
+                base_url + "/wp-content/debug.log",
+                "WordPress debug.log is publicly accessible — contains PHP errors, "
+                "file system paths, database query errors, and stack traces that "
+                "assist targeted exploitation. Remove or restrict with nginx/Apache rules."
+            )
+            print(timestamp() + f" [!!] WordPress debug.log accessible: {domain}")
+
+    # ── Laravel ───────────────────────────────────────────────────────────────
+    if "Laravel" in tech_set:
+        # /storage/logs/laravel.log
+        status, body, ct = _probe("/storage/logs/laravel.log")
+        if status == 200 and (
+            "[" in body and (
+                "laravel" in body.lower() or "exception" in body.lower()
+                or "error" in body.lower() or "stack trace" in body.lower()
+            )
+        ):
+            alert(
+                "LARAVEL LOG FILE EXPOSED",
+                "HIGH",
+                base_url + "/storage/logs/laravel.log",
+                "Laravel application log is publicly accessible — may contain "
+                "stack traces, file system paths, SQL queries, environment details, "
+                "and session tokens. Restrict the /storage/ directory in the web server."
+            )
+            print(timestamp() + f" [!!] Laravel laravel.log exposed: {domain}")
+
+        # /.env — checked here in addition to the generic check_env_exposure
+        # for a Laravel-specific body confirmation
+        status, body, ct = _probe("/.env")
+        if status == 200 and any(k in body for k in ("APP_KEY", "DB_PASSWORD", "DB_HOST",
+                                                       "MAIL_PASSWORD", "AWS_SECRET")):
+            alert(
+                "LARAVEL ENV FILE EXPOSED",
+                "CRITICAL",
+                base_url + "/.env",
+                ".env configuration file is publicly accessible — contains APP_KEY "
+                "(used for encryption/signing), database credentials, mail server "
+                "passwords, and third-party API keys. Rotate all secrets immediately "
+                "and restrict the file via web server configuration."
+            )
+            print(timestamp() + f" [!!] Laravel .env exposed: {domain}")
+
+        # /telescope — Laravel Telescope debug dashboard
+        status, body, ct = _probe("/telescope")
+        if status == 200 and not catch_all and (
+            "telescope" in body.lower() or "laravel" in body.lower()
+        ):
+            alert(
+                "LARAVEL TELESCOPE EXPOSED",
+                "HIGH",
+                base_url + "/telescope",
+                "Laravel Telescope dashboard is accessible without authentication — "
+                "exposes full HTTP request/response history, SQL queries, queued jobs, "
+                "cache operations, and exception details. Restrict to local env or "
+                "add gate() authorization in TelescopeServiceProvider."
+            )
+            print(timestamp() + f" [!!] Laravel Telescope exposed: {domain}")
+
+        # /horizon — Laravel Horizon queue dashboard
+        status, body, ct = _probe("/horizon")
+        if status == 200 and not catch_all and (
+            "horizon" in body.lower() or "laravel" in body.lower()
+            or "queue" in body.lower()
+        ):
+            alert(
+                "LARAVEL HORIZON EXPOSED",
+                "HIGH",
+                base_url + "/horizon",
+                "Laravel Horizon dashboard is accessible without authentication — "
+                "exposes queue worker configuration, failed job history, throughput "
+                "metrics, and job payload data. Add gate() authorization in "
+                "HorizonServiceProvider."
+            )
+            print(timestamp() + f" [!!] Laravel Horizon exposed: {domain}")
+
+        # Debug mode — probe a nonexistent path and check for Whoops/Ignition
+        rand_path = f"/nuscrape-laravel-debug-{random.randint(10000, 99999)}"
+        status, body, ct = _probe(rand_path)
+        if "whoops" in body.lower() or "ignition" in body.lower() \
+                or ("stack trace" in body.lower() and "laravel" in body.lower()):
+            alert(
+                "LARAVEL DEBUG MODE ENABLED",
+                "HIGH",
+                base_url,
+                "Laravel debug mode (APP_DEBUG=true) is active in production — "
+                "Whoops/Ignition error pages expose full stack traces, source file "
+                "contents, request variables, and environment configuration on "
+                "unhandled exceptions. Set APP_DEBUG=false in .env."
+            )
+            print(timestamp() + f" [!!] Laravel debug mode detected: {domain}")
+
+    # ── Spring Boot ───────────────────────────────────────────────────────────
+    # Actuator endpoint probing is already handled by check_actuator_exposure
+    # (which runs unconditionally in _exposure_tasks). Here we only confirm
+    # that the Whitelabel error page is present as a secondary signal.
+    if "Spring Boot" in tech_set:
+        rand_path = f"/nuscrape-spring-{random.randint(10000, 99999)}"
+        status, body, ct = _probe(rand_path)
+        if "whitelabel error page" in body.lower():
+            print(timestamp() + f" [*] Spring Boot Whitelabel error page confirmed: {domain}")
+            write_to_tech_database(base_url, "Spring Boot (Whitelabel confirmed)")
+
+    # ── Django ────────────────────────────────────────────────────────────────
+    if "Django" in tech_set:
+        # Trigger a 404 on a nonexistent path and check for the debug page
+        rand_path = f"/nuscrape-django-{random.randint(10000, 99999)}"
+        status, body, ct = _probe(rand_path)
+        if status == 404 and (
+            "using the urlconf" in body.lower()
+            or "django tried these url patterns" in body.lower()
+            or ("debugtoolbar" in body.lower())
+        ):
+            ver_m = re.search(r'django[/ ](\d+\.\d+)', body, re.I)
+            ver_str = f" (Django {ver_m.group(1)})" if ver_m else ""
+            alert(
+                "DJANGO DEBUG MODE ENABLED",
+                "HIGH",
+                base_url,
+                f"Django debug mode is active in production{ver_str} — the 404 "
+                f"debug page exposes all configured URL patterns, installed apps, "
+                f"Django and Python versions. Set DEBUG=False in settings.py."
+            )
+            print(timestamp() + f" [!!] Django debug mode detected: {domain}")
+
+        # /admin/
+        status, body, ct = _probe("/admin/")
+        if status == 200 and not catch_all and (
+            "django" in body.lower() or "log in" in body.lower()
+            or "password" in body.lower()
+        ):
+            alert(
+                "DJANGO ADMIN PANEL ACCESSIBLE",
+                "MEDIUM",
+                base_url + "/admin/",
+                "Django admin panel is publicly accessible. Verify it is protected "
+                "by strong credentials and is not exposed to the public internet; "
+                "consider restricting by IP via web server configuration."
+            )
+            print(timestamp() + f" [!] Django /admin/ accessible: {domain}")
+
+        # Django Debug Toolbar /__debug__/
+        status, body, ct = _probe("/__debug__/")
+        if status == 200 and not catch_all:
+            alert(
+                "DJANGO DEBUG TOOLBAR EXPOSED",
+                "MEDIUM",
+                base_url + "/__debug__/",
+                "Django Debug Toolbar endpoint is publicly accessible — may expose "
+                "SQL query history, request context, settings values, and template "
+                "context. Remove django-debug-toolbar from INSTALLED_APPS in production."
+            )
+            print(timestamp() + f" [!] Django Debug Toolbar /__debug__/ exposed: {domain}")
+
+    # ── Ruby on Rails ─────────────────────────────────────────────────────────
+    if "Ruby on Rails" in tech_set:
+        # /rails/info/properties
+        status, body, ct = _probe("/rails/info/properties")
+        if status == 200 and (
+            "ruby" in body.lower() or "rails" in body.lower()
+            or "middleware" in body.lower()
+        ):
+            alert(
+                "RAILS INFO PROPERTIES EXPOSED",
+                "HIGH",
+                base_url + "/rails/info/properties",
+                "/rails/info/properties is publicly accessible — exposes Ruby and "
+                "Rails version numbers, loaded middleware stack, and route information. "
+                "Restrict in production: config.consider_all_requests_local = false"
+            )
+            print(timestamp() + f" [!!] Rails /rails/info/properties exposed: {domain}")
+
+        # /rails/mailers
+        status, body, ct = _probe("/rails/mailers")
+        if status == 200 and not catch_all and (
+            "mailer" in body.lower() or "preview" in body.lower()
+        ):
+            alert(
+                "RAILS MAILERS PREVIEW EXPOSED",
+                "MEDIUM",
+                base_url + "/rails/mailers",
+                "Action Mailer preview endpoint is publicly accessible — exposes "
+                "email template content and internal mailer configuration. "
+                "Restrict via show_previews config or IP allowlist."
+            )
+            print(timestamp() + f" [!] Rails /rails/mailers exposed: {domain}")
+
+    # ── Drupal ────────────────────────────────────────────────────────────────
+    if "Drupal" in tech_set:
+        # /CHANGELOG.txt — version disclosure
+        status, body, ct = _probe("/CHANGELOG.txt")
+        if status == 200 and "drupal" in body[:200].lower():
+            ver_m = re.search(r'drupal\s+(\d+\.\d+[\.\d]*)', body, re.I)
+            ver_str = f" ({ver_m.group(0)})" if ver_m else ""
+            alert(
+                "DRUPAL VERSION DISCLOSURE",
+                "LOW",
+                base_url + "/CHANGELOG.txt",
+                f"CHANGELOG.txt is publicly accessible{ver_str} — discloses the "
+                f"exact Drupal version, enabling targeted lookup of known CVEs. "
+                f"Remove this file or deny access via web server configuration."
+            )
+            print(timestamp() + f" [!] Drupal CHANGELOG.txt accessible: {domain}")
+
+        # /sites/default/settings.php
+        status, body, ct = _probe("/sites/default/settings.php")
+        if status == 200 and (
+            "database" in body.lower() or "$databases" in body
+            or "$db_url" in body or "drupal" in body.lower()
+        ):
+            alert(
+                "DRUPAL SETTINGS FILE EXPOSED",
+                "CRITICAL",
+                base_url + "/sites/default/settings.php",
+                "Drupal settings.php is publicly readable — contains database "
+                "credentials, trusted_host_patterns, and installation-specific "
+                "configuration. Fix file permissions (chmod 440 or 444)."
+            )
+            print(timestamp() + f" [!!] Drupal settings.php exposed: {domain}")
+
+        # /admin/
+        status, body, ct = _probe("/admin/")
+        if status == 200 and not catch_all and (
+            "drupal" in body.lower() or "log in" in body.lower()
+            or "administer" in body.lower()
+        ):
+            alert(
+                "DRUPAL ADMIN PANEL ACCESSIBLE",
+                "MEDIUM",
+                base_url + "/admin/",
+                "Drupal admin panel is publicly accessible. Verify it is protected "
+                "by strong credentials and not reachable from the public internet."
+            )
+            print(timestamp() + f" [!] Drupal /admin/ accessible: {domain}")
+
+    # ── Joomla ────────────────────────────────────────────────────────────────
+    if "Joomla" in tech_set:
+        # /administrator/
+        status, body, ct = _probe("/administrator/")
+        if status == 200 and not catch_all and (
+            "joomla" in body.lower() or "administrator" in body.lower()
+            or "password" in body.lower()
+        ):
+            alert(
+                "JOOMLA ADMIN PANEL ACCESSIBLE",
+                "MEDIUM",
+                base_url + "/administrator/",
+                "Joomla administrator panel is publicly accessible. Consider "
+                "restricting access by IP address and enabling two-factor "
+                "authentication in Joomla's user management settings."
+            )
+            print(timestamp() + f" [!] Joomla /administrator/ accessible: {domain}")
+
+        # /configuration.php.bak
+        status, body, ct = _probe("/configuration.php.bak")
+        if status == 200 and (
+            "joomla" in body.lower() or "secret" in body.lower()
+            or "db_host" in body.lower() or "public $db" in body.lower()
+        ):
+            alert(
+                "JOOMLA CONFIGURATION BACKUP EXPOSED",
+                "CRITICAL",
+                base_url + "/configuration.php.bak",
+                "Joomla configuration.php.bak is publicly accessible — contains "
+                "database credentials, secret key, FTP credentials, and full "
+                "application configuration. Delete this file immediately."
+            )
+            print(timestamp() + f" [!!] Joomla configuration.php.bak exposed: {domain}")
+
+        # /README.txt — version disclosure
+        status, body, ct = _probe("/README.txt")
+        if status == 200 and "joomla" in body.lower():
+            ver_m = re.search(r'joomla[!]?\s+(\d+\.\d+[\.\d]*)', body, re.I)
+            ver_str = f" ({ver_m.group(0)})" if ver_m else ""
+            alert(
+                "JOOMLA VERSION DISCLOSURE",
+                "LOW",
+                base_url + "/README.txt",
+                f"README.txt is publicly accessible{ver_str} — discloses the Joomla "
+                f"version, aiding targeted exploitation of known CVEs. "
+                f"Remove this file from production."
+            )
+            print(timestamp() + f" [!] Joomla README.txt accessible: {domain}")
 
 
 # ─────────────────────────────────────────────
