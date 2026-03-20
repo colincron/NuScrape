@@ -38,7 +38,7 @@ All findings persist across sessions. Multiple scans accumulate into the same da
 **Python dependencies:**
 
 ```bash
-pip install requests aiohttp flask beautifulsoup4 lxml dnspython python-whois --break-system-packages
+pip install requests aiohttp flask beautifulsoup4 lxml dnspython python-whois colorama --break-system-packages
 ```
 
 **Optional — JS rendering for heavily JavaScript-dependent sites:**
@@ -728,6 +728,67 @@ All findings are stored in `ScrapeDB` (SQLite) in the same directory as `main.py
 **Export:** Every table is exportable as CSV or JSON from the Report tab in the UI, or directly via `/api/export/<table>.<csv|json>`.
 
 **Clear:** The "Clear Database" button in the UI wipes all tables without deleting the file.
+
+---
+
+## Terminal Output and Confidence Scoring
+
+### Color-coded output
+
+When running in a real terminal (not piped to a file), NuScrape uses ANSI colors via `colorama` to make findings immediately scannable. Colors are suppressed automatically when `sys.stdout.isatty()` is False — piped or redirected output is always plain text.
+
+| Element | Color |
+|---|---|
+| CRITICAL alert banner and `!!` markers | Bright red |
+| HIGH severity label | Red |
+| MEDIUM severity label | Yellow |
+| LOW severity label | Cyan |
+| INFO severity label | White |
+| `ERROR:` log prefix | Bright red |
+| Subdomain found / CT subdomain live | Green |
+| Scan start and completion messages | Bright green |
+
+### Confidence scoring
+
+Every finding stored in the `Alerts` table (and displayed in the UI) carries a **confidence** level that indicates how certain NuScrape is that the finding represents a real vulnerability rather than a false positive.
+
+| Level | Meaning |
+|---|---|
+| `CONFIRMED` | Finding was verified with body content, header reflection, or credential check with body fingerprinting — no manual follow-up required to confirm existence |
+| `LIKELY` | Strong automated indicators present but not fully verified — review recommended before reporting |
+| `NEEDS VERIFICATION` | Automated detection only; manual confirmation required before reporting |
+
+**Mapping by finding type:**
+
+| Finding type | Confidence |
+|---|---|
+| Default credentials accepted (body-verified) | CONFIRMED |
+| Open redirect (Location header verified) | CONFIRMED |
+| CRLF injection (header reflected) | CONFIRMED |
+| Path traversal (file content signatures) | CONFIRMED |
+| SSTI (arithmetic result reflected) | CONFIRMED |
+| XXE injection (canary reflected) | CONFIRMED |
+| Prototype pollution (canary reflected in body) | CONFIRMED |
+| Spring Boot Actuator (body signature confirmed) | CONFIRMED |
+| Exposed secrets in JS (value confirmed in bundle) | CONFIRMED |
+| Laravel / Django / Drupal / Joomla file exposure (body-confirmed) | CONFIRMED |
+| Missing or misconfigured security headers | CONFIRMED (factual observation) |
+| Insecure cookies / JWT findings | CONFIRMED |
+| Subdomain takeover (404 on unclaimed service) | LIKELY |
+| HTTP request smuggling (timing/status signal) | LIKELY |
+| GraphQL introspection (schema returned) | LIKELY |
+| CORS misconfiguration (header reflected) | LIKELY |
+| Mass assignment (field reflected) | LIKELY |
+| Dangerous HTTP method accepted | LIKELY |
+| WebSocket origin / auth findings | LIKELY |
+| API version enumeration | LIKELY |
+| DNS zone transfer, SPF/DMARC/DKIM | LIKELY |
+| SSRF candidate parameters | NEEDS VERIFICATION |
+| IDOR candidates | NEEDS VERIFICATION |
+| Admin panel 200 (generic, no body verification) | NEEDS VERIFICATION |
+| Prototype pollution crash (500 on injection) | NEEDS VERIFICATION |
+
+Confidence is inferred automatically from the `alert_type` string — no changes to existing call sites are needed. The level is stored in the `Alerts` database table and displayed in both the terminal alert banner and the UI findings table as a colored badge (green = CONFIRMED, yellow = LIKELY, cyan = NEEDS VERIFICATION).
 
 ---
 
