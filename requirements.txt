@@ -16,3 +16,5 @@ playwright-stealth
 pymysql
 # Optional — enhanced SSL certificate parsing
 cryptography
+# Optional — deep TLS protocol/cipher suite analysis
+sslyze

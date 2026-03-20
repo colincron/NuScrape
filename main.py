@@ -1478,6 +1478,19 @@ try:
 except ImportError:
     _CRYPTO_AVAILABLE = False
 
+# sslyze is optional — provides deep TLS protocol + cipher suite analysis.
+# Falls back to Python's ssl module when not installed.
+try:
+    from sslyze import (
+        Scanner              as _SslyzeScanner,
+        ServerNetworkLocation as _SslyzeLocation,
+        ServerScanRequest    as _SslyzeScanRequest,
+        ScanCommand          as _SslyzeCmd,
+    )
+    _SSLYZE_AVAILABLE = True
+except ImportError:
+    _SSLYZE_AVAILABLE = False
+
 def get_ssl_info(domain):
     try:
         from datetime import timezone
@@ -1595,6 +1608,384 @@ def get_ssl_info(domain):
 
     except (ssl.SSLError, socket.timeout, socket.gaierror, ConnectionRefusedError, OSError) as e:
         print_error("SSL failed for " + domain + ": " + str(e))
+
+# ─────────────────────────────────────────────
+# TLS/SSL misconfiguration detection
+# ─────────────────────────────────────────────
+
+_tls_checked: set = set()
+
+# Cipher name substrings → (severity, human label)
+_WEAK_CIPHER_PATTERNS = [
+    ("NULL",   "CRITICAL", "NULL cipher — no encryption"),
+    ("EXPORT", "CRITICAL", "EXPORT cipher — FREAK vulnerability"),
+    ("ANULL",  "CRITICAL", "anonymous cipher — no server authentication"),
+    ("RC4",    "HIGH",     "RC4 cipher — broken encryption"),
+    ("_DES",   "HIGH",     "DES cipher — SWEET32 vulnerability"),
+    ("3DES",   "HIGH",     "3DES cipher — SWEET32 vulnerability"),
+    ("_MD5",   "HIGH",     "MD5 MAC cipher"),
+]
+
+# Legacy versions testable via ssl.TLSVersion: (attr, severity, label, detail)
+_LEGACY_TLS_VERSIONS = [
+    ("SSLv3",   "HIGH",   "SSL 3.0",
+     "POODLE vulnerability — padding oracle attack allows decryption of HTTPS"),
+    ("TLSv1",   "MEDIUM", "TLS 1.0",
+     "Deprecated since RFC 8996 (2021); vulnerable to BEAST and POODLE-over-TLS"),
+    ("TLSv1_1", "MEDIUM", "TLS 1.1",
+     "Deprecated since RFC 8996 (2021); lacks AEAD cipher suite support"),
+]
+
+_HSTS_MIN_MAX_AGE    = 180 * 86400   # 180 days in seconds
+_CERT_EXPIRY_WARN_DAYS = 30          # flag LOW if cert expires within this many days
+
+
+def _test_legacy_tls_version(host: str, port: int, version_attr: str,
+                             timeout: int = 10) -> bool:
+    """Return True if the server accepts the named legacy TLS version."""
+    tls_ver = getattr(ssl.TLSVersion, version_attr, None)
+    if tls_ver is None:
+        return False   # version not supported by this Python/OpenSSL build
+    try:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode    = ssl.CERT_NONE
+        ctx.minimum_version = tls_ver
+        ctx.maximum_version = tls_ver
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host):
+                return True
+    except (ssl.SSLError, OSError, socket.timeout):
+        return False
+    except Exception:
+        return False
+
+
+def _get_negotiated_cipher(host: str, port: int, timeout: int = 10) -> str:
+    """Return the name of the cipher negotiated by default, or empty string."""
+    try:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode    = ssl.CERT_NONE
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                c = ssock.cipher()
+                return c[0] if c else ""
+    except Exception:
+        return ""
+
+
+def _check_hsts_header(domain: str, hsts_value) -> None:
+    """Validate a Strict-Transport-Security header value.
+    Skips the 'missing' case — that is already raised by check_security_headers."""
+    if not hsts_value:
+        return
+    parts      = [d.strip().lower() for d in hsts_value.split(";")]
+    directives = set(parts)
+    max_age    = None
+    for d in parts:
+        if d.startswith("max-age="):
+            try:
+                max_age = int(d.split("=", 1)[1])
+            except ValueError:
+                pass
+
+    if max_age is not None and max_age < _HSTS_MIN_MAX_AGE:
+        alert(
+            "HSTS MAX-AGE TOO SHORT",
+            "LOW",
+            domain,
+            f"HSTS max-age={max_age}s ({max_age // 86400} days) is below the "
+            f"recommended minimum of {_HSTS_MIN_MAX_AGE // 86400} days — "
+            f"allows downgrade window after first visit",
+        )
+    if "includesubdomains" not in directives:
+        alert(
+            "HSTS MISSING INCLUDESUBDOMAINS",
+            "LOW",
+            domain,
+            "Strict-Transport-Security lacks 'includeSubDomains' — "
+            "subdomains can still be reached over plain HTTP",
+        )
+    if "preload" not in directives:
+        alert(
+            "HSTS MISSING PRELOAD",
+            "INFO",
+            domain,
+            "Strict-Transport-Security lacks 'preload' — site is not eligible "
+            "for browser HSTS preload list",
+        )
+
+
+def _check_cert_obj_tls(domain: str, cert_obj) -> None:
+    """Check a cryptography cert object: 30-day expiry and weak signature algorithm."""
+    if not _CRYPTO_AVAILABLE or cert_obj is None:
+        return
+    from datetime import timezone
+    try:
+        # cryptography >= 42 exposes not_valid_after_utc; older uses not_valid_after
+        try:
+            exp = cert_obj.not_valid_after_utc
+        except AttributeError:
+            exp = cert_obj.not_valid_after.replace(tzinfo=timezone.utc)
+        days = (exp - datetime.now(timezone.utc)).days
+        if 0 < days <= _CERT_EXPIRY_WARN_DAYS:
+            alert(
+                "TLS CERTIFICATE EXPIRING SOON",
+                "LOW",
+                domain,
+                f"Certificate expires in {days} day(s) — renew before expiry to avoid outage",
+            )
+        sig_name = getattr(
+            getattr(cert_obj, "signature_hash_algorithm", None), "name", ""
+        ).lower()
+        if sig_name in ("md5", "sha1", "md2"):
+            alert(
+                f"WEAK TLS SIGNATURE ALGORITHM: {sig_name.upper()}",
+                "MEDIUM",
+                domain,
+                f"Certificate uses deprecated {sig_name.upper()} signature algorithm — "
+                f"vulnerable to collision attacks",
+            )
+    except Exception:
+        pass
+
+
+def _check_cert_ct(domain: str, cert_obj) -> None:
+    """Alert if the certificate has no embedded SCT (Certificate Transparency)."""
+    if not _CRYPTO_AVAILABLE or cert_obj is None:
+        return
+    try:
+        ct_oids = (
+            _x509.oid.ExtensionOID.PRECERT_SIGNED_CERTIFICATE_TIMESTAMPS,
+            _x509.oid.ExtensionOID.SIGNED_CERTIFICATE_TIMESTAMPS,
+        )
+        for oid in ct_oids:
+            try:
+                cert_obj.extensions.get_extension_for_oid(oid)
+                return   # SCT present — CT satisfied
+            except _x509.ExtensionNotFound:
+                pass
+        alert(
+            "CERTIFICATE TRANSPARENCY NOT LOGGED",
+            "LOW",
+            domain,
+            "Certificate contains no embedded SCT (Signed Certificate Timestamps) — "
+            "may not be logged in public CT logs; modern browsers may reject it",
+        )
+    except Exception:
+        pass
+
+
+def _check_tls_sslyze(host: str, port: int, domain: str) -> None:
+    """Deep TLS analysis using sslyze: protocol versions, cipher suites, cert, HSTS."""
+    try:
+        server_location = _SslyzeLocation(hostname=host, port=port)
+        scan_request    = _SslyzeScanRequest(
+            server_location=server_location,
+            scan_commands={
+                _SslyzeCmd.SSL_2_0_CIPHER_SUITES,
+                _SslyzeCmd.SSL_3_0_CIPHER_SUITES,
+                _SslyzeCmd.TLS_1_0_CIPHER_SUITES,
+                _SslyzeCmd.TLS_1_1_CIPHER_SUITES,
+                _SslyzeCmd.TLS_1_2_CIPHER_SUITES,
+                _SslyzeCmd.TLS_1_3_CIPHER_SUITES,
+                _SslyzeCmd.CERTIFICATE_INFO,
+                _SslyzeCmd.HTTP_HEADERS,
+            },
+        )
+        scanner = _SslyzeScanner()
+        scanner.queue_scans([scan_request])
+
+        for server_result in scanner.get_results():
+            if server_result.scan_result is None:
+                continue
+            sr = server_result.scan_result
+
+            # ── Protocol version checks ───────────────────────────────────
+            proto_checks = [
+                ("ssl_2_0_cipher_suites", "SSL 2.0", "CRITICAL",
+                 "SSL 2.0 accepted — severely broken; no secure cipher modes exist"),
+                ("ssl_3_0_cipher_suites", "SSL 3.0", "HIGH",
+                 "SSL 3.0 accepted — POODLE vulnerability allows CBC padding oracle attack"),
+                ("tls_1_0_cipher_suites", "TLS 1.0", "MEDIUM",
+                 "TLS 1.0 accepted — deprecated since RFC 8996; vulnerable to BEAST/POODLE-over-TLS"),
+                ("tls_1_1_cipher_suites", "TLS 1.1", "MEDIUM",
+                 "TLS 1.1 accepted — deprecated since RFC 8996; lacks AEAD cipher support"),
+            ]
+            for attr, label, severity, detail in proto_checks:
+                res = getattr(sr, attr, None)
+                if res and getattr(res, "accepted_cipher_suites", []):
+                    n = len(res.accepted_cipher_suites)
+                    alert(
+                        f"DEPRECATED TLS PROTOCOL: {label}",
+                        severity,
+                        domain,
+                        f"{detail} ({n} cipher suite(s) accepted)",
+                    )
+
+            # ── Weak cipher suites (TLS 1.2 and 1.3 buckets) ─────────────
+            for attr in ("tls_1_2_cipher_suites", "tls_1_3_cipher_suites"):
+                res = getattr(sr, attr, None)
+                if not res:
+                    continue
+                for cs in getattr(res, "accepted_cipher_suites", []):
+                    name = cs.cipher_suite.name.upper()
+                    for pattern, sev, label in _WEAK_CIPHER_PATTERNS:
+                        if pattern in name:
+                            alert(
+                                f"WEAK CIPHER SUITE: {pattern}",
+                                sev,
+                                domain,
+                                f"Server accepts weak cipher {name!r} ({label})",
+                            )
+                            break
+
+            # ── Certificate validation ────────────────────────────────────
+            cert_info = getattr(sr, "certificate_info", None)
+            if cert_info:
+                for deployment in getattr(cert_info, "certificate_deployments", []):
+                    chain = getattr(deployment, "received_certificate_chain", [])
+                    if not chain:
+                        continue
+                    leaf_crypto = getattr(chain[0], "as_crypto", None)
+
+                    # 30-day expiry + weak signature via cryptography lib
+                    _check_cert_obj_tls(domain, leaf_crypto)
+
+                    # Hostname mismatch
+                    if getattr(deployment, "leaf_certificate_subject_matches_hostname",
+                               None) is False:
+                        alert(
+                            "TLS CERTIFICATE HOSTNAME MISMATCH",
+                            "HIGH",
+                            domain,
+                            f"Certificate CN/SAN does not match hostname '{host}'",
+                        )
+
+                    # Certificate Transparency
+                    _check_cert_ct(domain, leaf_crypto)
+
+            # ── HSTS validation ───────────────────────────────────────────
+            http_hdrs = getattr(sr, "http_headers", None)
+            if http_hdrs:
+                hsts_hdr = getattr(http_hdrs, "strict_transport_security_header", None)
+                _check_hsts_header(
+                    domain,
+                    hsts_hdr.header_value if hsts_hdr else None,
+                )
+
+    except Exception as e:
+        print_error(f"sslyze TLS scan failed for {domain}: {e}")
+        # Fall back to ssl-module checks on sslyze error
+        _check_tls_ssl_module(host, port, domain)
+
+
+def _check_tls_ssl_module(host: str, port: int, domain: str) -> None:
+    """Fallback TLS analysis using Python's ssl module only."""
+    # Legacy protocol versions
+    for tls_attr, severity, label, detail in _LEGACY_TLS_VERSIONS:
+        if _test_legacy_tls_version(host, port, tls_attr):
+            alert(
+                f"DEPRECATED TLS PROTOCOL: {label}",
+                severity,
+                domain,
+                detail,
+            )
+
+    # Negotiated cipher — check what the server picks by default
+    cipher_name = _get_negotiated_cipher(host, port)
+    if cipher_name:
+        for pattern, sev, label in _WEAK_CIPHER_PATTERNS:
+            if pattern in cipher_name.upper():
+                alert(
+                    f"WEAK CIPHER SUITE: {pattern}",
+                    sev,
+                    domain,
+                    f"Server negotiated weak cipher {cipher_name!r} ({label})",
+                )
+
+    # Certificate: hostname match + 30-day expiry via ssl.CertificateError
+    from datetime import timezone
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = True
+        ctx.verify_mode    = ssl.CERT_REQUIRED
+        with socket.create_connection((host, port), timeout=10) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                cert      = ssock.getpeercert()
+                not_after = cert.get("notAfter", "")
+                if not_after:
+                    try:
+                        exp   = datetime.strptime(
+                            not_after, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
+                        days  = (exp - datetime.now(timezone.utc)).days
+                        if 0 < days <= _CERT_EXPIRY_WARN_DAYS:
+                            alert(
+                                "TLS CERTIFICATE EXPIRING SOON",
+                                "LOW",
+                                domain,
+                                f"Certificate expires in {days} day(s) ({not_after})",
+                            )
+                    except Exception:
+                        pass
+                if _CRYPTO_AVAILABLE:
+                    raw = ssock.getpeercert(binary_form=True)
+                    cert_obj = _x509.load_der_x509_certificate(raw, _crypto_backend())
+                    _check_cert_ct(domain, cert_obj)
+    except ssl.CertificateError as e:
+        alert(
+            "TLS CERTIFICATE HOSTNAME MISMATCH",
+            "HIGH",
+            domain,
+            f"Certificate CN/SAN does not match '{host}': {e}",
+        )
+    except Exception:
+        pass
+
+    # HSTS validation
+    resp = safe_get(f"https://{host}", timeout=10, method="head")
+    if resp:
+        _check_hsts_header(domain, resp.headers.get("Strict-Transport-Security"))
+
+
+def check_tls_config(domain: str) -> None:
+    """
+    Entry point for TLS misconfiguration detection.
+
+    Accepts a bare hostname (as supplied by enrich_domain via clean_domain).
+    Silently returns if port 443 is not reachable (HTTP-only host).
+    Passive check — does not require --active-probes.
+    Deduplicates per host.
+
+    Detects:
+      - Deprecated protocol versions (SSL 2.0, SSL 3.0, TLS 1.0, TLS 1.1)
+      - Weak cipher suites (NULL, EXPORT, RC4, DES/3DES, aNULL, MD5)
+      - Certificate issues (hostname mismatch, 30-day expiry, weak sig, no CT)
+      - HSTS misconfigurations (short max-age, missing includeSubDomains/preload)
+    Uses sslyze when available, falls back to Python's ssl module.
+    """
+    if domain in _tls_checked:
+        return
+    _tls_checked.add(domain)
+
+    host = domain
+    port = 443
+
+    # Quick reachability probe — silently skip HTTP-only or unreachable hosts
+    try:
+        with socket.create_connection((host, port), timeout=5):
+            pass
+    except (ConnectionRefusedError, socket.timeout, OSError):
+        return
+
+    print(timestamp() + f" TLS config analysis: {host}:{port}"
+          + (" [sslyze]" if _SSLYZE_AVAILABLE else " [ssl module]"))
+
+    if _SSLYZE_AVAILABLE:
+        _check_tls_sslyze(host, port, domain)
+    else:
+        _check_tls_ssl_module(host, port, domain)
 
 # ─────────────────────────────────────────────
 # WHOIS — threaded with hard timeout
@@ -3886,6 +4277,7 @@ def enrich_domain(domain_name, response_headers=None, html_content=None):
             get_ssl_info,
             get_whois_info,
             port_scan,
+            check_tls_config,
         ]
         with _TPE(max_workers=len(_network_tasks)) as _ex:
             _futs = {_ex.submit(fn, clean_domain): fn for fn in _network_tasks}
