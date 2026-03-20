@@ -152,24 +152,53 @@ def api_start():
     bug_bounty_header = bug_bounty_header.strip()
     active_probes = bool(data.get("active_probes", False))
 
-    if not domain:
+    # Multi-domain: optional list of domains from the UI textarea
+    domains_list = data.get("domains_list", [])
+    if not isinstance(domains_list, list):
+        domains_list = []
+    domains_list = [
+        d.strip() for d in domains_list
+        if isinstance(d, str) and d.strip()
+           and (d.strip().startswith("http://") or d.strip().startswith("https://"))
+    ]
+    use_multi   = len(domains_list) > 1
+    parallel    = bool(data.get("parallel", False)) and use_multi
+    first_domain = domains_list[0] if domains_list else domain
+
+    if not first_domain:
         return jsonify({"ok": False, "error": "No domain provided"}), 400
 
     with crawler_lock:
         if crawler_proc and crawler_proc.poll() is None:
             return jsonify({"ok": False, "error": "Crawler already running"}), 400
 
-        cmd = [
-            sys.executable, "-u", CRAWLER,   # -u = unbuffered stdout
-            "-D", domain,
-            "--rate-min", str(rate_min),
-            "--rate-max", str(rate_max),
-            "--concurrency", str(concurrency),
-        ]
+        # ── Write domains file for multi-domain mode ──────────────────────
+        domains_file = None
+        if use_multi:
+            import tempfile
+            tf = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, dir=BASE_DIR,
+                prefix="nuscrape_targets_",
+            )
+            tf.write("\n".join(domains_list))
+            tf.close()
+            domains_file = tf.name
+
+        # ── Build command ─────────────────────────────────────────────────
+        cmd = [sys.executable, "-u", CRAWLER, "--rate-min", str(rate_min),
+               "--rate-max", str(rate_max), "--concurrency", str(concurrency)]
+
+        if use_multi:
+            cmd.extend(["--domains", domains_file])
+            if parallel:
+                cmd.append("--parallel")
+        else:
+            cmd.extend(["-D", first_domain])
+            if resume:
+                cmd.append("--resume")
+
         if same_domain:
             cmd.append("--same-domain-only")
-        if resume:
-            cmd.append("--resume")
         if ignore_robots:
             cmd.append("--ignore-robots")
         if use_playwright:
@@ -189,8 +218,12 @@ def api_start():
             log_buffer.clear()
             log_total[0] = 0
 
-        push_log(f"[NuScrape] Args: rate={rate_min}-{rate_max}s  concurrency={concurrency}  same-domain={same_domain}  resume={resume}  stealth={stealth_profile}")
-        _launch_crawler(domain, cmd)
+        mode_note = (f"multi-domain ({len(domains_list)}"
+                     f"{' parallel' if parallel else ' sequential'})"
+                     if use_multi else "single-domain")
+        push_log(f"[NuScrape] Args: rate={rate_min}-{rate_max}s  concurrency={concurrency}"
+                 f"  same-domain={same_domain}  stealth={stealth_profile}  mode={mode_note}")
+        _launch_crawler(first_domain, cmd)
 
     return jsonify({"ok": True})
 
@@ -665,6 +698,18 @@ td a:hover{text-decoration:underline}
       <div class="field">
         <label>Target Domain</label>
         <input type="text" id="domain" placeholder="https://example.com">
+      </div>
+      <div class="field" style="margin-top:.3rem">
+        <label style="display:flex;align-items:center;gap:.5rem">
+          Multiple Domains
+          <span style="font-size:.62rem;color:var(--dim);font-family:var(--mono)">(one per line — overrides single domain above)</span>
+        </label>
+        <textarea id="multiDomains" rows="4" placeholder="https://target1.com&#10;https://target2.com&#10;https://target3.com"
+          style="width:100%;box-sizing:border-box;resize:vertical;background:var(--surface);border:1px solid var(--border);color:var(--fg);font-family:var(--mono);font-size:.72rem;padding:.35rem .5rem;border-radius:4px;outline:none;transition:border-color .15s"></textarea>
+      </div>
+      <div class="toggle-row" id="parallelRow" style="display:none">
+        <label>Parallel Scan (max 3 concurrent)</label>
+        <label class="toggle"><input type="checkbox" id="parallelScan"><span class="toggle-slider"></span></label>
       </div>
       <div class="row2">
         <div class="field"><label>Rate Min (s)</label><input type="number" id="rateMin" value="1.0" step="0.5" min="0"></div>
@@ -1228,28 +1273,48 @@ function setStealthBtn(el,val){
 }
 
 // ── Crawler control ────────────────────────────────────
+
+// Show/hide parallel toggle when multi-domain textarea has content
+document.addEventListener('DOMContentLoaded',()=>{
+  const ta=document.getElementById('multiDomains');
+  if(ta)ta.addEventListener('input',()=>{
+    const lines=ta.value.split('\n').map(l=>l.trim()).filter(Boolean);
+    document.getElementById('parallelRow').style.display=lines.length>1?'flex':'none';
+  });
+});
+
 async function startCrawler(){
   logOffset=0;logLines=0;clearLog();
-  const domain=document.getElementById('domain').value.trim();
-  if(!domain){alert('Enter a target domain');return}
+  const taVal=(document.getElementById('multiDomains').value||'');
+  const domainsList=taVal.split('\n').map(l=>l.trim()).filter(Boolean);
+  const singleDomain=document.getElementById('domain').value.trim();
+
+  if(domainsList.length===0 && !singleDomain){alert('Enter a target domain');return}
+
+  const payload={
+    domain: domainsList.length>0 ? domainsList[0] : singleDomain,
+    rate_min:parseFloat(document.getElementById('rateMin').value)||1,
+    rate_max:parseFloat(document.getElementById('rateMax').value)||3,
+    concurrency:parseInt(document.getElementById('concurrency').value)||5,
+    same_domain:document.getElementById('sameDomain').checked,
+    resume:document.getElementById('resumeCrawl').checked,
+    ignore_robots:document.getElementById('ignoreRobots').checked,
+    playwright:document.getElementById('usePW').checked,
+    no_social:document.getElementById('noSocial').checked,
+    skip_google_tracking:document.getElementById('skipGoogleTracking').checked,
+    active_probes:document.getElementById('activeProbes').checked,
+    stealth_profile:document.querySelector('input[name="stealthProfile"]:checked')?.value||'LOUD',
+    ...(document.getElementById('bugBountyToggle').checked && document.getElementById('bugBountyValue').value.trim()
+      ? {bug_bounty_header: document.getElementById('bugBountyValue').value.trim()}
+      : {}),
+  };
+  if(domainsList.length>1){
+    payload.domains_list=domainsList;
+    payload.parallel=document.getElementById('parallelScan').checked;
+  }
+
   const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      domain,
-      rate_min:parseFloat(document.getElementById('rateMin').value)||1,
-      rate_max:parseFloat(document.getElementById('rateMax').value)||3,
-      concurrency:parseInt(document.getElementById('concurrency').value)||5,
-      same_domain:document.getElementById('sameDomain').checked,
-      resume:document.getElementById('resumeCrawl').checked,
-      ignore_robots:document.getElementById('ignoreRobots').checked,
-      playwright:document.getElementById('usePW').checked,
-      no_social:document.getElementById('noSocial').checked,
-      skip_google_tracking:document.getElementById('skipGoogleTracking').checked,
-      active_probes:document.getElementById('activeProbes').checked,
-      stealth_profile:document.querySelector('input[name="stealthProfile"]:checked')?.value||'LOUD',
-      ...(document.getElementById('bugBountyToggle').checked && document.getElementById('bugBountyValue').value.trim()
-        ? {bug_bounty_header: document.getElementById('bugBountyValue').value.trim()}
-        : {}),
-    })});
+    body:JSON.stringify(payload)});
   const d=await r.json();
   if(!d.ok){alert('Error: '+d.error);return}
   switchTab('log');pollStatus();

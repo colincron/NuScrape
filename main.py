@@ -11178,6 +11178,245 @@ def probe_s3_permutations(root_domain):
         check_s3_bucket(bucket, source_url=f"permutation scan of {root_domain}")
 
 
+# ─────────────────────────────────────────────
+# Multi-domain scanning
+# ─────────────────────────────────────────────
+
+def _reset_per_domain_state() -> None:
+    """
+    Clear all module-level dedup sets and per-scan caches so that a fresh
+    domain scan does not inherit state from the previous one.
+
+    Called between domains in sequential multi-domain mode.  In parallel mode
+    each worker process has its own memory space so this is not needed.
+    """
+    global _zone_transfer_checked, _tls_checked, _exposure_checked
+    global _sensitive_checked, _admin_checked, _sec_headers_checked
+    global _dangerous_method_checked, _smuggling_tested, _waf_checked
+    global _waf_results, _well_known_checked, _host_header_checked
+    global _mapbox_pk_seen, _source_map_checked, _defcred_checked
+    global _actuator_checked, _tech_specific_checked, _graphql_checked
+    global _redirect_tested, _redirect_domains, _mass_assign_tested
+    global _api_version_tested, _ws_security_tested, _ws_stored
+    global _traversal_tested, _traversal_domains, _jwt_seen, _jwt_domains
+    global _ssti_tested, _ssti_domains, _crlf_tested, _crlf_domains
+    global _xxe_tested, _pp_body_tested, _pp_query_tested, _pp_js_tested
+    global _sqli_tested, _sqli_domains, _cmdi_tested, _cmdi_domains
+    global _ldapi_tested, _ldapi_form_tested
+    global _deserial_passive_seen, _deserial_active_tested
+    global _price_tested, _jwt_tested
+    global _idor_tested, _takeover_checked, _s3_checked, _s3_permutation_checked
+    global _subdomain_enriched, _ct_queried, _cookie_seen, _js_analysis_threads
+    _zone_transfer_checked  = set()
+    _tls_checked            = set()
+    _exposure_checked       = set()
+    _sensitive_checked      = set()
+    _admin_checked          = set()
+    _sec_headers_checked    = set()
+    _dangerous_method_checked = set()
+    _smuggling_tested       = set()
+    _waf_checked            = set()
+    _waf_results            = {}
+    _well_known_checked     = set()
+    _host_header_checked    = set()
+    _mapbox_pk_seen         = set()
+    _source_map_checked     = set()
+    _defcred_checked        = set()
+    _actuator_checked       = set()
+    _tech_specific_checked  = set()
+    _graphql_checked        = set()
+    _redirect_tested        = set()
+    _redirect_domains       = set()
+    _mass_assign_tested     = set()
+    _api_version_tested     = set()
+    _ws_security_tested     = set()
+    _ws_stored              = set()
+    _traversal_tested       = set()
+    _traversal_domains      = set()
+    _jwt_seen               = set()
+    _jwt_domains            = set()
+    _ssti_tested            = set()
+    _ssti_domains           = set()
+    _crlf_tested            = set()
+    _crlf_domains           = set()
+    _xxe_tested             = set()
+    _pp_body_tested         = set()
+    _pp_query_tested        = set()
+    _pp_js_tested           = set()
+    _sqli_tested            = set()
+    _sqli_domains           = set()
+    _cmdi_tested            = set()
+    _cmdi_domains           = set()
+    _ldapi_tested           = set()
+    _ldapi_form_tested      = set()
+    _deserial_passive_seen  = set()
+    _deserial_active_tested = set()
+    _price_tested           = set()
+    _jwt_tested             = set()
+    _idor_tested            = set()
+    _takeover_checked       = set()
+    _s3_checked             = set()
+    _s3_permutation_checked = set()
+    _subdomain_enriched     = set()
+    _ct_queried             = set()
+    _cookie_seen            = {}
+    _js_analysis_threads    = []
+    # Function-attribute dedup set used by check_spf_dmarc
+    if hasattr(check_spf_dmarc, "_checked"):
+        check_spf_dmarc._checked = set()
+    # DNS cache does not need clearing — TTL-based expiry handles staleness
+
+
+def _query_domain_summary(domain: str) -> dict:
+    """
+    Query ScrapeDB for alert counts and page count for a completed domain scan.
+    Returns {'critical': n, 'high': n, 'medium': n, 'low': n, 'pages': n}.
+    """
+    host = urlparse(domain).netloc or domain
+    try:
+        conn = sqlite3.connect("ScrapeDB", timeout=10)
+        conn.row_factory = sqlite3.Row
+        sev_rows = conn.execute(
+            "SELECT severity, COUNT(*) as c FROM Alerts "
+            "WHERE target LIKE ? GROUP BY severity",
+            (f"%{host}%",),
+        ).fetchall()
+        page_count = conn.execute(
+            "SELECT COUNT(*) as c FROM HTTPHistory WHERE url LIKE ?",
+            (f"%{host}%",),
+        ).fetchone()
+        conn.close()
+    except Exception:
+        return {"critical": 0, "high": 0, "medium": 0, "low": 0, "pages": 0}
+
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "pages": 0}
+    for r in sev_rows:
+        k = r["severity"].lower() if r["severity"] else ""
+        if k in counts:
+            counts[k] = r["c"]
+    counts["pages"] = page_count["c"] if page_count else 0
+    return counts
+
+
+def _domain_worker(domain: str, kwargs: dict) -> None:
+    """
+    Entry point for a multiprocessing.Process worker.
+    Each worker gets its own copy of module state (fork), so no reset needed.
+    Catches SystemExit from main_crawler so the process exits cleanly.
+    """
+    try:
+        main_crawler(domain, **kwargs)
+    except (SystemExit, KeyboardInterrupt):
+        pass
+
+
+def run_multi_domain(
+    domains: list,
+    same_domain_only: bool = False,
+    ignore_robots: bool    = False,
+    min_workers: int       = 1,
+    max_workers: int       = 10,
+    parallel: bool         = False,
+) -> None:
+    """
+    Scan a list of domains, either sequentially or in parallel (≤3 concurrent).
+
+    Sequential mode (default):
+      Calls main_crawler() in-process for each domain, resetting all dedup
+      state between runs.  Findings accumulate in the shared ScrapeDB.
+
+    Parallel mode (--parallel):
+      Spawns one multiprocessing.Process per domain, capped at 3 concurrent.
+      Each child process has its own memory, so state isolation is automatic.
+      SQLite write contention is minimal at ≤3 writers; each process uses its
+      own connection.
+
+    Prints progress [N/total] and a summary table when all scans complete.
+    """
+    import multiprocessing as _mp
+
+    total  = len(domains)
+    kwargs = dict(
+        same_domain_only = same_domain_only,
+        ignore_robots    = ignore_robots,
+        min_workers      = min_workers,
+        max_workers      = max_workers,
+    )
+    results = {}   # domain → {'elapsed': float, 'summary': dict}
+
+    if parallel:
+        _MAX_PARALLEL = 3
+        active: list  = []   # list of (Process, domain, start_time)
+        queued        = list(enumerate(domains, 1))   # [(idx, domain), ...]
+
+        def _reap_finished():
+            for p, d, t0 in list(active):
+                if not p.is_alive():
+                    p.join()
+                    elapsed = time.time() - t0
+                    results[d] = {"elapsed": elapsed,
+                                  "summary": _query_domain_summary(d)}
+                    active.remove((p, d, t0))
+
+        while queued or active:
+            _reap_finished()
+            while queued and len(active) < _MAX_PARALLEL:
+                idx, domain = queued.pop(0)
+                print(f"\n[{idx}/{total}] Scanning {domain}  [parallel]")
+                p  = _mp.Process(target=_domain_worker, args=(domain, kwargs),
+                                 daemon=False)
+                p.start()
+                active.append((p, domain, time.time()))
+            time.sleep(1)
+        _reap_finished()
+
+    else:
+        for idx, domain in enumerate(domains, 1):
+            print(f"\n{'='*60}")
+            print(f"[{idx}/{total}] Scanning {domain}...")
+            print(f"{'='*60}")
+            t0 = time.time()
+            try:
+                main_crawler(domain, **kwargs)
+            except SystemExit:
+                pass   # main_crawler calls sys.exit(0) on clean finish
+            except KeyboardInterrupt:
+                print("\n[*] Interrupted during multi-domain scan.")
+                _shutdown_playwright()
+                break
+            elapsed = time.time() - t0
+            results[domain] = {"elapsed": elapsed,
+                               "summary": _query_domain_summary(domain)}
+            if idx < total:
+                _reset_per_domain_state()
+
+    # ── Summary table ──────────────────────────────────────────────────────
+    print(f"\n{'='*60}")
+    print("MULTI-DOMAIN SCAN SUMMARY")
+    print(f"{'='*60}")
+    col_w = max((len(d) for d in domains), default=20)
+    hdr   = (f"{'Domain':<{col_w}}  {'Pages':>6}  "
+             f"{'CRIT':>5}  {'HIGH':>5}  {'MED':>5}  {'LOW':>5}  {'Time':>8}")
+    print(hdr)
+    print("-" * len(hdr))
+    for domain in domains:
+        r = results.get(domain, {})
+        s = r.get("summary", {})
+        elapsed_s = r.get("elapsed", 0)
+        mins, secs = divmod(int(elapsed_s), 60)
+        time_str   = f"{mins}m{secs:02d}s"
+        print(
+            f"{domain:<{col_w}}  "
+            f"{s.get('pages',0):>6}  "
+            f"{s.get('critical',0):>5}  "
+            f"{s.get('high',0):>5}  "
+            f"{s.get('medium',0):>5}  "
+            f"{s.get('low',0):>5}  "
+            f"{time_str:>8}"
+        )
+    print(f"{'='*60}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NuScrape — web recon and vulnerability scanner")
     parser.add_argument("-D", "--Domain",              help="Start URL including http/https")
@@ -11203,6 +11442,11 @@ if __name__ == "__main__":
                         help="Minimum adaptive concurrency workers (default: 1)")
     parser.add_argument("--max-workers", type=int, default=10,
                         help="Maximum adaptive concurrency workers (default: 10)")
+    parser.add_argument("--domains", metavar="FILE",
+                        help="Path to a text file containing one target URL per line "
+                             "(alternative to -D for multi-domain scanning)")
+    parser.add_argument("--parallel", action="store_true",
+                        help="Run up to 3 domain scans concurrently (requires --domains)")
 
     args = parser.parse_args()
 
@@ -11251,7 +11495,41 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT,  _handle_stop_signal)
     signal.signal(signal.SIGTERM, _handle_stop_signal)
 
-    if args.Domain:
+    if args.domains:
+        # ── Multi-domain mode ──────────────────────────────────────────────
+        try:
+            with open(args.domains, "r", encoding="utf-8") as _f:
+                raw_lines = _f.readlines()
+        except OSError as _e:
+            print(f"[!] Cannot read domains file '{args.domains}': {_e}")
+            sys.exit(1)
+
+        domain_list = [
+            ln.strip() for ln in raw_lines
+            if ln.strip() and not ln.strip().startswith("#")
+        ]
+        if not domain_list:
+            print(f"[!] No valid domains found in '{args.domains}'.")
+            sys.exit(1)
+
+        print(f"[*] Multi-domain mode: {len(domain_list)} target(s)"
+              f"  parallel={args.parallel}")
+
+        try:
+            run_multi_domain(
+                domain_list,
+                same_domain_only = args.same_domain_only,
+                ignore_robots    = args.ignore_robots,
+                min_workers      = args.min_workers,
+                max_workers      = args.max_workers,
+                parallel         = args.parallel,
+            )
+        except KeyboardInterrupt:
+            print("\n[*] Interrupted — shutting down cleanly...")
+            _shutdown_playwright()
+            sys.exit(0)
+
+    elif args.Domain:
         try:
             main_crawler(args.Domain, same_domain_only=args.same_domain_only,
                          resume=args.resume, ignore_robots=args.ignore_robots,
@@ -11272,5 +11550,7 @@ if __name__ == "__main__":
         print("  --resume                Resume from last saved state")
         print("  --playwright            Enable JS rendering via Playwright")
         print("  --no-social             Skip social media domains (Facebook, X, YouTube, etc.)")
-        print("  --stealth LOUD|NORMAL|GHOST  Stealth profile (default: LOUD)\n")
+        print("  --stealth LOUD|NORMAL|GHOST  Stealth profile (default: LOUD)")
+        print("  --domains FILE          Scan multiple domains from a text file (one per line)")
+        print("  --parallel              Run up to 3 domain scans concurrently (requires --domains)\n")
 
