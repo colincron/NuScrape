@@ -5949,6 +5949,9 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                 check_ldap_injection(url, html)
                 # Insecure deserialization — active confirmation of passive signals
                 check_insecure_deserialization(url, html, headers)
+                # Price manipulation — tests checkout/payment endpoints for
+                # client-side price/quantity bypass vulnerabilities
+                check_price_manipulation(url, html)
             # IDOR candidate detection — runs in background thread with timeout
             # to prevent hung verification requests stalling the crawl
             _idor_thread = threading.Thread(
@@ -9018,14 +9021,79 @@ _CMDI_WIN_INDICATORS = [
 _cmdi_tested: set  = set()   # (base_url, param) already probed
 _cmdi_domains: set = set()   # domains where CMDi was confirmed
 
+# ── False-positive filter regexes ────────────────────────────────────────────
+# Each is applied to a 300-char look-behind window ending immediately before a
+# canary occurrence.  If any pattern matches, that occurrence is a reflection
+# of the injected input rather than genuine shell output and is skipped.
+
+# Rule 1: canary is inside a URL query-parameter value  …?p=<val><canary>
+# The value portion allows spaces so that payloads like ';echo canary' —
+# which produce '?param=orig;echo ' immediately before the canary — are caught.
+_CMDI_FP_IN_PARAM_RE = re.compile(
+    r'[?&][^=&"\'<\n]+=(?:[^&"\'<\n]*)$',
+)
+# Rule 2: canary is inside an HTML attribute that carries a URL
+_CMDI_FP_IN_ATTR_RE = re.compile(
+    r'(?:href|src|action|content)\s*=\s*["\'][^"\']*$',
+    re.IGNORECASE,
+)
+# Rule 3: canary is inside a JSON string that contains a URL (absolute URL or
+#         query-string fragment with ?param= or &param=)
+_CMDI_FP_IN_JSON_URL_RE = re.compile(
+    r'"[^"\n]*(?:https?://|[?&][^"\n]*=)[^"\n]*$',
+)
+
+
+def _cmdi_canary_is_standalone(body: str, canary: str) -> bool:
+    """
+    Return True only if *canary* appears in *body* as standalone plain-text
+    output — i.e. NOT as a reflected URL parameter, NOT inside an HTML URL
+    attribute (href/src/action/content), and NOT embedded in a JSON URL string.
+
+    Iterates every occurrence of *canary* in *body* and checks a 300-character
+    look-behind window against three false-positive patterns.  Returns True as
+    soon as one occurrence passes all three checks (genuine shell echo).
+    Returns False if every occurrence is explained by a reflection pattern.
+    """
+    if canary not in body:
+        return False
+
+    pos = 0
+    while True:
+        pos = body.find(canary, pos)
+        if pos == -1:
+            break
+        pre = body[max(0, pos - 300):pos]
+
+        if _CMDI_FP_IN_PARAM_RE.search(pre):
+            pos += 1
+            continue   # reflected as a URL query-parameter value
+
+        if _CMDI_FP_IN_ATTR_RE.search(pre):
+            pos += 1
+            continue   # reflected inside href/src/action/content attribute
+
+        if _CMDI_FP_IN_JSON_URL_RE.search(pre):
+            pos += 1
+            continue   # embedded in a JSON string that contains a URL
+
+        return True    # this occurrence is not a known reflection pattern
+
+    return False   # every occurrence was a false-positive
+
 
 def check_cmdi(page_url: str, html_content) -> None:
     """
     Canary-based OS command injection detection.
 
     Injects harmless echo commands into every URL parameter found on the page.
-    Flags CRITICAL only when the literal canary string appears in the response —
-    proving the shell executed our input.
+    Flags CRITICAL only when the literal canary string appears in the response
+    as standalone plain-text output — proving the shell executed our input.
+
+    False-positive filtering via _cmdi_canary_is_standalone():
+      - Skips occurrences that are reflected URL parameter values
+      - Skips occurrences inside HTML href/src/action/content attributes
+      - Skips occurrences inside JSON strings that contain a URL
 
     Only called when --active-probes is enabled.
     Safe-mode only — no destructive commands, no reverse shells, no file reads.
@@ -9104,8 +9172,10 @@ def check_cmdi(page_url: str, html_content) -> None:
                         allow_redirects=True,
                     )
                     body = resp.text or ""
-                    # Check for canary echo (Linux and Windows)
-                    if _CMDI_CANARY in body:
+                    # Check for canary echo (Linux and Windows).
+                    # _cmdi_canary_is_standalone rejects reflected URL params,
+                    # HTML attribute reflections, and JSON URL string reflections.
+                    if _cmdi_canary_is_standalone(body, _CMDI_CANARY):
                         idx = body.find(_CMDI_CANARY)
                         snippet = body[max(0, idx - 30):idx + len(_CMDI_CANARY) + 60].strip()
                         alert(
@@ -9780,6 +9850,331 @@ def check_insecure_deserialization(
                     print(timestamp() + f" ViewState MAC validation active on {action_url}")
             except Exception:
                 pass
+
+
+# ─────────────────────────────────────────────
+# Price manipulation detection
+# ─────────────────────────────────────────────
+
+# URL path keywords that indicate a checkout/payment endpoint
+_PRICE_URL_RE = re.compile(
+    r'/(?:checkout|cart|order|payment|purchase|buy|basket|booking|ticket)',
+    re.IGNORECASE,
+)
+
+# JSON field names that carry monetary or quantity values
+_PRICE_FIELDS = frozenset({
+    "price", "amount", "total", "cost", "fee", "charge",
+    "quantity", "qty",
+})
+
+# Patterns in a response body that suggest an order/booking was accepted
+_PRICE_SUCCESS_RE = re.compile(
+    r'(?:order|booking|reservation|transaction|payment|purchase)'
+    r'[^.]{0,60}'
+    r'(?:confirmed|created|accepted|success|placed|complete)',
+    re.IGNORECASE,
+)
+
+# Patterns that indicate the server rejected the request safely
+_PRICE_REJECT_RE = re.compile(
+    r'invalid.{0,30}(?:price|amount|quantity|value)'
+    r'|(?:price|amount|quantity).{0,30}(?:must be|cannot be|invalid|positive)'
+    r'|bad.{0,30}request'
+    r'|validation.{0,30}(?:error|fail)'
+    r'|(?:negative|zero).{0,30}(?:price|amount|quantity).{0,30}not.{0,30}allow',
+    re.IGNORECASE,
+)
+
+_price_tested: set = set()   # endpoints already probed
+
+
+def _price_extract_numeric(val):
+    """
+    Return the float representation of *val* if it is a JSON number or a
+    string encoding a number (e.g. "9.99", "1000").  Returns None otherwise.
+    """
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        try:
+            return float(val.replace(",", "").strip())
+        except ValueError:
+            pass
+    return None
+
+
+def _price_find_fields(obj, path=""):
+    """
+    Recursively walk a decoded JSON object and yield (dot-path, value) for
+    every leaf whose key is a price/quantity field name.
+    """
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            full = f"{path}.{k}" if path else k
+            if k.lower() in _PRICE_FIELDS:
+                yield full, v
+            else:
+                yield from _price_find_fields(v, full)
+    elif isinstance(obj, list):
+        for i, item in enumerate(obj):
+            yield from _price_find_fields(item, f"{path}[{i}]")
+
+
+def _price_set_nested(obj, dot_path, new_val):
+    """
+    Return a deep copy of *obj* with the value at *dot_path* replaced by
+    *new_val*.  Handles both dict keys and list indices (bracket notation).
+    """
+    import copy
+    result = copy.deepcopy(obj)
+    parts  = re.split(r'\.|\[(\d+)\]', dot_path)
+    node   = result
+    # Walk to the parent of the target node
+    keys = []
+    for raw in dot_path.replace("]", "").replace("[", ".").split("."):
+        if raw == "":
+            continue
+        try:
+            keys.append(int(raw))
+        except ValueError:
+            keys.append(raw)
+    for k in keys[:-1]:
+        node = node[k]
+    node[keys[-1]] = new_val
+    return result
+
+
+def _price_response_signals(resp, orig_body: dict, field_path: str, probe_val):
+    """
+    Examine *resp* and return (severity, evidence_str) if the manipulation
+    appears to have been processed, or (None, None) if the server rejected it
+    safely or the result is ambiguous.
+
+    severity is "HIGH" or "MEDIUM".
+    """
+    if resp is None:
+        return None, None
+
+    body_text = resp.text or ""
+    body_lower = body_text.lower()
+
+    # Safe rejection — server explicitly complained about the value
+    if _PRICE_REJECT_RE.search(body_text):
+        return None, None
+
+    # Try to parse a JSON response and look for numeric totals
+    resp_json = None
+    try:
+        resp_json = resp.json()
+    except Exception:
+        pass
+
+    if resp_json is not None:
+        # Walk response JSON for total/amount/price fields
+        for resp_path, resp_val in _price_find_fields(resp_json):
+            num = _price_extract_numeric(resp_val)
+            if num is None:
+                continue
+            if num < 0:
+                snippet = f"response field '{resp_path}' = {resp_val!r}"
+                return "HIGH", (
+                    f"Server returned negative value ({resp_val!r}) in '{resp_path}' "
+                    f"after setting '{field_path}' to {probe_val!r}. {snippet}"
+                )
+            if num == 0 and probe_val in (0, -1, -0.01):
+                # Zero total after a zero/negative probe — likely processed
+                snippet = f"response field '{resp_path}' = {resp_val!r}"
+                return "HIGH", (
+                    f"Server returned zero total in '{resp_path}' after setting "
+                    f"'{field_path}' to {probe_val!r}. {snippet}"
+                )
+
+    # Success phrases without explicit total confirmation → MEDIUM
+    if resp.status_code == 200 and _PRICE_SUCCESS_RE.search(body_text):
+        excerpt = _PRICE_SUCCESS_RE.search(body_text).group(0)[:120]
+        return "MEDIUM", (
+            f"Server returned 200 with success phrase after setting "
+            f"'{field_path}' to {probe_val!r}. Response excerpt: {excerpt!r}"
+        )
+
+    # 200 with no rejection and no success — ambiguous; report MEDIUM
+    if resp.status_code == 200 and not _PRICE_REJECT_RE.search(body_text):
+        excerpt = body_text[:200].strip()
+        return "MEDIUM", (
+            f"Server accepted request without error after setting "
+            f"'{field_path}' to {probe_val!r} (HTTP 200, no validation error). "
+            f"Response prefix: {excerpt!r}"
+        )
+
+    return None, None
+
+
+def check_price_manipulation(page_url: str, html_content) -> None:
+    """
+    Client-side price manipulation detection.
+
+    Discovers checkout/payment endpoints from the page URL and any form
+    actions/links on the page.  For each endpoint that accepts a JSON body
+    containing price or quantity fields, resends the request with manipulated
+    values (negative price, zero price, zero/negative quantity, missing field)
+    and inspects the response for signs of acceptance.
+
+    Probes:
+      - Negative price  : field → -1
+      - Zero price      : field → 0
+      - Fractional neg  : field → -0.01
+      - Zero quantity   : quantity/qty field → 0
+      - Negative qty    : quantity/qty field → -1
+      - Field removal   : remove the price field entirely
+
+    Flags HIGH if response contains a negative/zero total or explicit success.
+    Flags MEDIUM if server returns 200 without a validation error.
+
+    Detection-only — does not complete any purchase or submit payment details.
+    Deduplicates per endpoint.  8-second timeout per probe.
+    Only called when --active-probes is enabled.
+    """
+    if not is_in_scope(page_url):
+        return
+    domain = urlparse(page_url).netloc
+    if is_third_party_cdn(domain):
+        return
+
+    # ── Collect candidate URLs from the page ──────────────────────────────────
+    candidate_urls = set()
+
+    # 1. The page URL itself if it matches the keyword pattern
+    if _PRICE_URL_RE.search(urlparse(page_url).path):
+        candidate_urls.add(page_url)
+
+    # 2. Form actions and links on the page
+    try:
+        text = html_content if isinstance(html_content, str) \
+               else html_content.decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(text, "lxml")
+    except Exception:
+        soup = None
+
+    if soup:
+        for tag in soup.find_all(["form", "a"]):
+            href = tag.get("action") or tag.get("href") or ""
+            if not href:
+                continue
+            resolved = urljoin(page_url, href)
+            if _PRICE_URL_RE.search(urlparse(resolved).path):
+                candidate_urls.add(resolved)
+
+    if not candidate_urls:
+        return
+
+    waf_note = ""
+    waf_vendor = _waf_results.get(domain)
+    if waf_vendor:
+        waf_note = f" [WAF: {waf_vendor} detected]"
+
+    for endpoint in candidate_urls:
+        if endpoint in _price_tested:
+            continue
+        _price_tested.add(endpoint)
+
+        ep_parsed = urlparse(endpoint)
+        if is_third_party_cdn(ep_parsed.netloc):
+            continue
+
+        # ── Probe with GET to capture a baseline JSON body ─────────────────
+        baseline_json = None
+        try:
+            stealth_delay(domain)
+            r0 = _get_session().get(
+                endpoint,
+                headers={**create_request_header(), "Accept": "application/json"},
+                timeout=8,
+                allow_redirects=True,
+            )
+            if r0 and r0.status_code == 200:
+                baseline_json = r0.json()
+        except Exception:
+            pass
+
+        if baseline_json is None:
+            # No JSON baseline — nothing to manipulate
+            continue
+
+        # ── Find price/quantity fields in the baseline ─────────────────────
+        fields = list(_price_find_fields(baseline_json))
+        if not fields:
+            continue
+
+        print(timestamp() + f" Price manipulation probe: {endpoint} "
+              f"fields={[p for p, _ in fields]}")
+
+        for field_path, orig_val in fields:
+            orig_num = _price_extract_numeric(orig_val)
+            field_key = field_path.split(".")[-1].lower()
+            is_qty    = field_key in {"quantity", "qty"}
+
+            # Build the probe set for this field
+            probes = []
+            if is_qty:
+                probes = [("zero qty",     0),
+                          ("negative qty", -1)]
+            else:
+                probes = [("negative price",    -1),
+                          ("zero price",         0),
+                          ("fractional neg",    -0.01)]
+
+            # Also probe field removal (all field types)
+            probes.append(("field removal", None))
+
+            for probe_label, probe_val in probes:
+                try:
+                    if probe_val is None:
+                        # Remove the field entirely
+                        import copy
+                        modified = copy.deepcopy(baseline_json)
+                        # Walk to parent and delete the key
+                        parts = [p for p in
+                                 field_path.replace("]", "").replace("[", ".").split(".")
+                                 if p]
+                        node = modified
+                        for k in parts[:-1]:
+                            node = node[int(k)] if k.isdigit() else node[k]
+                        last = parts[-1]
+                        if last.isdigit():
+                            del node[int(last)]
+                        elif last in node:
+                            del node[last]
+                        else:
+                            continue   # field not at expected path
+                    else:
+                        modified = _price_set_nested(baseline_json, field_path, probe_val)
+
+                    stealth_delay(domain)
+                    resp = _get_session().post(
+                        endpoint,
+                        json=modified,
+                        headers={**create_request_header(),
+                                 "Content-Type": "application/json"},
+                        timeout=8,
+                        allow_redirects=False,   # don't follow — stop before any commit
+                    )
+
+                    sev, evidence = _price_response_signals(
+                        resp, baseline_json, field_path, probe_val
+                    )
+                    if sev:
+                        alert(
+                            "PRICE MANIPULATION",
+                            sev,
+                            endpoint,
+                            f"Probe '{probe_label}': {evidence}{waf_note}",
+                        )
+                        print(timestamp() + f" [!] Price manipulation ({sev}) "
+                              f"at {endpoint} field={field_path} probe={probe_label}")
+
+                except Exception:
+                    pass
 
 
 # ─────────────────────────────────────────────
