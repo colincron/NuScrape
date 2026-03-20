@@ -4694,6 +4694,10 @@ _CONF_CONFIRMED_KEYS = {
     "WEBSOCKET UNAUTHENTICATED DATA",
     "WEBSOCKET ORIGIN VALIDATION",
     "WEBSOCKET UNENCRYPTED",
+    # Injection findings confirmed by canary/error-string evidence
+    "COMMAND INJECTION",
+    "SQL INJECTION",
+    "LDAP INJECTION",
     # Factual observations (header presence/absence is deterministic)
     "SECURITY HEADER",
     "MISSING SECURITY HEADER",
