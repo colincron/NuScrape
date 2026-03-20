@@ -47,6 +47,48 @@ try:
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
 
+# colorama is optional — provides cross-platform ANSI color support.
+# Colors are disabled automatically when stdout is not a TTY (piped output).
+# Fore/Style stubs ensure all references are safe even when colorama is absent.
+try:
+    from colorama import Fore, Style, init as _colorama_init
+    _colorama_init(autoreset=True)
+    _COLORAMA_AVAILABLE = True
+except ImportError:
+    _COLORAMA_AVAILABLE = False
+    class _Stub:                    # noqa: E302
+        def __getattr__(self, _):
+            return ""
+    Fore  = _Stub()  # type: ignore[assignment]
+    Style = _Stub()  # type: ignore[assignment]
+
+# Disable colors when not writing to a real terminal (e.g. piped to a file)
+USE_COLORS: bool = _COLORAMA_AVAILABLE and sys.stdout.isatty()
+
+
+def _c(text: str, fore: str, style: str = "") -> str:
+    """Wrap `text` with ANSI color codes if USE_COLORS is enabled."""
+    if not USE_COLORS:
+        return text
+    reset = Style.RESET_ALL  # type: ignore[attr-defined]
+    return f"{style}{fore}{text}{reset}"
+
+
+def _sev_color(severity: str) -> str:
+    """Return the ANSI-colored severity label, or the plain string if colors off."""
+    if not USE_COLORS:
+        return severity
+    mapping = {
+        "CRITICAL": Fore.RED   + Style.BRIGHT,  # type: ignore[operator]
+        "HIGH":     Fore.RED,
+        "MEDIUM":   Fore.YELLOW,
+        "LOW":      Fore.CYAN,
+        "INFO":     Fore.WHITE,
+    }
+    code = mapping.get(severity.upper(), "")
+    reset = Style.RESET_ALL  # type: ignore[attr-defined]
+    return f"{code}{severity}{reset}" if code else severity
+
 # ─────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────
@@ -393,7 +435,7 @@ def timestamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def print_error(error):
-    print(timestamp() + " ERROR: " + str(error))
+    print(timestamp() + " " + _c("ERROR:", Fore.RED, Style.BRIGHT) + " " + str(error))
 
 def sanitize_url(url):
     url = url.replace("https://", "").replace("http://", "").replace("www.", "")
@@ -886,7 +928,7 @@ def enumerate_subdomains(domain):
             if wildcard_ips and ip in wildcard_ips:
                 return
 
-            print(timestamp() + " Subdomain found: " + fqdn + " -> " + ip + (" [" + str(status) + "]" if status else ""))
+            print(timestamp() + " " + _c("Subdomain found:", Fore.GREEN) + " " + fqdn + " -> " + ip + (" [" + str(status) + "]" if status else ""))
             write_to_subdomains_database(root, fqdn, ip, status)
             _subdomain_enriched.add(fqdn)
             with found_lock:
@@ -980,7 +1022,7 @@ def query_ct_logs(domain):
             if wildcard_ips and ip in wildcard_ips:
                 continue
 
-            print(timestamp() + " CT subdomain live: " + fqdn + " -> " + ip
+            print(timestamp() + " " + _c("CT subdomain live:", Fore.GREEN) + " " + fqdn + " -> " + ip
                   + (" [" + str(status) + "]" if status else ""))
             write_to_subdomains_database(root, fqdn, ip, status)
             confirmed += 1
@@ -4035,7 +4077,92 @@ def is_social_media_domain(url):
         pass
     return False
 
-def write_to_alerts_database(alert_type, severity, target, detail):
+_CONFIDENCE_CONFIRMED = "CONFIRMED"
+_CONFIDENCE_LIKELY    = "LIKELY"
+_CONFIDENCE_NEEDS_VER = "NEEDS VERIFICATION"
+
+# Keywords in alert_type (upper-cased) that map to each confidence level.
+# Checked in order: CONFIRMED first, then LIKELY; anything else → NEEDS VERIFICATION.
+_CONF_CONFIRMED_KEYS = {
+    # Credential checks with body verification
+    "DEFAULT CREDENTIALS",
+    # Specific file/secret exposure confirmed by body content
+    "OPEN REDIRECT",
+    "CRLF INJECTION",
+    "PATH TRAVERSAL",
+    "SSTI",
+    "XXE INJECTION CONFIRMED",
+    "SERVER-SIDE PROTOTYPE POLLUTION",
+    "PROTOTYPE POLLUTION VIA URL",
+    "SPRING BOOT ACTUATOR",
+    "EXPOSED SECRET",
+    "LARAVEL ENV FILE",
+    "LARAVEL LOG FILE",
+    "LARAVEL DEBUG MODE",
+    "LARAVEL TELESCOPE",
+    "LARAVEL HORIZON",
+    "DJANGO DEBUG MODE",
+    "RAILS INFO PROPERTIES",
+    "DRUPAL SETTINGS FILE",
+    "JOOMLA CONFIGURATION BACKUP",
+    "WORDPRESS DEBUG LOG",
+    "WORDPRESS USER ENUMERATION",
+    "WORDPRESS XMLRPC",
+    "WSDL SERVICE DEFINITION",
+    "WEBSOCKET UNAUTHENTICATED DATA",
+    "WEBSOCKET ORIGIN VALIDATION",
+    "WEBSOCKET UNENCRYPTED",
+    # Factual observations (header presence/absence is deterministic)
+    "SECURITY HEADER",
+    "MISSING SECURITY HEADER",
+    "INSECURE COOKIE",
+    "JWT",
+    # .git/.env body-confirmed exposure
+    "GIT EXPOSURE",
+    "ENV FILE EXPOSED",
+    "SENSITIVE FILE",
+}
+
+_CONF_LIKELY_KEYS = {
+    "SUBDOMAIN TAKEOVER",
+    "PROTOTYPE POLLUTION — POSSIBLE",
+    "HTTP REQUEST SMUGGLING",
+    "GRAPHQL INTROSPECTION",
+    "CORS MISCONFIGURATION",
+    "MASS ASSIGNMENT",
+    "DANGEROUS HTTP METHOD",
+    "WORDPRESS LOGIN PAGE",
+    "DJANGO ADMIN PANEL",
+    "DRUPAL ADMIN",
+    "JOOMLA ADMIN",
+    "RAILS MAILERS",
+    "API VERSION",
+    "OLDER API VERSION",
+    "ZONE TRANSFER",
+    "DMARC",
+    "SPF",
+    "DKIM",
+    "ACTUATOR SHUTDOWN",
+    "SPRING BOOT WHITELABEL",
+}
+
+
+def _infer_confidence(alert_type: str) -> str:
+    """
+    Derive a confidence level from the alert type string.
+    Returns one of CONFIRMED / LIKELY / NEEDS VERIFICATION.
+    """
+    at = alert_type.upper()
+    for key in _CONF_CONFIRMED_KEYS:
+        if key in at:
+            return _CONFIDENCE_CONFIRMED
+    for key in _CONF_LIKELY_KEYS:
+        if key in at:
+            return _CONFIDENCE_LIKELY
+    return _CONFIDENCE_NEEDS_VER
+
+
+def write_to_alerts_database(alert_type, severity, target, detail, confidence=""):
     conn = sqlite3.connect("ScrapeDB", isolation_level=None)
     try:
         conn.execute("""CREATE TABLE IF NOT EXISTS Alerts (
@@ -4044,16 +4171,23 @@ def write_to_alerts_database(alert_type, severity, target, detail):
             severity TEXT,
             target TEXT,
             detail TEXT,
+            confidence TEXT,
             found_at TEXT
         )""")
+        # Migrate existing databases that pre-date the confidence column
+        try:
+            conn.execute("ALTER TABLE Alerts ADD COLUMN confidence TEXT")
+        except Exception:
+            pass  # column already exists
         # Deduplicate — don't re-insert the same finding
         existing = conn.execute(
             "SELECT id FROM Alerts WHERE alert_type=? AND target=? AND detail=? LIMIT 1",
             (alert_type, target, detail)).fetchone()
         if not existing:
             conn.execute(
-                "INSERT INTO Alerts (alert_type,severity,target,detail,found_at) VALUES (?,?,?,?,?)",
-                (alert_type, severity, target, detail, timestamp()))
+                "INSERT INTO Alerts (alert_type,severity,target,detail,confidence,found_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (alert_type, severity, target, detail, confidence, timestamp()))
     except Exception as e:
         print_error("write_to_alerts_database: " + str(e))
     finally:
@@ -4065,15 +4199,21 @@ def alert(alert_type, severity, target, detail, redact_detail=False):
     severity: CRITICAL | HIGH | MEDIUM
     redact_detail: if True, show only first 6 chars of detail in console output.
     """
-    bar = "=" * 64
-    display = (detail[:6] + "*" * max(0, len(detail) - 6)) if redact_detail and len(detail) > 6 else detail
+    confidence = _infer_confidence(alert_type)
+    display    = (detail[:6] + "*" * max(0, len(detail) - 6)) if redact_detail and len(detail) > 6 else detail
+    bar        = _c("=" * 64, Fore.RED, Style.BRIGHT if severity in ("CRITICAL", "HIGH") else "")
+    sev_label  = _sev_color(severity)
+    conf_label = _c(confidence, Fore.GREEN if confidence == _CONFIDENCE_CONFIRMED
+                    else Fore.YELLOW if confidence == _CONFIDENCE_LIKELY
+                    else Fore.CYAN)
     print(f"\n{bar}")
-    print(f"  !! {severity} ALERT: {alert_type} !!")
-    print(f"  Target : {target}")
-    print(f"  Detail : {display}")
-    print(f"  Time   : {timestamp()}")
+    print(f"  {_c('!!', Fore.RED, Style.BRIGHT)} {sev_label} ALERT: {alert_type} {_c('!!', Fore.RED, Style.BRIGHT)}")
+    print(f"  Target     : {target}")
+    print(f"  Detail     : {display}")
+    print(f"  Confidence : {conf_label}")
+    print(f"  Time       : {timestamp()}")
     print(f"{bar}\n")
-    write_to_alerts_database(alert_type, severity, target, detail)
+    write_to_alerts_database(alert_type, severity, target, detail, confidence)
 
 def write_to_js_database(page_url, js_url, finding_type, value, context=""):
     conn = sqlite3.connect("ScrapeDB", isolation_level=None)
@@ -5047,7 +5187,7 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
         except Exception as _e:
             print_error(f"Could not load recent crawl history: {_e}")
 
-        print(timestamp() + " Starting NuScrape → " + start_url)
+        print(timestamp() + " " + _c("Starting NuScrape →", Fore.GREEN, Style.BRIGHT) + " " + start_url)
         if same_domain_only:
             print(timestamp() + " Same-domain-only: staying on " + base_netloc)
 
@@ -5209,7 +5349,7 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
     probe_js_endpoints(base_url=start_url)
 
     clear_state()
-    print(timestamp() + " Done! Crawled " + str(i) + " pages.")
+    print(timestamp() + " " + _c("Done! Crawled " + str(i) + " pages.", Fore.GREEN, Style.BRIGHT))
     sys.exit(0)
 
 

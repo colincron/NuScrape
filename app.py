@@ -311,7 +311,7 @@ def api_xhr():
 @app.route("/api/alerts")
 def api_alerts():
     try:
-        return nocache(jsonify(qdb("SELECT id,alert_type,severity,target,detail,found_at FROM Alerts ORDER BY id DESC")))
+        return nocache(jsonify(qdb("SELECT id,alert_type,severity,target,detail,confidence,found_at FROM Alerts ORDER BY id DESC")))
     except Exception:
         return nocache(jsonify([]))
 
@@ -462,8 +462,8 @@ def api_export(table, fmt):
                             ["url","endpoint","method","found_at"]),
         "js_findings":     ("SELECT url,js_url,finding_type,value,context,found_at FROM JSFindings ORDER BY finding_type",
                             ["url","js_url","finding_type","value","context","found_at"]),
-        "alerts":          ("SELECT alert_type,severity,target,detail,found_at FROM Alerts ORDER BY found_at DESC",
-                            ["alert_type","severity","target","detail","found_at"]),
+        "alerts":          ("SELECT alert_type,severity,confidence,target,detail,found_at FROM Alerts ORDER BY found_at DESC",
+                            ["alert_type","severity","confidence","target","detail","found_at"]),
         "waf":             ("SELECT domain,waf_vendor,detected_by,found_at FROM WAF ORDER BY domain",
                             ["domain","waf_vendor","detected_by","found_at"]),
         "zone_transfers":  ("SELECT root_domain,nameserver,record,found_at FROM ZoneTransfer ORDER BY root_domain,nameserver",
@@ -817,7 +817,7 @@ td a:hover{text-decoration:underline}
         </div>
         <div class="search-row"><input type="text" placeholder="Filter..." oninput="filterTbl('tAlerts',this.value)"></div>
         <div class="tbl-wrap"><table id="tAlerts">
-          <thead><tr><th>Severity</th><th>Type</th><th>Target</th><th>Detail</th><th>Found</th></tr></thead>
+          <thead><tr><th>Severity</th><th>Confidence</th><th>Type</th><th>Target</th><th>Detail</th><th>Found</th></tr></thead>
           <tbody id="bAlerts"></tbody>
         </table></div>
       </div>
@@ -1463,18 +1463,23 @@ async function loadAlerts(){
   }
   const sevCls={CRITICAL:'br',HIGH:'br',MEDIUM:'by'};
   const sevIcon={CRITICAL:'🔴',HIGH:'🟠',MEDIUM:'🟡'};
+  const confCls={'CONFIRMED':'bg','LIKELY':'by','NEEDS VERIFICATION':'bc'};
+  const confIcon={'CONFIRMED':'✓','LIKELY':'~','NEEDS VERIFICATION':'?'};
   document.getElementById('bAlerts').innerHTML=rows.length
     ?rows.map(r=>{
       const cls=sevCls[r.severity]||'by';
+      const conf=r.confidence||'NEEDS VERIFICATION';
+      const ccls=confCls[conf]||'bc';
       return`<tr>
         <td><span class="b ${cls}">${sevIcon[r.severity]||''} ${escHtml(r.severity||'-')}</span></td>
+        <td><span class="b ${ccls}" title="${escHtml(conf)}">${confIcon[conf]||'?'} ${escHtml(conf)}</span></td>
         <td style="font-family:var(--mono);font-size:.72rem;color:var(--red)">${escHtml(r.alert_type||'-')}</td>
         <td class="wrap" style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${escHtml(r.target||'-')}</td>
         <td class="wrap" style="font-size:.72rem;white-space:normal;min-width:200px">${escHtml(r.detail||'-')}</td>
         <td style="font-size:.72rem;white-space:nowrap;color:var(--muted)">${escHtml(r.found_at||'-')}</td>
       </tr>`;
     }).join('')
-    :`<tr><td colspan="5" class="empty">// no alerts — system looks clean</td></tr>`;
+    :`<tr><td colspan="6" class="empty">// no alerts — system looks clean</td></tr>`;
 }
 
 async function loadDNS(){
