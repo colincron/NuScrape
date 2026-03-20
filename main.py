@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import argparse
-import sqlite3, re, random, sys, socket, ssl, time, json, os, heapq, itertools
+import sqlite3, re, random, sys, socket, ssl, time, json, os, heapq, itertools, signal
 from collections import defaultdict
 import asyncio
 import aiohttp
@@ -5210,8 +5210,34 @@ def check_js_source_map(page_url, js_url, js_response=None):
 # ─────────────────────────────────────────────
 
 # Per-thread persistent browser — each thread owns one browser for its lifetime
-_pw_semaphore = threading.Semaphore(PLAYWRIGHT_MAX_CONC)
-_pw_local     = threading.local()
+_pw_semaphore      = threading.Semaphore(PLAYWRIGHT_MAX_CONC)
+_pw_local          = threading.local()
+_pw_instances_lock = threading.Lock()
+_pw_instances: list = []   # [(pw, browser), …] — one entry per thread that spawned a browser
+
+
+def _shutdown_playwright() -> None:
+    """Close all Playwright browser instances and stop the Node.js process cleanly.
+
+    Iterates over every (pw, browser) pair registered in _pw_instances and shuts
+    each one down gracefully. Called on SIGINT, SIGTERM, and at normal crawler exit
+    to prevent the Node.js subprocess from receiving a write to a closed pipe
+    ('write EPIPE') when Python exits while Playwright is still running.
+    """
+    if not PLAYWRIGHT_AVAILABLE:
+        return
+    with _pw_instances_lock:
+        instances = list(_pw_instances)
+        _pw_instances.clear()
+    for pw, browser in instances:
+        try:
+            browser.close()
+        except Exception:
+            pass
+        try:
+            pw.stop()
+        except Exception:
+            pass
 
 
 def _get_pw_thread_browser():
@@ -5232,6 +5258,8 @@ def _get_pw_thread_browser():
         )
         _pw_local.pw      = pw
         _pw_local.browser = browser
+        with _pw_instances_lock:
+            _pw_instances.append((pw, browser))
     return _pw_local.browser
 
 # JS frameworks that definitely need Playwright
@@ -5956,6 +5984,7 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
 
     probe_js_endpoints(base_url=start_url)
 
+    _shutdown_playwright()
     clear_state()
     print(timestamp() + " " + _c("Done! Crawled " + str(i) + " pages.", Fore.GREEN, Style.BRIGHT))
     sys.exit(0)
@@ -10445,10 +10474,23 @@ if __name__ == "__main__":
             if not PLAYWRIGHT_STEALTH_AVAILABLE:
                 print("[!] playwright-stealth not installed — bot fingerprint suppression disabled. Run: pip install playwright-stealth")
 
+    def _handle_stop_signal(signum, frame):
+        print(f"\n[*] Received signal {signum} — shutting down cleanly...")
+        _shutdown_playwright()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT,  _handle_stop_signal)
+    signal.signal(signal.SIGTERM, _handle_stop_signal)
+
     if args.Domain:
-        main_crawler(args.Domain, same_domain_only=args.same_domain_only,
-                     resume=args.resume, ignore_robots=args.ignore_robots,
-                     min_workers=args.min_workers, max_workers=args.max_workers)
+        try:
+            main_crawler(args.Domain, same_domain_only=args.same_domain_only,
+                         resume=args.resume, ignore_robots=args.ignore_robots,
+                         min_workers=args.min_workers, max_workers=args.max_workers)
+        except KeyboardInterrupt:
+            print("\n[*] Interrupted — shutting down cleanly...")
+            _shutdown_playwright()
+            sys.exit(0)
     else:
         print("\nUsage: ./main.py -D https://www.example.com\n")
         print("Optional flags:")
