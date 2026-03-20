@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import argparse
-import sqlite3, re, random, sys, socket, ssl, time, json, os
+import sqlite3, re, random, sys, socket, ssl, time, json, os, heapq, itertools
 from collections import defaultdict
 import asyncio
 import aiohttp
@@ -265,6 +265,106 @@ PLAYWRIGHT_MAX_CONC = 2       # max concurrent browser pages (Pi-friendly)
 JS_CONTENT_MIN      = 500     # bytes — if aiohttp gets less, try Playwright
 QUEUE_SAVE_INTERVAL = 25
 
+# ─────────────────────────────────────────────
+# Adaptive concurrency
+# ─────────────────────────────────────────────
+
+class AdaptiveConcurrency:
+    """Dynamically adjusts worker count based on rolling response-time and error windows."""
+
+    _WINDOW = 20
+
+    def __init__(self, start: int = 3, min_workers: int = 1, max_workers: int = 10):
+        self._lock       = threading.Lock()
+        self.workers     = start
+        self.min_workers = min_workers
+        self.max_workers = max_workers
+        self._times: list  = []   # rolling elapsed seconds
+        self._errors: list = []   # rolling bool flags
+
+    def record(self, elapsed: float, is_error: bool) -> None:
+        with self._lock:
+            self._times.append(elapsed)
+            self._errors.append(is_error)
+            if len(self._times) > self._WINDOW:
+                self._times.pop(0)
+                self._errors.pop(0)
+            if len(self._times) >= self._WINDOW:
+                self._adjust()
+
+    def record_429(self) -> None:
+        with self._lock:
+            old = self.workers
+            self.workers = self.min_workers
+            if self.workers != old:
+                print(timestamp() + " [AdaptiveConcurrency] 429 received — throttling to "
+                      + str(self.workers) + " worker(s), pausing 10 s")
+            time.sleep(10)
+
+    def _adjust(self) -> None:
+        avg      = sum(self._times) / len(self._times)
+        err_rate = sum(self._errors) / len(self._errors)
+        old = self.workers
+        if err_rate > 0.20:
+            self.workers = max(self.min_workers, self.workers - 2)
+        elif avg > 2.0:
+            self.workers = max(self.min_workers, self.workers - 1)
+        elif avg < 0.5:
+            self.workers = min(self.max_workers, self.workers + 1)
+        if self.workers != old:
+            print(timestamp() + " [AdaptiveConcurrency] " + str(old) + "→" + str(self.workers)
+                  + " workers (avg=" + f"{avg:.2f}" + "s err=" + f"{err_rate:.0%}" + ")")
+
+
+# Singleton — initialised in main_crawler with CLI-supplied min/max
+_ac: AdaptiveConcurrency = AdaptiveConcurrency()
+
+# ─────────────────────────────────────────────
+# Priority queue helpers
+# ─────────────────────────────────────────────
+
+_pq_seq = itertools.count()   # monotonically increasing; breaks priority ties with FIFO order
+
+_P1_RE = re.compile(
+    r"/api[/\b]|/graphql|/login|/signin|/auth[/\b]|/oauth|/token[/\b]"
+    r"|/admin[/\b]|/dashboard|/wp-admin|/wp-json",
+    re.IGNORECASE,
+)
+_P2_RE = re.compile(
+    r"/upload|/download|/export|/import|/backup|/config[/\b]|/setting"
+    r"|/user[/\b]|/account|/profile|/reset|/password|/register"
+    r"|/payment|/checkout|/invoice|/order",
+    re.IGNORECASE,
+)
+_P4_RE = re.compile(
+    r"\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|mp4|mp3|zip|gz|tar)(\?|$)",
+    re.IGNORECASE,
+)
+
+
+def _url_priority(url: str) -> int:
+    """Return crawl priority tier for *url* (1=highest … 4=lowest)."""
+    path = urlparse(url).path
+    if _P1_RE.search(path):
+        return 1
+    if _P2_RE.search(path):
+        return 2
+    if _P4_RE.search(path):
+        return 4
+    return 3
+
+
+def _pq_push(queue: list, url: str) -> None:
+    """Push *url* onto the heapq priority queue."""
+    heapq.heappush(queue, (_url_priority(url), next(_pq_seq), url))
+
+
+def _pq_pop(queue: list) -> str:
+    """Pop the highest-priority URL from the heapq priority queue."""
+    _, _, url = heapq.heappop(queue)
+    return url
+
+
 # Subdomains to probe for each discovered root domain
 SUBDOMAIN_WORDLIST = [
     "www", "mail", "smtp", "pop", "imap", "ftp", "sftp",
@@ -483,7 +583,7 @@ def save_state(start_url, url_queue, url_seen, visited, pages_crawled, same_doma
         "same_domain_only": same_domain_only,
         "pages_crawled":    pages_crawled,
         "saved_at":         timestamp(),
-        "url_queue":        list(url_queue),
+        "url_queue":        [item[2] for item in url_queue],  # extract URLs from (pri, seq, url) tuples
         "url_seen":         list(url_seen),
         "visited":          list(visited),
     }
@@ -4797,6 +4897,7 @@ def playwright_fetch(url):
 
 async def async_fetch(session, url, semaphore):
     async with semaphore:
+        _t0 = time.monotonic()
         try:
             if STEALTH_PROFILE == "NORMAL":
                 await asyncio.sleep(random.uniform(0.5, 1.5))
@@ -4807,25 +4908,34 @@ async def async_fetch(session, url, semaphore):
             async with session.get(url, headers=headers, timeout=timeout) as response:
                 status = response.status
                 record_http_response(url, status)
+                if status == 429:
+                    elapsed = time.monotonic() - _t0
+                    await asyncio.sleep(random.uniform(RATE_LIMIT_MIN, RATE_LIMIT_MAX))
+                    return url, None, {}, elapsed, True, True   # (url, html, hdrs, elapsed, is_error, is_429)
                 if status == 200:
                     content_type = response.headers.get('Content-Type', '')
                     if 'xml' in content_type and 'html' not in content_type:
+                        elapsed = time.monotonic() - _t0
                         await asyncio.sleep(random.uniform(RATE_LIMIT_MIN, RATE_LIMIT_MAX))
-                        return url, None, {}
+                        return url, None, {}, elapsed, False, False
                     html = await response.read()
+                    elapsed = time.monotonic() - _t0
                     await asyncio.sleep(random.uniform(RATE_LIMIT_MIN, RATE_LIMIT_MAX))
-                    return url, html, dict(response.headers)
+                    return url, html, dict(response.headers), elapsed, False, False
         except asyncio.TimeoutError:
             print_error("Timeout fetching: " + url)
         except aiohttp.ClientError as e:
             print_error("Async fetch failed for " + url + ": " + str(e))
         except Exception as e:
             print_error("Unexpected error fetching " + url + ": " + str(e))
+        elapsed = time.monotonic() - _t0
         await asyncio.sleep(random.uniform(RATE_LIMIT_MIN, RATE_LIMIT_MAX))
-        return url, None, {}
+        return url, None, {}, elapsed, True, False
 
-async def crawl_batch(urls):
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+async def crawl_batch(urls, concurrency=None):
+    if concurrency is None:
+        concurrency = _ac.workers
+    semaphore = asyncio.Semaphore(max(1, concurrency))
     connector = aiohttp.TCPConnector(ssl=False)
     async with aiohttp.ClientSession(
         connector=connector,
@@ -4874,7 +4984,10 @@ def get_domain_names(anchors, url_queue, url_seen, base_netloc, same_domain_only
             if SKIP_GOOGLE_TRACKING and is_google_tracking_url(href):
                 continue
             url_seen.add(href)
-            url_queue.append(href)
+            priority = _url_priority(href)
+            _pq_push(url_queue, href)
+            if priority == 1:
+                print(timestamp() + " [P1] High-value URL queued: " + href)
             if href.endswith((".com", ".gov/", ".net/", ".edu/", ".org/",
                                ".io/", ".co.uk/", ".ie/", ".info/")):
                 new_domains.append(href)
@@ -5139,10 +5252,14 @@ def write_to_subdomains_database(root_domain, subdomain, ip, status_code):
 # Main crawler
 # ─────────────────────────────────────────────
 
-def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=False):
-    global START_URL, SAME_DOMAIN_ONLY
+def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=False,
+                 min_workers=1, max_workers=10):
+    global START_URL, SAME_DOMAIN_ONLY, _ac
     START_URL        = start_url
     SAME_DOMAIN_ONLY = same_domain_only
+    _ac = AdaptiveConcurrency(start=3, min_workers=min_workers, max_workers=max_workers)
+    print(timestamp() + " [AdaptiveConcurrency] min=" + str(min_workers)
+          + " max=" + str(max_workers) + " start=3 workers")
     parsed_start = urlparse(start_url)
     base_netloc  = parsed_start.netloc
     base_url     = parsed_start.scheme + "://" + base_netloc
@@ -5150,7 +5267,8 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
     state = load_state() if resume else None
 
     if state and state.get("start_url") == start_url:
-        url_queue = state["url_queue"]
+        url_queue = [(_url_priority(u), next(_pq_seq), u) for u in state["url_queue"]]
+        heapq.heapify(url_queue)
         url_seen  = set(state["url_seen"])
         visited   = set(state["visited"])
         i         = state["pages_crawled"]
@@ -5164,7 +5282,7 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
     else:
         if resume and state:
             print(timestamp() + " Saved state is for a different domain — starting fresh.")
-        url_queue = [start_url]
+        url_queue = [(_url_priority(start_url), next(_pq_seq), start_url)]
         url_seen  = {start_url}
         visited   = set()
         i         = 0
@@ -5204,21 +5322,28 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
             su = _clean_url(su)
             if su not in url_seen:
                 url_seen.add(su)
-                url_queue.append(su)
+                _pq_push(url_queue, su)
 
     _ghost_shuffle_at = random.randint(10, 20) if STEALTH_PROFILE == "GHOST" else 0
     _ghost_crawl_count = 0
     while url_queue:
-        # GHOST: periodically shuffle the queue to avoid predictable crawl patterns
+        # GHOST: periodically shuffle P3/P4 items to randomise crawl patterns
+        # while preserving P1/P2 ordering.
         if STEALTH_PROFILE == "GHOST" and _ghost_shuffle_at > 0:
             _ghost_crawl_count += 1
             if _ghost_crawl_count >= _ghost_shuffle_at:
-                random.shuffle(url_queue)
+                p12 = [item for item in url_queue if item[0] <= 2]
+                p34 = [item for item in url_queue if item[0] > 2]
+                random.shuffle(p34)
+                url_queue = p12 + p34
+                heapq.heapify(url_queue)
                 _ghost_crawl_count = 0
                 _ghost_shuffle_at = random.randint(10, 20)
+
         batch = []
-        while len(batch) < MAX_CONCURRENT and url_queue:
-            url = url_queue.pop(0)
+        batch_size = _ac.workers
+        while len(batch) < batch_size and url_queue:
+            url = _pq_pop(url_queue)
             if url in visited:
                 continue
             if SOCIAL_FILTER_FLAGS["enabled"] and is_social_media_domain(url):
@@ -5234,11 +5359,16 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
         if not batch:
             break
 
-        print(timestamp() + " Batch " + str(len(batch)) + " | crawled=" + str(i) + " queue=" + str(len(url_queue)))
+        print(timestamp() + " Batch " + str(len(batch)) + " [workers=" + str(_ac.workers)
+              + "] | crawled=" + str(i) + " queue=" + str(len(url_queue)))
 
-        results = asyncio.run(crawl_batch(batch))
+        results = asyncio.run(crawl_batch(batch, concurrency=_ac.workers))
 
-        for url, html, headers in results:
+        for url, html, headers, elapsed, is_error, is_429 in results:
+            if is_429:
+                _ac.record_429()
+            else:
+                _ac.record(elapsed, is_error)
             if html is None:
                 continue
             i += 1
@@ -8811,6 +8941,10 @@ if __name__ == "__main__":
                         help="Enable payload-injecting checks: path traversal, SSTI, CRLF injection, "
                              "CORS evil-origin probes, default credential tests, and dangerous HTTP method testing. "
                              "Only use against targets you are authorised to test.")
+    parser.add_argument("--min-workers", type=int, default=1,
+                        help="Minimum adaptive concurrency workers (default: 1)")
+    parser.add_argument("--max-workers", type=int, default=10,
+                        help="Maximum adaptive concurrency workers (default: 10)")
 
     args = parser.parse_args()
 
@@ -8853,13 +8987,16 @@ if __name__ == "__main__":
 
     if args.Domain:
         main_crawler(args.Domain, same_domain_only=args.same_domain_only,
-                     resume=args.resume, ignore_robots=args.ignore_robots)
+                     resume=args.resume, ignore_robots=args.ignore_robots,
+                     min_workers=args.min_workers, max_workers=args.max_workers)
     else:
         print("\nUsage: ./main.py -D https://www.example.com\n")
         print("Optional flags:")
         print("  --rate-min 1.0          Min seconds between requests")
         print("  --rate-max 3.0          Max seconds between requests")
-        print("  --concurrency 5         Max concurrent async requests")
+        print("  --concurrency 5         Max concurrent async requests (legacy; use --max-workers)")
+        print("  --min-workers 1         Minimum adaptive concurrency workers")
+        print("  --max-workers 10        Maximum adaptive concurrency workers")
         print("  --same-domain-only      Stay on the starting domain only")
         print("  --resume                Resume from last saved state")
         print("  --playwright            Enable JS rendering via Playwright")
