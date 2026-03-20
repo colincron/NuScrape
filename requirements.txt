@@ -6,5 +6,13 @@ dnspython
 python-whois
 flask
 publicsuffix2
+colorama
+websockets
+# Optional — JS rendering
 playwright
+# Optional — bot-detection suppression
+playwright-stealth
+# Optional — MySQL auth probing
 pymysql
+# Optional — enhanced SSL certificate parsing
+cryptography
