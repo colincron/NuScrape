@@ -63,6 +63,75 @@ SAME_DOMAIN_ONLY = False   # overridden by --same-domain-only CLI arg
 START_URL        = ""      # set at crawler startup; used by is_in_scope()
 ACTIVE_PROBES    = False   # overridden by --active-probes CLI arg; gates payload-injecting checks
 
+# ─────────────────────────────────────────────
+# Third-party CDN / external service exclusion
+# ─────────────────────────────────────────────
+# Active probes must never fire against these domains — they are not part of
+# the target scope and probing them would constitute unauthorised testing.
+# is_third_party_cdn() matches exact domains and any subdomain thereof.
+
+_THIRD_PARTY_CDN_DOMAINS = frozenset({
+    # Google
+    "fonts.googleapis.com",
+    "ajax.googleapis.com",
+    "google-analytics.com",
+    "googletagmanager.com",
+    "doubleclick.net",
+    "googleadservices.com",
+    # Cloudflare / CDN hosts
+    "cdnjs.cloudflare.com",
+    "cloudflare.com",
+    # jsDelivr / unpkg
+    "cdn.jsdelivr.net",
+    "jsdelivr.net",
+    "unpkg.com",
+    # Font Awesome
+    "fontawesome.com",
+    "use.fontawesome.com",
+    # jQuery
+    "jquery.com",
+    "code.jquery.com",
+    # Bootstrap CDN
+    "bootstrapcdn.com",
+    "maxcdn.bootstrapcdn.com",
+    "stackpath.bootstrapcdn.com",
+    # Social / tracking
+    "facebook.net",
+    "connect.facebook.net",
+    "twitter.com",
+    "platform.twitter.com",
+    "linkedin.com",
+    "snap.licdn.com",
+    # Analytics / session recording
+    "hotjar.com",
+    "static.hotjar.com",
+    # Support widgets
+    "intercom.io",
+    "widget.intercom.io",
+    # Payment / CAPTCHA
+    "stripe.com",
+    "js.stripe.com",
+    "recaptcha.net",
+    "www.recaptcha.net",
+})
+
+
+def is_third_party_cdn(netloc: str) -> bool:
+    """
+    Return True if `netloc` is, or is a subdomain of, a known third-party
+    CDN or external service that must not be actively probed.
+
+    Strips port suffix and leading 'www.' before comparing.
+    """
+    host = netloc.split(":")[0].lower().lstrip("www.")
+    if not host:
+        return False
+    for cdn in _THIRD_PARTY_CDN_DOMAINS:
+        if host == cdn or host.endswith("." + cdn):
+            return True
+    return False
+
+
 UA_POOL = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -5782,6 +5851,8 @@ def flag_ssrf_candidates(page_url, html_content):
     domain = urlparse(page_url).netloc
     if domain in _ssrf_flagged:
         return
+    if is_third_party_cdn(domain):
+        return
 
     try:
         text = html_content if isinstance(html_content, str) \
@@ -6435,6 +6506,8 @@ def check_path_traversal(page_url, html_content):
     domain = urlparse(page_url).netloc
     if domain in _traversal_domains:
         return
+    if is_third_party_cdn(domain):
+        return
 
     try:
         text = html_content if isinstance(html_content, str) \
@@ -6458,6 +6531,8 @@ def check_path_traversal(page_url, html_content):
         try:
             resolved_url = urljoin(page_url, raw_url)
             parsed = urlparse(resolved_url)
+            if is_third_party_cdn(parsed.netloc):
+                continue
             if not parsed.query:
                 continue
             params = {}
@@ -6930,6 +7005,8 @@ def check_crlf_injection(page_url, html_content):
         return
     if not is_in_scope(page_url):
         return
+    if is_third_party_cdn(domain):
+        return
 
     try:
         text = html_content if isinstance(html_content, str) \
@@ -6948,6 +7025,8 @@ def check_crlf_injection(page_url, html_content):
         if domain in _crlf_domains:
             break
         if not is_in_scope(raw_url):
+            continue
+        if is_third_party_cdn(urlparse(raw_url).netloc):
             continue
         try:
             parsed = urlparse(raw_url)
@@ -7300,6 +7379,8 @@ def check_prototype_pollution(page_url: str, html_content: str) -> None:
         return
 
     domain = urlparse(page_url).netloc
+    if is_third_party_cdn(domain):
+        return
 
     try:
         text = html_content if isinstance(html_content, str) \
