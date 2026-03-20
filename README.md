@@ -686,6 +686,93 @@ If port 3306 is found open, probes for access without credentials. **CRITICAL** 
 
 ---
 
+#### SQL Injection Detection
+
+Probes every URL query parameter discovered on crawled pages (from page URL, `<a href>` links, and `<form action>` attributes) for SQL injection. Requires `--active-probes`. Deduplicates per `(base_url, param)` pair.
+
+**Phase 1 — error-based:** Appends 9 quote/comment payloads (`'`, `''`, `` ` ``, `')`, `'))`, `' OR '1'='1`, etc.) to each parameter. Flags **CRITICAL** when any of 11 database error strings appear in the response (`SQL syntax`, `mysql_fetch`, `ORA-01756`, `PostgreSQL ERROR`, `unclosed quotation`, etc.).
+
+**Phase 2 — time-based blind:** Injects `SLEEP(5)` and `WAITFOR DELAY '0:0:5'` payloads. Flags **HIGH** if response time exceeds 5 seconds — manual confirmation required.
+
+| Finding | Severity | Signal |
+|---|---|---|
+| SQL error string in response | CRITICAL | Error-based injection confirmed |
+| Response delay ≥ 5s on sleep payload | HIGH | Time-based blind candidate |
+
+- Skips static asset URLs (CSS, JS, images, archives)
+- Skips third-party CDN domains
+- WAF vendor noted in finding detail when detected
+- 10-second timeout per probe; stops testing a domain after first confirmed finding
+
+---
+
+#### Command Injection Detection
+
+Injects harmless canary echo payloads into every URL query parameter. Flags **CRITICAL** only when the literal canary string `nuscrape-ci-canary` appears in the response — proving the OS shell executed the input. Requires `--active-probes`.
+
+| Platform | Payloads tested | Confirmation signal |
+|---|---|---|
+| Unix/Linux | `;echo`, `\|echo`, `` `echo` ``, `$(echo)`, `${IFS}echo`, `%0aecho` | `nuscrape-ci-canary` in response body |
+| Windows | `&echo`, `\|echo`, `;dir` | `nuscrape-ci-canary` in body; or `Volume in drive` / `Directory of` |
+
+- 10-second timeout per probe
+- Skips third-party CDN domains and static asset paths
+- WAF vendor noted in finding detail
+
+---
+
+#### LDAP Injection Detection
+
+Two-phase detection against endpoints handling directory lookups. Requires `--active-probes`.
+
+**Phase 1 — error-based URL parameter injection:** Appends 10 LDAP metacharacter payloads (`*`, `)(uid=*`, `*(|(uid=*))`, `\2a`, etc.) to each URL query parameter. Flags **CRITICAL** when any of 11 LDAP error strings are reflected (`LDAPException`, `javax.naming`, `Bad search filter`, `LdapErr`, `DSA is unwilling to perform`, etc.).
+
+**Phase 2 — login form authentication bypass:** Identifies POST forms containing both a username-type and password-type field. Sends a baseline request with garbage credentials, then retries with classic LDAP wildcard payloads (`*`/`*`, `admin)(&)`/`anything`). Flags **HIGH** if the bypass response indicates a successful login via any of three independent signals:
+- Final URL path contains a post-login segment (`dashboard`, `admin`, `profile`, `portal`, etc.)
+- A new auth-related cookie appeared that was absent in the baseline response
+- Response body contains a success phrase (`welcome`, `logged in`, `sign out`, etc.)
+
+| Finding | Severity | Signal |
+|---|---|---|
+| LDAP error string reflected | CRITICAL | Error-based injection confirmed |
+| Bypass response shows login success | HIGH | Authentication bypass confirmed |
+
+- 8-second timeout per probe
+- Skips third-party CDN domains and static asset paths
+- WAF vendor noted in finding detail
+
+---
+
+#### Insecure Deserialization Detection
+
+Two-tier detection: **passive** (runs on every crawled response, always active) and **active** (requires `--active-probes`).
+
+**Passive detection** — scans each response body, `Content-Type`, and `Set-Cookie` header for serialized data format indicators:
+
+| Format | Indicator | Severity |
+|---|---|---|
+| Java serialization | `AC ED 00 05` magic bytes in body; `rO0AB` Base64 prefix in body or cookie; `Content-Type: application/x-java-serialized-object` | MEDIUM |
+| PHP serialization | `O:\d+:` / `a:\d+:` / `s:\d+:` patterns in response body or `Set-Cookie` | MEDIUM |
+| Python pickle | `80 02`–`80 05` magic bytes; `Content-Type: application/python-pickle` | MEDIUM |
+| Ruby Marshal | `04 08` magic bytes | MEDIUM |
+| .NET ViewState | `__VIEWSTATE` hidden form field present | INFO |
+
+**Active confirmation** (requires `--active-probes`) — only fires on endpoints where passive detection already found a signal:
+
+| Target | Probe | Confirmation | Severity |
+|---|---|---|---|
+| Java endpoint | POST malformed serialization stream (magic header + truncated class descriptor for non-existent class `NuScrape`) | `InvalidClassException`, `ClassNotFoundException`, `StreamCorruptedException` in response | HIGH |
+| PHP endpoint | POST syntactically incomplete serialized string (`O:9:"NuScrape":1:{`) | `unserialize(): Error`, `Cannot unserialize`, `__wakeup`, `__destruct` in response | HIGH |
+| .NET ViewState | Extract `__VIEWSTATE`, flip last Base64 character, resubmit to form action | Server accepts tampered ViewState without MAC validation error → MAC disabled | HIGH |
+
+The Java probe uses a truncated class descriptor that triggers a deserialization exception before any class is resolved — no class loading, no gadget chain execution. The PHP probe uses an incomplete object literal that PHP's unserialize() rejects immediately. No ysoserial payloads or exploit gadget chains are used.
+
+- 10-second timeout per probe
+- Deduplicates per `(endpoint, format)` pair
+- WAF vendor noted in finding detail
+
+---
+
 ### Alert Severity Levels
 
 | Severity | Meaning |

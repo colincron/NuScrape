@@ -5891,6 +5891,8 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
             flag_ssrf_candidates(url, html)
             # WebSocket endpoint discovery — runs unconditionally, no active probing
             discover_websockets(url, html, headers)
+            # Passive deserialization format detection — runs unconditionally
+            scan_deserial_passive(url, html, headers)
             # Active probe checks — only run when --active-probes is enabled
             if ACTIVE_PROBES:
                 # Open redirect detection — probes URL params with canary URL
@@ -5917,6 +5919,8 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                 check_cmdi(url, html)
                 # LDAP injection — error-based and auth bypass detection
                 check_ldap_injection(url, html)
+                # Insecure deserialization — active confirmation of passive signals
+                check_insecure_deserialization(url, html, headers)
             # IDOR candidate detection — runs in background thread with timeout
             # to prevent hung verification requests stalling the crawl
             _idor_thread = threading.Thread(
@@ -9405,6 +9409,346 @@ def check_ldap_injection(page_url: str, html_content) -> None:
                         f"Snippet: {body_snip!r}{waf_note}",
                     )
                     break   # one alert per form
+            except Exception:
+                pass
+
+
+# ─────────────────────────────────────────────
+# Insecure Deserialization Detection
+# ─────────────────────────────────────────────
+
+# ── Passive indicator constants ─────────────────────────────────────────────
+
+_JAVA_SERIAL_MAGIC      = b"\xac\xed\x00\x05"
+_JAVA_SERIAL_B64_PREFIX = "rO0AB"          # base64 encoding of AC ED 00 05
+
+# PHP serialized object/array/string/bool/int/null prefix patterns
+_PHP_SERIAL_RE = re.compile(
+    r"(?:^|[\s\n;{,])(?:O:\d+:\"|a:\d+:\{|s:\d+:\"|b:[01];|i:\d+;|N;)",
+    re.MULTILINE,
+)
+
+# Python pickle protocol 2–5 magic bytes
+_PICKLE_MAGICS = (b"\x80\x02", b"\x80\x03", b"\x80\x04", b"\x80\x05")
+
+_RUBY_MARSHAL_MAGIC = b"\x04\x08"
+
+# Matches both attribute-order variants of a __VIEWSTATE hidden input
+_VIEWSTATE_RE = re.compile(
+    r'<input[^>]+name=["\']__VIEWSTATE["\'][^>]*value=["\']([^"\']{4,})["\']'
+    r'|<input[^>]+value=["\']([^"\']{4,})["\'][^>]*name=["\']__VIEWSTATE["\']',
+    re.IGNORECASE | re.DOTALL,
+)
+_VIEWSTATE_B64_RE = re.compile(r'^[A-Za-z0-9+/=]+$')
+
+# ── Active probe error strings ──────────────────────────────────────────────
+
+_JAVA_DESERIAL_ERRORS = [
+    "java.io.InvalidClassException",
+    "java.lang.ClassNotFoundException",
+    "ObjectInputStream",
+    "ClassCastException",
+    "java.io.StreamCorruptedException",
+]
+_PHP_DESERIAL_ERRORS = [
+    "unserialize(): Error",
+    "Cannot unserialize",
+    "__wakeup",
+    "__destruct",
+    "unserialize() expects parameter",
+]
+
+# ── Dedup sets ──────────────────────────────────────────────────────────────
+
+_deserial_passive_seen: set  = set()   # (page_url, format_label)
+_deserial_active_tested: set = set()   # (endpoint, format_label)
+
+
+# ── Helpers ─────────────────────────────────────────────────────────────────
+
+def _to_bytes(content) -> bytes:
+    """Return content as bytes regardless of input type."""
+    if isinstance(content, bytes):
+        return content
+    if isinstance(content, str):
+        return content.encode("utf-8", errors="replace")
+    return b""
+
+
+def scan_deserial_passive(
+    page_url: str,
+    html_content,
+    response_headers: dict,
+) -> None:
+    """
+    Passive serialization format detection. Runs unconditionally on every crawled
+    response — does NOT require --active-probes. Flags MEDIUM (or INFO for ViewState
+    presence alone) when a known serialized-data indicator is found in the response
+    body, Content-Type header, or Set-Cookie header.
+
+    Java:   AC ED 00 05 magic bytes | 'rO0AB' Base64 prefix | Content-Type header
+    PHP:    O:\\d+: / a:\\d+: / s:\\d+: patterns in body or Set-Cookie
+    Pickle: 80 02–05 magic bytes | Content-Type header
+    Ruby:   04 08 magic bytes
+    .NET:   __VIEWSTATE hidden field present (INFO — active check may upgrade)
+    """
+    if not is_in_scope(page_url):
+        return
+    if is_third_party_cdn(urlparse(page_url).netloc):
+        return
+
+    hdrs       = {k.lower(): v for k, v in response_headers.items()} if response_headers else {}
+    ct         = hdrs.get("content-type", "")
+    set_cookie = hdrs.get("set-cookie", "")
+    body_b     = _to_bytes(html_content)
+    body_s     = body_b.decode("utf-8", errors="replace")
+
+    findings = []   # (format_label, evidence_str, severity)
+
+    # ── Java serialization ────────────────────────────────────────────────────
+    if "application/x-java-serialized-object" in ct.lower():
+        findings.append(("Java serialization",
+                          "Content-Type: application/x-java-serialized-object", "MEDIUM"))
+    elif body_b[:4] == _JAVA_SERIAL_MAGIC:
+        findings.append(("Java serialization",
+                          "Response body starts with Java magic bytes AC ED 00 05", "MEDIUM"))
+    elif _JAVA_SERIAL_B64_PREFIX in body_s or _JAVA_SERIAL_B64_PREFIX in set_cookie:
+        where = "Set-Cookie" if _JAVA_SERIAL_B64_PREFIX in set_cookie else "response body"
+        findings.append(("Java serialization",
+                          f"Base64 Java serialization prefix 'rO0AB' in {where}", "MEDIUM"))
+
+    # ── PHP serialization ─────────────────────────────────────────────────────
+    for src_label, src_text in (("response body", body_s), ("Set-Cookie", set_cookie)):
+        m = _PHP_SERIAL_RE.search(src_text)
+        if m:
+            snippet = src_text[max(0, m.start() - 10):m.end() + 60].strip()
+            findings.append(("PHP serialization",
+                              f"PHP serialized data pattern in {src_label}: {snippet!r}", "MEDIUM"))
+            break
+
+    # ── Python pickle ─────────────────────────────────────────────────────────
+    if "application/python-pickle" in ct.lower():
+        findings.append(("Python pickle", "Content-Type: application/python-pickle", "MEDIUM"))
+    elif any(body_b.startswith(m) for m in _PICKLE_MAGICS):
+        findings.append(("Python pickle",
+                          f"Response body starts with pickle magic {body_b[:2].hex().upper()}", "MEDIUM"))
+
+    # ── Ruby Marshal ──────────────────────────────────────────────────────────
+    if body_b[:2] == _RUBY_MARSHAL_MAGIC:
+        findings.append(("Ruby Marshal",
+                          "Response body starts with Ruby Marshal magic bytes 04 08", "MEDIUM"))
+
+    # ── .NET ViewState presence ───────────────────────────────────────────────
+    vm = _VIEWSTATE_RE.search(body_s)
+    if vm:
+        vs_val = (vm.group(1) or vm.group(2) or "")[:40]
+        findings.append(("NET ViewState",
+                          f"__VIEWSTATE hidden field present (prefix: {vs_val!r}…)", "INFO"))
+
+    for fmt_label, evidence, sev in findings:
+        key = (page_url, fmt_label)
+        if key in _deserial_passive_seen:
+            continue
+        _deserial_passive_seen.add(key)
+        alert(
+            f"SERIALIZED DATA FORMAT DETECTED: {fmt_label}",
+            sev,
+            page_url,
+            f"{fmt_label} serialized data format detected — endpoint may accept/return "
+            f"serialized objects. Evidence: {evidence}. "
+            f"Manual verification required to confirm exploitability.",
+        )
+        print(timestamp() + f" [!] Serialized format ({fmt_label}) detected at {page_url}")
+
+
+def check_insecure_deserialization(
+    page_url: str,
+    html_content,
+    response_headers: dict,
+) -> None:
+    """
+    Active insecure deserialization detection. Requires --active-probes.
+
+    Java:
+      POST a malformed serialization stream (magic header + truncated class
+      descriptor) to the endpoint. Triggers StreamCorruptedException or
+      InvalidClassException — confirms deserialization without loading any class.
+
+    PHP:
+      POST a syntactically incomplete PHP serialized string to the page. Checks
+      for PHP unserialize() warning/error strings in the response.
+
+    .NET ViewState MAC:
+      For each form containing __VIEWSTATE, flip one character, resubmit via POST
+      to the form action. If the server accepts the tampered ViewState without a
+      MAC validation error → MAC protection is disabled → HIGH.
+
+    Detection-only: no gadget chains, no class loading, no code execution.
+    10-second timeout per probe. Deduplicates per (endpoint, format) pair.
+    """
+    if not is_in_scope(page_url):
+        return
+    domain = urlparse(page_url).netloc
+    if is_third_party_cdn(domain):
+        return
+
+    body_b = _to_bytes(html_content)
+    body_s = body_b.decode("utf-8", errors="replace")
+    hdrs   = {k.lower(): v for k, v in response_headers.items()} if response_headers else {}
+    ct     = hdrs.get("content-type", "")
+    sc     = hdrs.get("set-cookie", "")
+
+    waf_note = ""
+    waf_vendor = _waf_results.get(domain)
+    if waf_vendor:
+        waf_note = f" [WAF: {waf_vendor} detected]"
+
+    # ── Java active probe ─────────────────────────────────────────────────────
+    is_java = (
+        "application/x-java-serialized-object" in ct.lower()
+        or body_b[:4] == _JAVA_SERIAL_MAGIC
+        or _JAVA_SERIAL_B64_PREFIX in body_s
+        or _JAVA_SERIAL_B64_PREFIX in sc
+    )
+    if is_java:
+        akey = (page_url, "Java")
+        if akey not in _deserial_active_tested:
+            _deserial_active_tested.add(akey)
+            # Malformed stream: magic + class-descriptor start for non-existent class.
+            # StreamCorruptedException fires before any class is resolved — safe.
+            java_probe = (
+                _JAVA_SERIAL_MAGIC
+                + b"\x73\x72\x00\x09NuScrape"   # TC_OBJECT TC_CLASSDESC len=9 "NuScrape"
+                + b"\x00" * 8                    # serialVersionUID placeholder
+                + b"\x02\x00\x00"                # flags + field count = 0
+            )
+            try:
+                stealth_delay(domain)
+                print(timestamp() + f" Java deserial active probe: {page_url}")
+                resp = _get_session().post(
+                    page_url,
+                    data=java_probe,
+                    headers={**create_request_header(),
+                              "Content-Type": "application/x-java-serialized-object"},
+                    timeout=10,
+                    allow_redirects=True,
+                    verify=False,
+                )
+                body = resp.text or ""
+                for err in _JAVA_DESERIAL_ERRORS:
+                    if err in body:
+                        idx     = body.find(err)
+                        snippet = body[max(0, idx - 30):idx + 120].strip()
+                        alert(
+                            "INSECURE DESERIALIZATION: Java (CONFIRMED)",
+                            "HIGH",
+                            page_url,
+                            f"Endpoint processed Java serialized input and reflected error "
+                            f"'{err}' — confirms server-side Java ObjectInputStream usage. "
+                            f"Snippet: {snippet!r}{waf_note}",
+                        )
+                        break
+            except Exception:
+                pass
+
+    # ── PHP active probe ──────────────────────────────────────────────────────
+    is_php = bool(_PHP_SERIAL_RE.search(body_s) or _PHP_SERIAL_RE.search(sc))
+    if is_php:
+        akey = (page_url, "PHP")
+        if akey not in _deserial_active_tested:
+            _deserial_active_tested.add(akey)
+            # Intentionally malformed — truncated object body triggers unserialize() error
+            php_probe = 'O:9:"NuScrape":1:{'
+            try:
+                stealth_delay(domain)
+                print(timestamp() + f" PHP deserial active probe: {page_url}")
+                resp = _get_session().post(
+                    page_url,
+                    data={"data": php_probe},
+                    headers=create_request_header(),
+                    timeout=10,
+                    allow_redirects=True,
+                )
+                body = resp.text or ""
+                for err in _PHP_DESERIAL_ERRORS:
+                    if err.lower() in body.lower():
+                        idx     = body.lower().find(err.lower())
+                        snippet = body[max(0, idx - 30):idx + 120].strip()
+                        alert(
+                            "INSECURE DESERIALIZATION: PHP (CONFIRMED)",
+                            "HIGH",
+                            page_url,
+                            f"Endpoint reflected PHP unserialize error '{err}' — "
+                            f"confirms server-side unserialize() call on user input. "
+                            f"Snippet: {snippet!r}{waf_note}",
+                        )
+                        break
+            except Exception:
+                pass
+
+    # ── .NET ViewState MAC validation check ───────────────────────────────────
+    try:
+        soup = BeautifulSoup(body_s, "lxml")
+    except Exception:
+        soup = None
+
+    if soup:
+        for form in soup.find_all("form"):
+            vs_input = form.find("input", attrs={"name": "__VIEWSTATE"})
+            if vs_input is None:
+                continue
+            vs_val = vs_input.get("value", "")
+            if not vs_val or not _VIEWSTATE_B64_RE.match(vs_val):
+                continue
+
+            action     = form.get("action") or page_url
+            action_url = urljoin(page_url, action)
+            akey       = (action_url, "ViewState")
+            if akey in _deserial_active_tested:
+                continue
+            _deserial_active_tested.add(akey)
+
+            # Tamper: flip last Base64 character (preserves length, breaks MAC)
+            modified_vs = vs_val[:-1] + ("A" if vs_val[-1] != "A" else "B")
+
+            # Build a minimal form submission with all hidden fields + tampered ViewState
+            form_data = {"__VIEWSTATE": modified_vs}
+            for inp in form.find_all("input"):
+                n = inp.get("name", "")
+                if n and n != "__VIEWSTATE":
+                    form_data[n] = inp.get("value", "")
+
+            try:
+                stealth_delay(domain)
+                print(timestamp() + f" ViewState MAC probe: {action_url}")
+                resp = _get_session().post(
+                    action_url,
+                    data=form_data,
+                    headers=create_request_header(),
+                    timeout=10,
+                    allow_redirects=True,
+                )
+                body = resp.text or ""
+                mac_error_sigs = [
+                    "invalid viewstate",
+                    "validation of viewstate mac",
+                    "the state information is invalid",
+                    "mac failed",
+                    "viewstate",
+                ]
+                rejected = any(sig in body.lower() for sig in mac_error_sigs)
+                if not rejected and resp.status_code == 200:
+                    alert(
+                        "INSECURE DESERIALIZATION: .NET ViewState MAC Disabled",
+                        "HIGH",
+                        action_url,
+                        f"Tampered __VIEWSTATE accepted without MAC validation error — "
+                        f"ViewState MAC protection appears disabled. "
+                        f"Original prefix: {vs_val[:20]!r}… "
+                        f"Tampered prefix: {modified_vs[:20]!r}…{waf_note}",
+                    )
+                else:
+                    print(timestamp() + f" ViewState MAC validation active on {action_url}")
             except Exception:
                 pass
 
