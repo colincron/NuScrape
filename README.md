@@ -697,6 +697,11 @@ Inline `<script>` blocks are stripped from HTML before scanning to avoid minifie
 | Public key prefix | Matched by `is_public_key()` (Stripe `pk_`, Google `AIza`, etc.) |
 | AWS SAK decoded content | 40-char base64 that matches the AWS Secret Access Key pattern is decoded; suppressed if the result is valid JSON, hex-only text, or >85% printable ASCII — real AWS SAKs decode to random binary, not structured data |
 | HTML `<input>` value attribute | Base64 string appearing as the `value=` of an `<input>` element is skipped — form state tokens, CSRF tokens, and session state are routinely base64-encoded in hidden inputs and are never AWS secrets |
+| Meta domain-verification tag | Base64 appearing as the `content=` of a `<meta name="*-verification">` tag (Google, Bing, Yandex, Baidu, Facebook, Norton, Pinterest) is skipped — ownership tokens are never AWS secrets |
+| URL path segment | Candidate immediately preceded by `/` or immediately followed by `/` — the string is a URL resource identifier, not embedded key material |
+| URL attribute value (terminal) | Candidate immediately followed by a closing quote (`"` / `'`) and the 80-char look-behind contains `href="`, `src="`, `action="`, or `url(` — the string is the final path segment of a URL attribute value |
+| URL attribute look-behind | The 80-char context window before the candidate contains a URL attribute assignment (`href="`, `src="`, `url(`, etc.) — candidate is a URL value regardless of surrounding characters |
+| Candidate contains URL characters | The string itself contains `://` (protocol separator) or a percent-encoded sequence (`%XX`) — indicates URL data, not key material |
 
 Deduplicates by the first 8 characters of each flagged string to avoid repeated alerts for the same token across pages.
 

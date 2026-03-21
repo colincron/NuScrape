@@ -6097,6 +6097,15 @@ _ENT_TRACKING_PARAM_RE = re.compile(
 # Strings that are almost certainly HTML entities or encoded text
 _ENT_HTML_ENTITY_RE = re.compile(r'&[a-zA-Z]{2,8};|&#\d{2,5};|&#x[0-9a-fA-F]{2,5};')
 
+# URL attribute/property context — the candidate is a URL value being reflected,
+# not a secret.  Matches when the look-behind shows the start of a URL attribute
+# assignment or a CSS url() call.
+_ENT_URL_ATTR_CTX_RE = re.compile(
+    r'(?:href|src|action|data-src|data-href|content)\s*=\s*["\'][^"\']*$'
+    r'|url\s*\(\s*["\']?[^)"\']*$',
+    re.IGNORECASE,
+)
+
 # ── Meta verification tag suppression ────────────────────────────────────────
 
 # Exact name= values used by search engines / security vendors for domain ownership
@@ -6288,20 +6297,32 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         entropy   = _shannon_entropy(candidate)
         if entropy <= threshold:
             return
+
+        # Context snippet (20 chars either side) — computed before dedup so that
+        # URL-context suppressions don't poison the dedup set.
+        pos = scan_body.find(candidate) if source == "body" else -1
+        if pos >= 0:
+            ctx_start = max(0, pos - 20)
+            ctx_end   = pos + len(candidate) + 20
+            context   = scan_body[ctx_start:ctx_end].strip()
+            # URL attribute context check: 80-char look-behind contains href=",
+            # src=", url(, etc. — the candidate is a URL value, not a secret.
+            pre_ctx = scan_body[max(0, pos - 80): pos]
+            if _ENT_URL_ATTR_CTX_RE.search(pre_ctx):
+                return
+        else:
+            context = candidate[:60]
+
+        # Candidate-level URL character check: protocol separator or
+        # percent-encoded sequences indicate URL data, not key material.
+        if "://" in candidate or re.search(r'%[0-9A-Fa-f]{2}', candidate):
+            return
+
         # Dedup by 8-char prefix
         dedup_key = candidate[:8]
         if dedup_key in _entropy_seen:
             return
         _entropy_seen.add(dedup_key)
-
-        # Context snippet (20 chars either side)
-        pos   = scan_body.find(candidate) if source == "body" else -1
-        if pos >= 0:
-            ctx_start = max(0, pos - 20)
-            ctx_end   = pos + len(candidate) + 20
-            context   = scan_body[ctx_start:ctx_end].strip()
-        else:
-            context = candidate[:60]
 
         # Pattern matching — override severity for known secret types
         final_sev   = sev_override or body_base_sev
@@ -6428,9 +6449,37 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
             return True
         return False
 
+    def _in_url_path_context(m_start: int, m_end: int) -> bool:
+        """
+        Return True if the match is a URL path segment or the value of a
+        URL-carrying HTML attribute — almost certainly a resource identifier,
+        not a secret.
+
+        Three detection paths:
+          1. Immediately preceded by '/' — the candidate is a URL path component
+             sitting between two forward slashes (e.g. /api/v1/<candidate>/details).
+          2. Immediately followed by '/' — non-terminal path segment.
+          3. Immediately followed by a closing quote AND the 80-char look-behind
+             contains a URL attribute assignment (href=", src=", url() — the
+             candidate is the terminal path segment inside an href or src value.
+        """
+        pre_char  = scan_body[m_start - 1: m_start] if m_start > 0 else ""
+        post_char = scan_body[m_end: m_end + 1]
+        if pre_char == "/":
+            return True
+        if post_char == "/":
+            return True
+        if post_char in ('"', "'"):
+            pre_window = scan_body[max(0, m_start - 80): m_start]
+            if _ENT_URL_ATTR_CTX_RE.search(pre_window):
+                return True
+        return False
+
     # ── Scan response body ────────────────────────────────────────────────────
     for m in _ENT_B64_RE.finditer(scan_body):
         if _in_cdn_skip_url(m.start()):
+            continue
+        if _in_url_path_context(m.start(), m.end()):
             continue
         if _in_meta_verification_content(m.start()):
             continue
@@ -6440,6 +6489,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
     for m in _ENT_HEX_RE.finditer(scan_body):
         if _in_cdn_skip_url(m.start()):
             continue
+        if _in_url_path_context(m.start(), m.end()):
+            continue
         if _in_tracking_param(m.start()):
             continue
         if _in_image_filename_context(m.start(), m.end()):
@@ -6447,6 +6498,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         _try_flag(m.group(), "hex", "body")
     for m in _ENT_ALNUM_RE.finditer(scan_body):
         if _in_cdn_skip_url(m.start()):
+            continue
+        if _in_url_path_context(m.start(), m.end()):
             continue
         # Only flag alnum if it wasn't already caught by B64/hex
         val = m.group()
