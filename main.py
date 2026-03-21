@@ -9529,64 +9529,68 @@ def _collect_baseline_worker(base: str, params: dict):
     """
     Background worker: collect a 2-sample baseline for (base, params).
 
-    Each HTTP request is submitted to _baseline_req_pool and awaited with
-    future.result(timeout=5).  concurrent.futures.TimeoutError is caught and
-    causes the entire baseline to be skipped — this enforces the hard per-request
-    cap at the thread level, which also catches DNS stalls and SSL hangs that
-    can bypass requests' own timeout parameter.
+    Both requests fire concurrently via _baseline_req_pool so total baseline
+    time is bounded by the slower of the two responses, not their sum.
 
-    Hard timeouts:
-      - Per-request: 5 seconds (future.result + requests.exceptions.Timeout)
-      - Total budget: 12 seconds across both requests
+    Stealth delays are deliberately skipped: baseline requests are internal
+    measurement probes, not crawl requests, and don't need pacing.
+    Per-request timing is measured inside each thread for accuracy.
+
+    Hard timeout: 8 seconds per request (future.result + requests.Timeout).
+    concurrent.futures.TimeoutError cancels remaining futures and skips
+    the endpoint entirely.
 
     The entire worker body is wrapped in a top-level try/except so any
     unexpected failure skips baseline gracefully rather than hanging or crashing.
 
     Returns EndpointBaseline or None.  Called via _baseline_pool only.
     """
-    _PER_REQ_TIMEOUT = 5
-    _TOTAL_BUDGET    = 12.0
+    _PER_REQ_TIMEOUT = 8
 
     def _do_fetch(url: str):
-        return _get_session().get(
+        """Fetch url and return (response, elapsed_ms). No stealth delay."""
+        t0   = time.monotonic()
+        resp = _get_session().get(
             url,
             headers=create_request_header(),
             timeout=_PER_REQ_TIMEOUT,
             allow_redirects=True,
             verify=False,
         )
+        return resp, (time.monotonic() - t0) * 1000
 
     try:
-        query = "&".join(f"{k}={v}" for k, v in params.items())
+        query  = "&".join(f"{k}={v}" for k, v in params.items())
+        sep    = "&" if query else ""
+        now_ms = int(time.time() * 1000)
+        urls   = [
+            base + "?" + query + sep + f"_cb={now_ms + i}"
+            for i in range(2)
+        ]
+
+        # Fire both requests simultaneously
+        futures = [_baseline_req_pool.submit(_do_fetch, u) for u in urls]
+
         samples_body: list = []
         samples_len:  list = []
         samples_time: list = []
         last_status = None
         last_ct     = ""
-        budget_start = time.monotonic()
 
-        for i in range(2):
-            if time.monotonic() - budget_start > _TOTAL_BUDGET:
-                print(timestamp() + f" [Baseline] Skipping {base} — timeout")
-                return None
-            bust = f"_cb={int(time.time() * 1000) + i}"
-            sep  = "&" if query else ""
-            url  = base + "?" + query + sep + bust
+        for fut in futures:
             try:
-                fut = _baseline_req_pool.submit(_do_fetch, url)
-                try:
-                    t0   = time.monotonic()
-                    resp = fut.result(timeout=_PER_REQ_TIMEOUT)
-                    elapsed_ms  = (time.monotonic() - t0) * 1000
-                    body        = resp.text or ""
-                    last_status = resp.status_code
-                    last_ct     = resp.headers.get("Content-Type", "")
-                    samples_body.append(body)
-                    samples_len.append(len(body))
-                    samples_time.append(elapsed_ms)
-                except concurrent.futures.TimeoutError:
-                    print(timestamp() + f" [Baseline] Skipping {base} — timed out")
-                    return None
+                resp, elapsed_ms = fut.result(timeout=_PER_REQ_TIMEOUT)
+                body        = resp.text or ""
+                last_status = resp.status_code
+                last_ct     = resp.headers.get("Content-Type", "")
+                samples_body.append(body)
+                samples_len.append(len(body))
+                samples_time.append(elapsed_ms)
+            except concurrent.futures.TimeoutError:
+                print(timestamp() + f" [Baseline] Skipping {base} — timed out")
+                for f in futures:
+                    f.cancel()
+                return None
             except Exception:
                 pass
 
