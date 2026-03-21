@@ -848,6 +848,120 @@ Tests state-changing endpoints for race condition vulnerabilities by firing 10 s
 
 ---
 
+#### HTTP Parameter Pollution (HPP) Detection
+
+Tests URL query parameters for server-side parsing discrepancies caused by duplicate parameter names. Requires `--active-probes`. Targets every query parameter found on crawled pages, linked `<a href>` URLs, and form actions.
+
+**Three probe classes per parameter:**
+
+**1. Duplicate order probes** — sends `?param=orig&param=nuscrape-hpp` and the reverse. Checks whether the canary appears in the response and in which position.
+
+**2. WAF bypass split** — sends the full XSS payload `<script>` first (to test if WAF blocks it), then sends the payload split across two duplicate params: `?param=<scr&param=ipt>...`. If the single payload is blocked (4xx) but the split is not, the WAF can be bypassed by parameter duplication.
+
+**3. Auth/privilege change detection** — if duplicating the parameter introduces privilege-indicating words (`admin`, `dashboard`, `privilege`, `role`, etc.) that were absent in the baseline response, flags as HIGH.
+
+| Finding | Severity | Signal |
+|---|---|---|
+| Duplicate param triggers auth/privilege change | HIGH | Privilege keyword appeared only with duplicate param |
+| WAF bypass via split payload | MEDIUM | Single payload blocked but split across duplicates was not |
+| Last-wins parsing | MEDIUM | Canary reflected only when it is the second duplicate value |
+| First-wins parsing | MEDIUM | Canary reflected only when it is the first duplicate value |
+| Unexpected canary reflection | LOW | Canary reflected in both or either probe — unexpected parsing |
+
+- 8-second timeout per probe; `stealth_delay` between requests
+- Deduplicates per `(base_url, param)` pair
+
+---
+
+#### Web Cache Poisoning Detection
+
+Tests cacheable endpoints for web cache poisoning vectors using safe canary values. Requires `--active-probes`. Only runs on endpoints that appear to be cached (see cacheability detection below).
+
+**Cacheability detection** — an endpoint is considered cacheable if any of the following are present:
+- `Cache-Control: public` or `Cache-Control: max-age=...`
+- `Vary` response header
+- CDN indicator headers: `x-cache`, `cf-cache-status`, `x-amz-cf-id`, `x-varnish`, `age`, `x-served-by`, etc.
+- Static file extension (`.js`, `.css`, `.html`, `.json`, `.xml`, `.svg`, `.ico`, `.woff`)
+
+**Three detection classes:**
+
+**1. Unkeyed header injection** — sends each of the following headers individually and checks whether the injected value is reflected in the response body or any response header (`Location`, `Link`, etc.):
+
+| Header | Injected value |
+|---|---|
+| `X-Forwarded-Host` | `nuscrape-cache-test.com` |
+| `X-Forwarded-Scheme` | `nuscrape-cache-test` |
+| `X-Original-URL` | `/nuscrape-cache-test` |
+| `X-Rewrite-URL` | `/nuscrape-cache-test` |
+| `X-Custom-IP-Authorization` | `127.0.0.1` |
+| `X-Forwarded-For` | `127.0.0.1` |
+
+**2. Fat GET detection** — sends a `GET` request with a conflicting body parameter. If the body value appears in the response instead of the URL parameter value, the server processes GET request bodies and may allow cache poisoning via the body parameter.
+
+**3. Parameter cloaking** — appends `;param=nuscrape-cache-test-cloak` to the URL. If the cloaked value appears in the response, the cache may key on the URL before the semicolon while the backend processes the full string.
+
+| Finding | Severity | Signal |
+|---|---|---|
+| Unkeyed header reflected in response | HIGH | Injected header value appears in body or response headers |
+| Fat GET body parameter reflected | MEDIUM | GET body parameter overrides or appears alongside URL parameter |
+| Semicolon parameter cloaking | MEDIUM | Cloaked parameter value reflected in response body |
+
+**Safety rules enforced:**
+- Canary values are harmless strings — no XSS or HTML payloads
+- Only one probe per `(endpoint, header)` pair — never re-sends a poisoned header to avoid polluting the cache for real users
+- Stops testing an endpoint immediately on first confirmed reflection
+- Does not fetch the cached copy from a different IP — reflection in the direct response is the signal; manual verification confirms actual cache storage
+
+- 8-second timeout per probe
+- Deduplicates per `(base_url, test_name)` pair
+
+---
+
+#### Accuracy Improvements: Response Diffing and Context-Aware Payloads
+
+Two cross-cutting accuracy mechanisms apply to all injection detection checks that require `--active-probes`.
+
+**Response diffing**
+
+Before flagging a finding, NuScrape fetches and caches a clean baseline response (no payload) for each `(endpoint, params)` combination. A finding is only raised if the difference between the probe response and the baseline is meaningful:
+
+| Condition | Verdict |
+|---|---|
+| HTTP status code changed | Meaningful |
+| Canary appears in probe but not in baseline | Meaningful |
+| New server/DB error string appeared absent in baseline | Meaningful |
+| Body length changed by >10% and >50 bytes | Meaningful |
+| Only change is <50 bytes (timestamp / session noise) | Not meaningful — suppressed |
+| Error string was already present in baseline | Not meaningful — suppressed |
+
+Applied to: SQL injection, command injection, SSTI, path traversal, CRLF injection.
+
+**Context-aware payload selection**
+
+Before injecting payloads, NuScrape examines the baseline response body to determine where the parameter value is rendered. The detected context is logged as `[Context] param=<name> in <context> context` and selects the most appropriate payload variant:
+
+| Detected context | How identified | Effect |
+|---|---|---|
+| `html_attr` | Param value inside `attr="...value..."` | Context-breaking CMDi payloads prepended: `" && echo canary` |
+| `html_body` | Param value between `>...value...<` tags | (logged; generic payloads used) |
+| `js_string` | Param value inside a JS string literal | JS string-breaking CMDi payloads prepended: `"; echo canary;//` |
+| `json` | Param value inside a JSON string value | JSON-breaking CMDi payloads prepended: `"; echo canary; "` |
+| `url_context` | Param value inside `href`/`src`/`action` | (logged; generic payloads used) |
+| `unknown` | Value not found in response | Generic payloads used |
+
+For SQL injection, when an error-based probe response contains a DB fingerprint string (e.g. `PostgreSQL ERROR`, `mysql_fetch`, `Microsoft OLE DB`, `SQLite3::`), DB-specific time-based payloads are prioritised in the blind phase:
+
+| DB fingerprinted | Time payload |
+|---|---|
+| MySQL | `' OR SLEEP(5)--` |
+| PostgreSQL | `' OR pg_sleep(5)--` |
+| MSSQL | `'; WAITFOR DELAY '0:0:5'--` |
+| SQLite | `' OR randomblob(500000000/2/2)--` |
+
+Applied to: SQL injection (diffing + DB-specific time payloads), command injection (diffing + context-breaking payloads), SSTI (diffing), path traversal (diffing), CRLF injection (diffing).
+
+---
+
 ### Alert Severity Levels
 
 | Severity | Meaning |
@@ -958,6 +1072,11 @@ Every finding stored in the `Alerts` table (and displayed in the UI) carries a *
 | Race condition — timing variance only | LIKELY |
 | Insecure deserialization (active probe exception reflected) | CONFIRMED |
 | Insecure deserialization (passive format signal) | NEEDS VERIFICATION |
+| HTTP parameter pollution — auth/privilege change | CONFIRMED |
+| HTTP parameter pollution — WAF bypass, first/last-wins | CONFIRMED |
+| HTTP parameter pollution — unexpected reflection | LIKELY |
+| Web cache poisoning — unkeyed header reflected | CONFIRMED |
+| Web cache poisoning — fat GET / parameter cloaking | NEEDS VERIFICATION |
 
 Confidence is inferred automatically from the `alert_type` string — no changes to existing call sites are needed. The level is stored in the `Alerts` database table and displayed in both the terminal alert banner and the UI findings table as a colored badge (green = CONFIRMED, yellow = LIKELY, cyan = NEEDS VERIFICATION).
 

@@ -7707,6 +7707,138 @@ def check_websocket_security(ws_url: str, page_url: str) -> None:
 
 
 # ─────────────────────────────────────────────
+# Shared probe helpers: baseline cache, response diffing, context detection
+# ─────────────────────────────────────────────
+
+_probe_baseline: dict = {}   # (base_url, params_frozen) → (status_int, body_str)
+
+
+def _get_probe_baseline(base: str, params: dict, timeout: int = 8) -> tuple:
+    """
+    Fetch and cache a clean baseline response for (base, params).
+    Returns (status_code: int, body: str) or (None, None) on failure.
+    Cached per (base, frozenset(params.items())) to avoid repeat requests.
+    """
+    key = (base, frozenset(params.items()))
+    if key not in _probe_baseline:
+        orig_query = "&".join(f"{k}={v}" for k, v in params.items())
+        url = base + ("?" + orig_query if orig_query else "")
+        try:
+            resp = _get_session().get(
+                url,
+                headers=create_request_header(),
+                timeout=timeout,
+                allow_redirects=True,
+                verify=False,
+            )
+            _probe_baseline[key] = (resp.status_code, resp.text or "")
+        except Exception:
+            _probe_baseline[key] = (None, None)
+    return _probe_baseline[key]
+
+
+# Error indicator strings reused by _diff_is_meaningful and check_sqli
+_DIFF_ERROR_INDICATORS = [
+    "sql syntax", "mysql_fetch", "ora-", "pg::error", "sqlite_",
+    "unclosed quotation", "you have an error in your sql",
+    "warning: mysql", "invalid query", "odbc", "ole db",
+    "fatal error", "parse error", "traceback (most recent call last)",
+]
+
+
+def _diff_is_meaningful(
+    bl_status,
+    bl_body,
+    pr_status: int,
+    pr_body: str,
+    canary: str = "",
+) -> tuple:
+    """
+    Return (is_meaningful: bool, reason: str).
+
+    A diff is meaningful if:
+      - HTTP status code changed between baseline and probe
+      - Canary appears in the probe body but was absent in the baseline
+      - A new error string appeared that was absent in baseline
+      - Body length changed by >10% AND by >50 bytes
+
+    Not meaningful if the only difference is sub-50-byte dynamic noise.
+    If no baseline is available (None), always returns (True, "no baseline").
+    """
+    if bl_status is None or bl_body is None:
+        return True, "no baseline"
+
+    if pr_status != bl_status:
+        return True, f"status {bl_status}→{pr_status}"
+
+    if canary and canary in pr_body and canary not in bl_body:
+        return True, f"canary '{canary}' new in probe"
+
+    pr_lower = pr_body.lower()
+    bl_lower = bl_body.lower()
+    for err in _DIFF_ERROR_INDICATORS:
+        if err in pr_lower and err not in bl_lower:
+            return True, f"new error indicator '{err}'"
+
+    bl_len = len(bl_body)
+    pr_len = len(pr_body)
+    diff   = abs(pr_len - bl_len)
+    if diff > 50 and bl_len > 0 and diff / bl_len > 0.10:
+        return True, f"body length {bl_len}→{pr_len} ({diff / bl_len:.0%} change)"
+
+    return False, "diff not meaningful (dynamic noise)"
+
+
+def _detect_input_context(body: str, param_value: str) -> str:
+    """
+    Detect the rendering context of *param_value* in *body*.
+
+    Returns one of:
+      'html_attr'   — inside an HTML attribute value (any attribute)
+      'html_body'   — between HTML tags
+      'js_string'   — inside a JS string literal
+      'url_context' — inside href/src/action/content attribute URL
+      'json'        — inside a JSON string value
+      'unknown'     — not found or context indeterminate
+
+    Uses a 120-character look-behind window before the first occurrence.
+    """
+    if not param_value or not body or param_value not in body:
+        return "unknown"
+
+    pos = body.find(param_value)
+    pre = body[max(0, pos - 120): pos]
+
+    # JSON value: preceded by colon-quote pattern  "key": "VALUE
+    if re.search(r':\s*"[^"\n]*$', pre):
+        return "json"
+
+    # JS string: inside a JS assignment / expression string literal
+    if re.search(
+        r'''(?:var|let|const|=)\s*[^=\n]*?['"][^'"<>\n]*$''',
+        pre, re.IGNORECASE,
+    ):
+        return "js_string"
+
+    # URL attribute: href/src/action/content/location = "...VALUE
+    if re.search(
+        r'(?:href|src|action|content|location)\s*=\s*["\'][^"\'<\n]*$',
+        pre, re.IGNORECASE,
+    ):
+        return "url_context"
+
+    # Generic HTML attribute: attr="...VALUE
+    if re.search(r'[\w-]+\s*=\s*["\'][^"\'<\n]*$', pre):
+        return "html_attr"
+
+    # HTML body: between tags  >...VALUE
+    if re.search(r'>[^<]*$', pre):
+        return "html_body"
+
+    return "unknown"
+
+
+# ─────────────────────────────────────────────
 # Path traversal detection
 # ─────────────────────────────────────────────
 
@@ -7832,6 +7964,7 @@ def check_path_traversal(page_url, html_content):
             _traversal_tested.add(test_key)
 
             print(timestamp() + f" Path traversal probe: {base_endpoint} param={param}")
+            bl_status, bl_body = _get_probe_baseline(base_endpoint, params)
 
             for payload, os_hint in PATH_TRAVERSAL_PAYLOADS:
                 if domain in _traversal_domains:
@@ -7857,8 +7990,13 @@ def check_path_traversal(page_url, html_content):
 
                     body = resp.text
 
+                    # Diff guard — only flag if the file signature is new
+                    # (not already present in the baseline response body)
+                    bl_lower = (bl_body or "").lower()
+
                     # Check Unix signatures
-                    unix_hit = [s for s in PATH_TRAVERSAL_UNIX_SIGS if s in body]
+                    unix_hit = [s for s in PATH_TRAVERSAL_UNIX_SIGS
+                                if s in body and s not in (bl_body or "")]
                     if unix_hit:
                         _traversal_domains.add(domain)
                         alert(
@@ -7874,7 +8012,8 @@ def check_path_traversal(page_url, html_content):
 
                     # Check Windows signatures
                     win_hit = [s for s in PATH_TRAVERSAL_WIN_SIGS
-                               if s.lower() in body.lower()]
+                               if s.lower() in body.lower()
+                               and s.lower() not in bl_lower]
                     if win_hit:
                         _traversal_domains.add(domain)
                         alert(
@@ -8220,6 +8359,16 @@ def check_ssti(page_url, html_content):
             continue
         _ssti_tested.add(test_key)
 
+        # Baseline for diff and context detection
+        base_params = {k: v for k, v in
+                       (p.split("=", 1) for p in query.split("&") if "=" in p)}
+        bl_status, bl_body = _get_probe_baseline(base, base_params)
+
+        # Context detection — log for audit trail
+        ctx = _detect_input_context(bl_body or "", original_val)
+        if ctx != "unknown":
+            print(timestamp() + f" [Context] SSTI param={param} in {ctx} context")
+
         # Fresh random operands per (endpoint, param) pair — product is unique
         a = _random.randint(1000, 9999)
         b = _random.randint(1000, 9999)
@@ -8240,8 +8389,11 @@ def check_ssti(page_url, html_content):
                     timeout=5,
                     allow_redirects=True,
                 )
-                # Confirm: exact product in response AND raw payload not literally echoed
-                if marker in resp.text and payload not in resp.text:
+                # Confirm: exact product in response, raw payload not literally echoed,
+                # AND marker was not already present in the baseline response
+                if (marker in resp.text
+                        and payload not in resp.text
+                        and marker not in (bl_body or "")):
                     _ssti_domains.add(domain)
                     alert(
                         "SERVER-SIDE TEMPLATE INJECTION (SSTI)",
@@ -8317,6 +8469,9 @@ def check_crlf_injection(page_url, html_content):
         except Exception:
             continue
 
+        # Baseline for diff check (we verify the canary header is absent in clean response)
+        bl_status, bl_body = _get_probe_baseline(base, params)
+
         for param, value in params.items():
             if domain in _crlf_domains:
                 break
@@ -8339,8 +8494,16 @@ def check_crlf_injection(page_url, html_content):
                     timeout=5,
                     allow_redirects=False,
                 )
-                # Check if canary header was reflected in the response
-                if _CRLF_CANARY_VALUE in resp.headers.get(_CRLF_CANARY_HEADER, ""):
+                # Check if canary header was reflected — also diff-check the body
+                # to skip noise (e.g. page already dynamically includes the value)
+                crlf_header_hit = _CRLF_CANARY_VALUE in resp.headers.get(
+                    _CRLF_CANARY_HEADER, ""
+                )
+                meaningful, _ = _diff_is_meaningful(
+                    bl_status, bl_body, resp.status_code, resp.text or "",
+                    canary=_CRLF_CANARY_VALUE,
+                )
+                if crlf_header_hit and meaningful:
                     _crlf_domains.add(domain)
                     alert(
                         "CRLF INJECTION",
@@ -8871,6 +9034,18 @@ _SQLI_TIME_PAYLOADS = [
 ]
 _SQLI_TIME_THRESHOLD = 5.0   # seconds
 
+# DB-specific time payloads — keyed by the error string that fingerprints the DB.
+# Used to prioritise the right payload once an error response reveals the DB type.
+_SQLI_CTX_DB_PAYLOADS: dict = {
+    "mysql_fetch":       ["' OR SLEEP(5)--",                   "1 OR SLEEP(5)--"],
+    "SQL syntax":        ["' OR SLEEP(5)--",                   "1 OR SLEEP(5)--"],
+    "PostgreSQL ERROR":  ["' OR pg_sleep(5)--",               "1; SELECT pg_sleep(5)--"],
+    "Warning: pg_":      ["' OR pg_sleep(5)--"],
+    "Microsoft OLE DB":  ["'; WAITFOR DELAY '0:0:5'--"],
+    "ODBC SQL Server":   ["'; WAITFOR DELAY '0:0:5'--"],
+    "SQLite3::":         ["' OR randomblob(500000000/2/2)--"],
+}
+
 # Static file extensions whose query params are not injection targets
 _SQLI_STATIC_RE = re.compile(
     r'\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|map|mp4|mp3|pdf|zip|gz|tar)(\?|$)',
@@ -8940,6 +9115,9 @@ def check_sqli(page_url: str, html_content) -> None:
         except Exception:
             continue
 
+        # Baseline for this URL — used for diff check and context detection
+        bl_status, bl_body = _get_probe_baseline(base, params)
+
         for param, orig_val in params.items():
             if domain in _sqli_domains:
                 break
@@ -8948,7 +9126,14 @@ def check_sqli(page_url: str, html_content) -> None:
                 continue
             _sqli_tested.add(test_key)
 
+            # Context detection — log and inform DB-specific payload selection
+            ctx = _detect_input_context(bl_body or "", orig_val)
+            if ctx != "unknown":
+                print(timestamp() + f" [Context] SQLi param={param} in {ctx} context")
+
             print(timestamp() + f" SQLi probe: {base} param={param}")
+
+            _db_hint: str | None = None  # set when an error response fingerprints the DB
 
             # ── Phase 1: error-based ─────────────────────────────────────────
             for payload in _SQLI_ERROR_PAYLOADS:
@@ -8968,8 +9153,18 @@ def check_sqli(page_url: str, html_content) -> None:
                         allow_redirects=True,
                     )
                     body = (resp.text or "")
+                    bl_lower = (bl_body or "").lower()
                     for err_str in _SQLI_ERROR_STRINGS:
                         if err_str.lower() in body.lower():
+                            # Diff check — skip if this error was already in baseline
+                            if err_str.lower() in bl_lower:
+                                continue
+                            # Fingerprint the DB type for time-based phase
+                            if _db_hint is None:
+                                for hint_key in _SQLI_CTX_DB_PAYLOADS:
+                                    if hint_key.lower() in body.lower():
+                                        _db_hint = hint_key
+                                        break
                             snippet = body[max(0, body.lower().find(err_str.lower()) - 40):
                                           body.lower().find(err_str.lower()) + 120].strip()
                             alert(
@@ -8990,7 +9185,17 @@ def check_sqli(page_url: str, html_content) -> None:
                 break
 
             # ── Phase 2: time-based (blind) ──────────────────────────────────
-            for payload in _SQLI_TIME_PAYLOADS:
+            # Use DB-specific payloads first when the error phase fingerprinted the DB
+            if _db_hint and _db_hint in _SQLI_CTX_DB_PAYLOADS:
+                db_payloads = _SQLI_CTX_DB_PAYLOADS[_db_hint]
+                time_payloads = db_payloads + [p for p in _SQLI_TIME_PAYLOADS
+                                               if p not in db_payloads]
+                print(timestamp() + f" [Context] SQLi param={param} DB hint: "
+                      f"{_db_hint!r} — prioritising DB-specific time payloads")
+            else:
+                time_payloads = _SQLI_TIME_PAYLOADS
+
+            for payload in time_payloads:
                 new_query = "&".join(
                     f"{k}={orig_val + payload}" if k == param else f"{k}={v}"
                     for k, v in params.items()
@@ -9049,6 +9254,14 @@ _CMDI_WIN_INDICATORS = [
 
 _cmdi_tested: set  = set()   # (base_url, param) already probed
 _cmdi_domains: set = set()   # domains where CMDi was confirmed
+
+# Context-specific extra CMDi payloads prepended when input context is detected.
+# These break out of the enclosing string/attribute before the shell command.
+_CMDI_CTX_EXTRA: dict = {
+    "html_attr":  [f'" && echo {_CMDI_CANARY}',  f"' && echo {_CMDI_CANARY}"],
+    "js_string":  [f'"; echo {_CMDI_CANARY};//', f"'; echo {_CMDI_CANARY};//"],
+    "json":       [f'"; echo {_CMDI_CANARY}; "', f"'; echo {_CMDI_CANARY}; '"],
+}
 
 # ── False-positive filter regexes ────────────────────────────────────────────
 # Each is applied to a 300-char look-behind window ending immediately before a
@@ -9172,6 +9385,9 @@ def check_cmdi(page_url: str, html_content) -> None:
         except Exception:
             continue
 
+        # Baseline for diff check and context detection
+        bl_status, bl_body = _get_probe_baseline(base, params)
+
         for param, orig_val in params.items():
             if domain in _cmdi_domains:
                 break
@@ -9180,9 +9396,15 @@ def check_cmdi(page_url: str, html_content) -> None:
                 continue
             _cmdi_tested.add(test_key)
 
-            print(timestamp() + f" CMDi probe: {base} param={param}")
+            # Context detection — prepend context-breaking payloads when applicable
+            ctx = _detect_input_context(bl_body or "", orig_val)
+            if ctx != "unknown":
+                print(timestamp() + f" [Context] CMDi param={param} in {ctx} context"
+                      f" — using context-specific payloads")
+            extra_payloads = _CMDI_CTX_EXTRA.get(ctx, [])
+            all_payloads   = extra_payloads + _CMDI_UNIX_PAYLOADS + _CMDI_WIN_PAYLOADS
 
-            all_payloads = _CMDI_UNIX_PAYLOADS + _CMDI_WIN_PAYLOADS
+            print(timestamp() + f" CMDi probe: {base} param={param}")
 
             for payload in all_payloads:
                 if domain in _cmdi_domains:
@@ -9204,7 +9426,9 @@ def check_cmdi(page_url: str, html_content) -> None:
                     # Check for canary echo (Linux and Windows).
                     # _cmdi_canary_is_standalone rejects reflected URL params,
                     # HTML attribute reflections, and JSON URL string reflections.
-                    if _cmdi_canary_is_standalone(body, _CMDI_CANARY):
+                    # Diff guard: canary must be new (not already in baseline).
+                    if (_cmdi_canary_is_standalone(body, _CMDI_CANARY)
+                            and _CMDI_CANARY not in (bl_body or "")):
                         idx = body.find(_CMDI_CANARY)
                         snippet = body[max(0, idx - 30):idx + len(_CMDI_CANARY) + 60].strip()
                         alert(
@@ -9219,7 +9443,8 @@ def check_cmdi(page_url: str, html_content) -> None:
                     # Windows-specific indicators (no canary, but dir output seen)
                     if payload in _CMDI_WIN_PAYLOADS:
                         for win_str in _CMDI_WIN_INDICATORS:
-                            if win_str in body and win_str != _CMDI_CANARY:
+                            if (win_str in body and win_str != _CMDI_CANARY
+                                    and win_str not in (bl_body or "")):
                                 snippet = body[max(0, body.find(win_str) - 30):
                                                body.find(win_str) + 120].strip()
                                 alert(
@@ -11975,7 +12200,7 @@ def _reset_per_domain_state() -> None:
     global _sqli_tested, _sqli_domains, _cmdi_tested, _cmdi_domains
     global _ldapi_tested, _ldapi_form_tested
     global _deserial_passive_seen, _deserial_active_tested
-    global _price_tested, _jwt_tested, _hpp_tested, _wcp_tested
+    global _price_tested, _jwt_tested, _hpp_tested, _wcp_tested, _probe_baseline
     global _idor_tested, _takeover_checked, _s3_checked, _s3_permutation_checked
     global _subdomain_enriched, _ct_queried, _cookie_seen, _js_analysis_threads
     _zone_transfer_checked  = set()
@@ -12026,6 +12251,7 @@ def _reset_per_domain_state() -> None:
     _jwt_tested             = set()
     _hpp_tested             = set()
     _wcp_tested             = set()
+    _probe_baseline         = {}
     _idor_tested            = set()
     _takeover_checked       = set()
     _s3_checked             = set()
