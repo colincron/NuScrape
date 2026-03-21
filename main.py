@@ -6062,6 +6062,8 @@ _ENT_SKIP_CDN_HOSTS = frozenset({
     "media.giphy.com",
     "twimg.com",
     "fbcdn.net",
+    "fbsbx.com",
+    "cdninstagram.com",
     "storage.googleapis.com",
 })
 
@@ -6093,6 +6095,21 @@ _ENT_TRACKING_PARAM_RE = re.compile(
     r'(?:^|[?&])(' + '|'.join(re.escape(p) for p in sorted(_ENT_TRACKING_PARAMS)) + r')=\s*$',
     re.IGNORECASE,
 )
+
+# Facebook CDN signature query parameters — values adjacent to these are CDN
+# cache/auth tokens (never application secrets).
+# oh=  image hash / auth signature
+# oe=  expiry timestamp (hex)
+# _nc_cat / _nc_sid / _nc_ohc / _nc_ht / ccb — CDN routing and cache metadata
+_ENT_FB_CDN_PARAM_RE = re.compile(
+    r'[?&](?:oh|oe|_nc_cat|_nc_sid|_nc_ohc|_nc_ht|_nc_hash|ccb)=',
+    re.IGNORECASE,
+)
+
+# Facebook / Instagram CDN domain substrings used for a wider-window (300-char)
+# context check.  fbcdn.net is also in _ENT_SKIP_CDN_HOSTS (200-char window),
+# but Facebook CDN URLs can be long enough to push the hostname out of that range.
+_ENT_FB_DOMAINS = ("facebook.com", "fbcdn.net", "fbsbx.com", "cdninstagram.com")
 
 # Strings that are almost certainly HTML entities or encoded text
 _ENT_HTML_ENTITY_RE = re.compile(r'&[a-zA-Z]{2,8};|&#\d{2,5};|&#x[0-9a-fA-F]{2,5};')
@@ -6475,11 +6492,36 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
                 return True
         return False
 
+    def _in_fb_cdn_token(m_start: int, m_end: int) -> bool:
+        """
+        Return True if the match is a Facebook CDN authentication or cache token.
+
+        Path 1 — CDN signature parameter proximity:
+          The 300-char window around the match contains a Facebook CDN signature
+          query parameter (&oh=, &oe=, &_nc_cat=, &_nc_sid=, etc.).  These params
+          appear exclusively in Facebook CDN URLs; any adjacent high-entropy string
+          is a CDN token, not an application secret.
+
+        Path 2 — Facebook/Instagram domain in wider window:
+          The 300-char window contains a Facebook or Instagram CDN domain
+          (facebook.com, fbcdn.net, fbsbx.com, cdninstagram.com).  Catches
+          base64url token fragments (alphanumeric parts of `oh=`-style values)
+          whose domain is beyond the 200-char range of _in_cdn_skip_url.
+        """
+        window = scan_body[max(0, m_start - 300): m_end + 300]
+        if _ENT_FB_CDN_PARAM_RE.search(window):
+            return True
+        if any(d in window for d in _ENT_FB_DOMAINS):
+            return True
+        return False
+
     # ── Scan response body ────────────────────────────────────────────────────
     for m in _ENT_B64_RE.finditer(scan_body):
         if _in_cdn_skip_url(m.start()):
             continue
         if _in_url_path_context(m.start(), m.end()):
+            continue
+        if _in_fb_cdn_token(m.start(), m.end()):
             continue
         if _in_meta_verification_content(m.start()):
             continue
@@ -6500,6 +6542,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         if _in_cdn_skip_url(m.start()):
             continue
         if _in_url_path_context(m.start(), m.end()):
+            continue
+        if _in_fb_cdn_token(m.start(), m.end()):
             continue
         # Only flag alnum if it wasn't already caught by B64/hex
         val = m.group()

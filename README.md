@@ -690,7 +690,7 @@ Inline `<script>` blocks are stripped from HTML before scanning to avoid minifie
 | Image filename extension | Hex immediately followed by `.jpg`, `.png`, `.webp`, `.gif`, `.svg`, `.ico`, `.bmp`, `.avif` |
 | CMS image hash filename | Matches `[-_]<hex8+>[-_<text>].<img_ext>` — CMS-generated cache-busting filenames |
 | Ad/tracking URL parameter | Hex value is preceded by a known tracking param name: `msockid`, `msclkid`, `fbclid`, `gclid`, `dclid`, `twclid`, `ttclid`, `li_fat_id` — high-entropy by design, never secrets |
-| CDN/image CDN URL context | 200-char window contains a known CDN hostname (Google Fonts/CDN, Cloudinary, imgix, Contentful, Shopify CDN, Unsplash, Akamai, Squarespace, WordPress, Gravatar, Giphy, Twitter CDN, Facebook CDN, GCS) |
+| CDN/image CDN URL context | 200-char window contains a known CDN hostname (Google Fonts/CDN, Cloudinary, imgix, Contentful, Shopify CDN, Unsplash, Akamai, Squarespace, WordPress, Gravatar, Giphy, Twitter CDN, Facebook CDN (`fbcdn.net`, `fbsbx.com`), Instagram CDN (`cdninstagram.com`), GCS) |
 | HTML entity | Matches `&amp;`, `&#123;`, `&#x1F;`, etc. |
 | String longer than 500 chars | Likely serialised binary or minified content |
 | Known false-positive string | Matched by `is_secret_fp()` (placeholder/example values) |
@@ -702,6 +702,8 @@ Inline `<script>` blocks are stripped from HTML before scanning to avoid minifie
 | URL attribute value (terminal) | Candidate immediately followed by a closing quote (`"` / `'`) and the 80-char look-behind contains `href="`, `src="`, `action="`, or `url(` — the string is the final path segment of a URL attribute value |
 | URL attribute look-behind | The 80-char context window before the candidate contains a URL attribute assignment (`href="`, `src="`, `url(`, etc.) — candidate is a URL value regardless of surrounding characters |
 | Candidate contains URL characters | The string itself contains `://` (protocol separator) or a percent-encoded sequence (`%XX`) — indicates URL data, not key material |
+| Facebook CDN signature param proximity | The 300-char window around the candidate contains a Facebook CDN signature parameter (`&oh=`, `&oe=`, `&_nc_cat=`, `&_nc_sid=`, `&_nc_ohc=`, `&_nc_ht=`, `&ccb=`) — these appear exclusively in Facebook CDN URLs; adjacent high-entropy strings are CDN cache/auth tokens, never secrets |
+| Facebook/Instagram CDN domain (wide window) | The 300-char window contains `facebook.com`, `fbcdn.net`, `fbsbx.com`, or `cdninstagram.com` — catches base64url token fragments (alphanumeric parts of `oh=`-style values) whose CDN hostname falls beyond the 200-char range of the standard CDN host check |
 
 Deduplicates by the first 8 characters of each flagged string to avoid repeated alerts for the same token across pages.
 
