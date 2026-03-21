@@ -692,17 +692,20 @@ Probes every URL query parameter discovered on crawled pages (from page URL, `<a
 
 **Phase 1 — error-based:** Appends 9 quote/comment payloads (`'`, `''`, `` ` ``, `')`, `'))`, `' OR '1'='1`, etc.) to each parameter. Flags **CRITICAL** when any of 11 database error strings appear in the response (`SQL syntax`, `mysql_fetch`, `ORA-01756`, `PostgreSQL ERROR`, `unclosed quotation`, etc.).
 
-**Phase 2 — time-based blind:** Injects `SLEEP(5)` and `WAITFOR DELAY '0:0:5'` payloads. Flags **HIGH** if response time exceeds 5 seconds — manual confirmation required.
+**Phase 2 — time-based blind (statistical):** First establishes a per-endpoint timing profile (5 cache-busted baseline requests → mean/σ). Skips time-based probing if σ > 500ms (noisy link). Sends three escalating probes at 2s / 4s / 6s using DB-specific templates (`SLEEP({N})`, `pg_sleep({N})`, `WAITFOR DELAY '0:0:{N}'`, `randomblob(...)`, `dbms_pipe.receive_message`, or generic fallback). Each probe threshold is `mean + 3σ + delay`. Stops on first miss (proportional scaling).
 
 | Finding | Severity | Signal |
 |---|---|---|
 | SQL error string in response | CRITICAL | Error-based injection confirmed |
-| Response delay ≥ 5s on sleep payload | HIGH | Time-based blind candidate |
+| 2–3 of 3 probes exceed adaptive threshold | HIGH | Time-based blind confirmed |
+| 1 of 3 probes exceeds adaptive threshold | MEDIUM | Time-based blind — weak signal |
+
+Log format: `[Timing] Baseline: 180ms ±42ms | Probe(SLEEP 2): 2243ms (threshold 2740ms) ✓ | ... → CONFIRMED`
 
 - Skips static asset URLs (CSS, JS, images, archives)
 - Skips third-party CDN domains
 - WAF vendor noted in finding detail when detected
-- 10-second timeout per probe; stops testing a domain after first confirmed finding
+- Stops testing a domain after first confirmed HIGH finding
 
 ---
 
@@ -715,7 +718,16 @@ Injects harmless canary echo payloads into every URL query parameter. Flags **CR
 | Unix/Linux | `;echo`, `\|echo`, `` `echo` ``, `$(echo)`, `${IFS}echo`, `%0aecho` | `nuscrape-ci-canary` in response body |
 | Windows | `&echo`, `\|echo`, `;dir` | `nuscrape-ci-canary` in body; or `Volume in drive` / `Directory of` |
 
-- 10-second timeout per probe
+**Phase 2 — blind timing:** When canary-based Phase 1 finds nothing, applies the same statistical timing approach as SQLi: 5-request baseline profile (σ > 500ms → skip), then three escalating `; sleep {N}` / `| sleep {N}` / `$(sleep {N})` probes at 2s / 4s / 6s. Threshold: `mean + 3σ + delay`.
+
+| Finding | Severity | Signal |
+|---|---|---|
+| Canary echoed in response | CRITICAL | Shell execution confirmed |
+| Windows dir output detected | CRITICAL | Shell execution confirmed (Windows) |
+| 2–3 of 3 sleep probes exceed adaptive threshold | HIGH | Blind timing — confirmed |
+| 1 of 3 sleep probes exceeds adaptive threshold | MEDIUM | Blind timing — weak signal |
+
+- 10-second timeout per canary probe; `delay + 10s` for timing probes
 - Skips third-party CDN domains and static asset paths
 - WAF vendor noted in finding detail
 
@@ -970,14 +982,16 @@ Before injecting payloads, NuScrape examines the baseline response body to deter
 | `url_context` | Param value inside `href`/`src`/`action` | (logged; generic payloads used) |
 | `unknown` | Value not found in response | Generic payloads used |
 
-For SQL injection, when an error-based probe response contains a DB fingerprint string (e.g. `PostgreSQL ERROR`, `mysql_fetch`, `Microsoft OLE DB`, `SQLite3::`), DB-specific time-based payloads are prioritised in the blind phase:
+For SQL injection, when Phase 1 fingerprints the DB via an error string, DB-specific templates are prioritised in Phase 2. The `{N}` placeholder is replaced by the actual probe delay (2, 4, or 6 seconds):
 
-| DB fingerprinted | Time payload |
-|---|---|
-| MySQL | `' OR SLEEP(5)--` |
-| PostgreSQL | `' OR pg_sleep(5)--` |
-| MSSQL | `'; WAITFOR DELAY '0:0:5'--` |
-| SQLite | `' OR randomblob(500000000/2/2)--` |
+| DB fingerprinted | Fingerprint strings | Time template |
+|---|---|---|
+| MySQL | `mysql_fetch`, `SQL syntax`, `Warning: mysql` | `' OR SLEEP({N})--` |
+| PostgreSQL | `PostgreSQL ERROR`, `Warning: pg_` | `' OR pg_sleep({N})--` |
+| MSSQL | `Microsoft OLE DB`, `ODBC SQL Server` | `'; WAITFOR DELAY '0:0:{N}'--` |
+| SQLite | `SQLite3::` | `' OR randomblob({N}×50M)--` |
+| Oracle | `ORA-` | `dbms_pipe.receive_message(chr(0),{N})` |
+| Generic (fallback) | — | `' OR SLEEP({N})--` / `WAITFOR DELAY '0:0:{N}'--` |
 
 Applied to: SQL injection (diffing + DB-specific time payloads), command injection (diffing + context-breaking payloads), SSTI (diffing), path traversal (diffing), CRLF injection (diffing).
 
@@ -1085,7 +1099,11 @@ Every finding stored in the `Alerts` table (and displayed in the UI) carries a *
 | Admin panel 200 (generic, no body verification) | NEEDS VERIFICATION |
 | Prototype pollution crash (500 on injection) | NEEDS VERIFICATION |
 | Command injection (canary confirmed in body) | CONFIRMED |
+| Command injection (blind timing — 2–3 probes confirmed) | CONFIRMED |
+| Command injection (blind timing — 1 probe, weak signal) | NEEDS VERIFICATION |
 | SQL injection (error string reflected) | CONFIRMED |
+| SQL injection (time-based blind — 2–3 probes confirmed) | CONFIRMED |
+| SQL injection (time-based blind — 1 probe, weak signal) | NEEDS VERIFICATION |
 | LDAP injection (error string reflected) | CONFIRMED |
 | JWT algorithm confusion (alg:none / RS256→HS256 / weak secret) | CONFIRMED |
 | Price manipulation (server accepted probe) | CONFIRMED |
