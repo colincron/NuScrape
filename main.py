@@ -6903,22 +6903,36 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                             write_to_xhr_database(url, endpoint, method)
 
             print(timestamp() + " Parsed: " + url)
+            print(timestamp() + " [DEBUG] Starting email_scraper")
             email_scraper(html)
+            print(timestamp() + " [DEBUG] Done email_scraper")
             # Cookie security flag audit — runs on every page response
+            print(timestamp() + " [DEBUG] Starting check_cookie_security")
             check_cookie_security(url, headers)
+            print(timestamp() + " [DEBUG] Done check_cookie_security")
             # JWT detection and weakness analysis
+            print(timestamp() + " [DEBUG] Starting scan_for_jwts")
             scan_for_jwts(url, html, response_headers=headers)
+            print(timestamp() + " [DEBUG] Done scan_for_jwts")
             # SSRF candidate parameter flagging — informational, no HTTP requests
+            print(timestamp() + " [DEBUG] Starting flag_ssrf_candidates")
             flag_ssrf_candidates(url, html)
+            print(timestamp() + " [DEBUG] Done flag_ssrf_candidates")
             # WebSocket endpoint discovery — runs unconditionally, no active probing
+            print(timestamp() + " [DEBUG] Starting discover_websockets")
             discover_websockets(url, html, headers)
+            print(timestamp() + " [DEBUG] Done discover_websockets")
             # Entropy-based secret detection — passive, no active probes needed
+            print(timestamp() + " [DEBUG] Starting check_response_entropy")
             check_response_entropy(url,
                                    html if isinstance(html, str)
                                    else (html or b"").decode("utf-8", errors="ignore"),
                                    headers)
+            print(timestamp() + " [DEBUG] Done check_response_entropy")
             # Passive deserialization format detection — runs unconditionally
+            print(timestamp() + " [DEBUG] Starting scan_deserial_passive")
             scan_deserial_passive(url, html, headers)
+            print(timestamp() + " [DEBUG] Done scan_deserial_passive")
             # Active probe checks — only run when --active-probes is enabled
             if ACTIVE_PROBES:
                 # SSRF OOB confirmation — interactsh callback for URL-accepting params
