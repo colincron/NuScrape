@@ -362,8 +362,34 @@ During JS bundle analysis, scans first-party JS for known prototype pollution si
 
 ---
 
-#### SSRF Candidate Parameters
-Scans page links and form inputs for URL-accepting parameter names (`url`, `endpoint`, `webhook`, `callback`, `fetch`, `proxy`, `dest`, etc.). Flags them for manual follow-up. Downgraded to LOW when a WAF fingerprint is detected on the page. **MEDIUM** (no WAF) / **LOW** (WAF detected).
+#### SSRF Detection
+
+**Passive candidate flagging** (always runs): scans page links and form inputs for URL-accepting parameter names (`url`, `endpoint`, `webhook`, `callback`, `fetch`, `proxy`, `dest`, etc.). Flags them for manual follow-up. Downgraded to LOW when a WAF fingerprint is detected on the page. **MEDIUM** (no WAF) / **LOW** (WAF detected).
+
+**OOB confirmation** (requires `--active-probes` and `pip install interactsh-client`): for each URL-accepting parameter, injects interactsh subdomain payloads (`http://<id>.interact.sh`, `https://<id>.interact.sh`, `http://<id>.interact.sh/nuscrape-ssrf-test`) and polls for DNS/HTTP callbacks for 10 seconds.
+
+| Finding | Severity | Signal |
+|---|---|---|
+| SSRF confirmed — OOB interaction from target IP | HIGH | DNS or HTTP callback received from the target server's own IP |
+| SSRF likely — OOB interaction, unexpected IP | MEDIUM | Callback received from CDN or public DNS resolver, not target IP |
+| SSRF candidate — no OOB interaction | LOW | Parameter accepts URLs but no callback received within 10s |
+| SSRF candidate — OOB unavailable | LOW | `interactsh-client` not installed; blind fallback |
+| SSRF: cloud metadata accessible | CRITICAL | Confirmed SSRF endpoint returned AWS/GCP/Azure metadata indicators |
+
+**Cloud metadata probing** (only on confirmed SSRF endpoints): injects safe non-sensitive metadata paths into the confirmed parameter and checks the response body for metadata indicators.
+
+| Cloud | URL probed | Indicators checked |
+|---|---|---|
+| AWS IMDSv1 | `http://169.254.169.254/latest/meta-data/` | `ami-id`, `instance-id`, `instance-type` |
+| AWS IMDSv2 | `http://169.254.169.254/latest/api/token` | `EC2-IMDS`, `instance-id` |
+| GCP | `http://metadata.google.internal/computeMetadata/v1/` | `computeMetadata`, `serviceAccounts` |
+| Azure | `http://169.254.169.254/metadata/instance` | `azureMetadata`, `vmId`, `subscriptionId` |
+
+IAM credential paths are never accessed. Cloud metadata probing confirms reachability only.
+
+- One interactsh client registered per scan session (shared across all domains)
+- 10-second request timeout + 10-second polling window per parameter
+- Deduplicated per `(base_url, param)` pair
 
 ---
 
@@ -1127,7 +1153,10 @@ Every finding stored in the `Alerts` table (and displayed in the UI) carries a *
 | WebSocket origin / auth findings | LIKELY |
 | API version enumeration | LIKELY |
 | DNS zone transfer, SPF/DMARC/DKIM | LIKELY |
-| SSRF candidate parameters | NEEDS VERIFICATION |
+| SSRF confirmed (OOB interaction from target IP) | CONFIRMED |
+| SSRF likely (OOB interaction, unexpected source IP) | LIKELY |
+| SSRF: cloud metadata accessible | CONFIRMED |
+| SSRF candidate (no OOB interaction / OOB unavailable) | NEEDS VERIFICATION |
 | IDOR candidates | NEEDS VERIFICATION |
 | Admin panel 200 (generic, no body verification) | NEEDS VERIFICATION |
 | Prototype pollution crash (500 on injection) | NEEDS VERIFICATION |

