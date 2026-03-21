@@ -1080,6 +1080,8 @@ def enumerate_subdomains(domain):
     found = [0]
 
     def _probe_sub(sub):
+        if _stop_event.is_set():
+            return
         fqdn = sub + "." + root
         try:
             ip = socket.gethostbyname(fqdn)
@@ -2150,6 +2152,8 @@ def port_scan(domain):
         return
 
     def _probe_port(port):
+        if _stop_event.is_set():
+            return
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(0.5)
@@ -2744,6 +2748,8 @@ def check_sensitive_files(base_url, domain):
         pass
 
     def _probe(path, severity, description):
+        if _stop_event.is_set():
+            return
         url = base_url.rstrip("/") + path
         try:
             stealth_delay(domain)
@@ -2898,6 +2904,8 @@ def check_admin_panels(base_url, domain):
         pass
 
     def _probe(path, severity, description):
+        if _stop_event.is_set():
+            return
         url = base_url.rstrip("/") + path
         try:
             stealth_delay(domain)
@@ -5036,6 +5044,8 @@ def _js_context(js_text, value, window=100):
 
 def analyse_js_bundle(page_url, js_url):
     """Download and analyse a JS bundle for endpoints, secrets, and staging URLs."""
+    if _stop_event.is_set():
+        return
     if js_url in _js_analysed:
         return
     _js_analysed.add(js_url)
@@ -5141,6 +5151,9 @@ def analyse_js_bundle(page_url, js_url):
 # final endpoint probe (ensures all endpoints are in the DB before probing).
 _js_analysis_threads = []
 _js_analysis_threads_lock = threading.Lock()
+
+# ── Graceful stop event — set by signal handler or stop API to halt all workers
+_stop_event = threading.Event()
 
 def extract_and_analyse_js(page_url, html_content):
     """Find all script src tags in a page and analyse each JS bundle."""
@@ -5258,6 +5271,8 @@ def probe_js_endpoints(base_url=None):
     print(timestamp() + f" Probing {len(to_probe)} JS-discovered endpoints unauthenticated...")
 
     def _probe(full_url, page_url):
+        if _stop_event.is_set():
+            return
         with _js_endpoint_probed_lock:
             _js_endpoint_probed.add(full_url)
         try:
@@ -6458,6 +6473,7 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
 def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=False,
                  min_workers=1, max_workers=10):
     global START_URL, SAME_DOMAIN_ONLY, _ac
+    _stop_event.clear()   # ensure a fresh scan is never blocked by a previous stop
     START_URL        = start_url
     SAME_DOMAIN_ONLY = same_domain_only
     _ac = AdaptiveConcurrency(start=3, min_workers=min_workers, max_workers=max_workers)
@@ -6530,6 +6546,9 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
     _ghost_shuffle_at = random.randint(10, 20) if STEALTH_PROFILE == "GHOST" else 0
     _ghost_crawl_count = 0
     while url_queue:
+        if _stop_event.is_set():
+            print(timestamp() + " [*] Stop requested — halting crawler loop.")
+            break
         # GHOST: periodically shuffle P3/P4 items to randomise crawl patterns
         # while preserving P1/P2 ordering.
         if STEALTH_PROFILE == "GHOST" and _ghost_shuffle_at > 0:
@@ -13480,6 +13499,8 @@ def check_idor_candidates(page_url, html_content):
     pipeline on each unique (endpoint, param) pair before alerting.
     Alerts only on confirmed auth-gated endpoints with per-object data.
     """
+    if _stop_event.is_set():
+        return
     domain = urlparse(page_url).netloc
     base_domain = domain.lstrip("www.")
     if any(base_domain == d or base_domain.endswith("." + d) for d in _IDOR_SKIP_DOMAINS):
@@ -14127,6 +14148,8 @@ def _reset_per_domain_state() -> None:
     _ct_queried             = set()
     _cookie_seen            = {}
     _js_analysis_threads    = []
+    # Clear stop event so subsequent scans in multi-domain mode are not blocked
+    _stop_event.clear()
     # Function-attribute dedup set used by check_spf_dmarc
     if hasattr(check_spf_dmarc, "_checked"):
         check_spf_dmarc._checked = set()
@@ -14355,7 +14378,16 @@ if __name__ == "__main__":
 
     def _handle_stop_signal(signum, frame):
         print(f"\n[*] Received signal {signum} — shutting down cleanly...")
+        _stop_event.set()
         _shutdown_playwright()
+        # Give tracked threads up to 5 seconds to observe the stop event
+        deadline = time.time() + 5.0
+        with _js_analysis_threads_lock:
+            threads = list(_js_analysis_threads)
+        for _t in threads:
+            remaining = deadline - time.time()
+            if remaining > 0:
+                _t.join(timeout=remaining)
         sys.exit(0)
 
     signal.signal(signal.SIGINT,  _handle_stop_signal)

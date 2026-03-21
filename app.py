@@ -233,9 +233,23 @@ def api_stop():
     with crawler_lock:
         if crawler_proc and crawler_proc.poll() is None:
             _stopped_by_user[0] = True   # suppress auto-restart
+            # SIGTERM triggers _handle_stop_signal in main.py, which sets
+            # _stop_event so all worker threads observe the stop flag and
+            # return early, then shuts down Playwright and exits cleanly.
             crawler_proc.terminate()
             _write_scan_log(f"[NuScrape] Scan stopped by user @ {datetime.now()}\n")
             push_log("[NuScrape] Crawler stopped by user.")
+            # Wait up to 5 seconds for the process to exit gracefully,
+            # then force-kill if it is still running.
+            def _force_kill_if_needed(proc):
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    push_log("[NuScrape] Crawler did not exit within 5 s — sending SIGKILL.")
+                    proc.kill()
+            threading.Thread(
+                target=_force_kill_if_needed, args=(crawler_proc,), daemon=True
+            ).start()
             return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "No crawler running"})
 
