@@ -674,10 +674,13 @@ def save_state(start_url, url_queue, url_seen, visited, pages_crawled, same_doma
 def load_state():
     try:
         with open(QUEUE_SAVE_FILE, "r") as f:
-            state = json.load(f)
+            content = f.read().strip()
+        if not content:
+            return None
+        state = json.loads(content)
         print(timestamp() + " Resuming — " + str(len(state["url_queue"])) + " in queue, " + str(state["pages_crawled"]) + " already crawled.")
         return state
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
         return None
     except Exception as e:
         print_error("Failed to load state: " + str(e))
