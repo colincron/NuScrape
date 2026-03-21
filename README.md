@@ -245,12 +245,12 @@ Injects template expression payloads (`{{7*7}}`, `${7*7}`, `<%= 7*7 %>`) into UR
 ---
 
 #### CRLF Injection
-For each URL parameter found on crawled pages, appends a URL-encoded `%0d%0a` (CR+LF) sequence followed by a canary header (`X-CRLF-Test: nuscrape-crlf-canary`) to the parameter value. Checks whether the injected header appears in the response headers — body reflection is not sufficient. Only tests parameters on in-scope URLs. Stops probing a domain after the first confirmed finding. Exploitable for response splitting, log poisoning, cache poisoning, and cookie injection. **HIGH** when confirmed.
+For each URL parameter found on crawled pages, appends a URL-encoded `%0d%0a` (CR+LF) sequence followed by a canary header (`X-Cache-Status: probe-1a2b`) to the parameter value. Checks whether the injected header appears in the response headers — body reflection is not sufficient. Only tests parameters on in-scope URLs. Stops probing a domain after the first confirmed finding. Exploitable for response splitting, log poisoning, cache poisoning, and cookie injection. **HIGH** when confirmed.
 
 ---
 
 #### Open Redirect
-Parses all links on every crawled page looking for 30 common redirect parameter names (`next`, `url`, `redirect`, `return_to`, `goto`, `callback`, etc.). Injects the canary URL `https://example.com/nuscrape-redirect-test` and checks whether the `Location` header in the response points to it. Does not follow the redirect. Suppresses findings where the response shows a WAF fingerprint. Deduplicated per `(path, parameter)` pair. Requires `--active-probes`. **HIGH** when confirmed.
+Parses all links on every crawled page looking for 30 common redirect parameter names (`next`, `url`, `redirect`, `return_to`, `goto`, `callback`, etc.). Injects the canary URL `https://example.com/redirect-probe-5c8b` and checks whether the `Location` header in the response points to it. Does not follow the redirect. Suppresses findings where the response shows a WAF fingerprint. Deduplicated per `(path, parameter)` pair. Requires `--active-probes`. **HIGH** when confirmed.
 
 ---
 
@@ -306,11 +306,11 @@ Requires `--active-probes`. Deduplicated per `(host, path)` pattern.
 
 | Check | Method | Finding | Severity |
 |---|---|---|---|
-| Static-entity XXE | POST `text/xml` | Canary `xxe-test-nuscrape` reflected in response — entity processing confirmed | HIGH |
+| Static-entity XXE | POST `text/xml` | Canary `xxe-probe-4f7c` reflected in response — entity processing confirmed | HIGH |
 | SOAP-wrapped XXE | POST `application/soap+xml` | Same canary reflected inside SOAP envelope | HIGH |
 | WSDL exposure | GET `?wsdl` | 200 response with XML/WSDL body without auth — exposes full service contract | MEDIUM |
 
-The test payload uses a safe static string entity (`<!ENTITY xxe "xxe-test-nuscrape">`) — no file reads, no network callbacks, no sensitive data access. Confirmation requires the canary to appear verbatim in the response body.
+The test payload uses a safe static string entity (`<!ENTITY xxe "xxe-probe-4f7c">`) — no file reads, no network callbacks, no sensitive data access. Confirmation requires the canary to appear verbatim in the response body.
 
 - 8-second timeout per probe
 - Deduplicated per `(endpoint_url, content_type)` pair
@@ -368,7 +368,7 @@ During JS bundle analysis, scans first-party JS for known prototype pollution si
 
 **Phase 1 — candidate collection** (always runs): scans page links, form inputs, and the current page URL for parameter names from the SSRF list (`url`, `endpoint`, `webhook`, `callback`, `fetch`, `proxy`, `dest`, etc.). Stores candidates with their WAF status. No alerts fired.
 
-**Phase 2 — OOB confirmation** (requires `--active-probes` and `pip install interactsh-client`): for each stored candidate, injects interactsh subdomain payloads (`http://<id>.interact.sh`, `https://<id>.interact.sh`, `http://<id>.interact.sh/nuscrape-ssrf-test`) and polls for DNS/HTTP callbacks for 10 seconds. WAF detection from Phase 1 is carried through and noted in the finding detail.
+**Phase 2 — OOB confirmation** (requires `--active-probes` and `pip install interactsh-client`): for each stored candidate, injects interactsh subdomain payloads (`http://<id>.interact.sh`, `https://<id>.interact.sh`, `http://<id>.interact.sh/ssrf-probe-2a1f`) and polls for DNS/HTTP callbacks for 10 seconds. WAF detection from Phase 1 is carried through and noted in the finding detail.
 
 | Finding | Severity | Signal |
 |---|---|---|
@@ -823,12 +823,12 @@ Log format: `[Timing] Baseline: 180ms ±42ms | Probe(SLEEP 2): 2243ms (threshold
 
 #### Command Injection Detection
 
-Injects harmless canary echo payloads into every URL query parameter. Flags **CRITICAL** only when the literal canary string `nuscrape-ci-canary` appears in the response — proving the OS shell executed the input. Requires `--active-probes`.
+Injects harmless canary echo payloads into every URL query parameter. Flags **CRITICAL** only when the literal canary string `probe-test-7f3a` appears in the response — proving the OS shell executed the input. Requires `--active-probes`.
 
 | Platform | Payloads tested | Confirmation signal |
 |---|---|---|
-| Unix/Linux | `;echo`, `\|echo`, `` `echo` ``, `$(echo)`, `${IFS}echo`, `%0aecho` | `nuscrape-ci-canary` in response body |
-| Windows | `&echo`, `\|echo`, `;dir` | `nuscrape-ci-canary` in body; or `Volume in drive` / `Directory of` |
+| Unix/Linux | `;echo`, `\|echo`, `` `echo` ``, `$(echo)`, `${IFS}echo`, `%0aecho` | `probe-test-7f3a` in response body |
+| Windows | `&echo`, `\|echo`, `;dir` | `probe-test-7f3a` in body; or `Volume in drive` / `Directory of` |
 
 **Phase 2 — blind timing:** When canary-based Phase 1 finds nothing, applies the same statistical timing approach as SQLi: 5-request baseline profile (σ > 500ms → skip), then three escalating `; sleep {N}` / `| sleep {N}` / `$(sleep {N})` probes at 2s / 4s / 6s. Threshold: `mean + 3σ + delay`.
 
@@ -1011,7 +1011,7 @@ Tests URL query parameters for server-side parsing discrepancies caused by dupli
 
 **Three probe classes per parameter:**
 
-**1. Duplicate order probes** — sends `?param=orig&param=nuscrape-hpp` and the reverse. Checks whether the canary appears in the response and in which position.
+**1. Duplicate order probes** — sends `?param=orig&param=hpp-probe-6a9b` and the reverse. Checks whether the canary appears in the response and in which position.
 
 **2. WAF bypass split** — sends the full XSS payload `<script>` first (to test if WAF blocks it), then sends the payload split across two duplicate params: `?param=<scr&param=ipt>...`. If the single payload is blocked (4xx) but the split is not, the WAF can be bypassed by parameter duplication.
 
@@ -1046,16 +1046,16 @@ Tests cacheable endpoints for web cache poisoning vectors using safe canary valu
 
 | Header | Injected value |
 |---|---|
-| `X-Forwarded-Host` | `nuscrape-cache-test.com` |
-| `X-Forwarded-Scheme` | `nuscrape-cache-test` |
-| `X-Original-URL` | `/nuscrape-cache-test` |
-| `X-Rewrite-URL` | `/nuscrape-cache-test` |
+| `X-Forwarded-Host` | `cache-probe-8b2c.com` |
+| `X-Forwarded-Scheme` | `cache-probe-8b2c` |
+| `X-Original-URL` | `/cache-probe-8b2c` |
+| `X-Rewrite-URL` | `/cache-probe-8b2c` |
 | `X-Custom-IP-Authorization` | `127.0.0.1` |
 | `X-Forwarded-For` | `127.0.0.1` |
 
 **2. Fat GET detection** — sends a `GET` request with a conflicting body parameter. If the body value appears in the response instead of the URL parameter value, the server processes GET request bodies and may allow cache poisoning via the body parameter.
 
-**3. Parameter cloaking** — appends `;param=nuscrape-cache-test-cloak` to the URL. If the cloaked value appears in the response, the cache may key on the URL before the semicolon while the backend processes the full string.
+**3. Parameter cloaking** — appends `;param=cloak-probe-9d4e` to the URL. If the cloaked value appears in the response, the cache may key on the URL before the semicolon while the backend processes the full string.
 
 Two false-positive filters are applied before alerting:
 

@@ -2571,7 +2571,7 @@ def check_backup_exposure(base_url, domain):
         # Fetch the homepage and a guaranteed-nonexistent path.
         # If both return the same content/redirect destination, this server
         # uses a catch-all — backup file 200s cannot be trusted.
-        canary = base_url.rstrip("/") + "/nuscrape-canary-" + str(random.randint(100000, 999999)) + ".php.bak"
+        canary = base_url.rstrip("/") + "/probe-canary-" + str(random.randint(100000, 999999)) + ".php.bak"
         canary_resp = safe_get(canary, timeout=6)
         if canary_resp:
             # If a random nonexistent path returns 200 or redirects to homepage, it's a catch-all
@@ -2732,7 +2732,7 @@ def check_sensitive_files(base_url, domain):
     _sensitive_checked.add(domain)
 
     # Canary probe — if a random path returns 200, skip (catch-all server)
-    canary = base_url.rstrip("/") + f"/nuscrape-canary-{random.randint(100000,999999)}.json"
+    canary = base_url.rstrip("/") + f"/probe-canary-{random.randint(100000,999999)}.json"
     try:
         stealth_delay(domain)
         cr = _get_session().get(canary, headers=create_request_header(),
@@ -2886,7 +2886,7 @@ def check_admin_panels(base_url, domain):
     _admin_checked.add(domain)
 
     # Canary — if a random nonexistent path returns 200 we can't trust 200s
-    canary = base_url.rstrip("/") + f"/nuscrape-canary-{random.randint(100000,999999)}.admin"
+    canary = base_url.rstrip("/") + f"/probe-canary-{random.randint(100000,999999)}.admin"
     catch_all_200 = False
     try:
         cr = _get_session().get(canary, headers=create_request_header(),
@@ -7253,7 +7253,7 @@ def _is_catch_all(base_url: str) -> bool:
     produce false positives on path-based probes.
     """
     canary = (base_url.rstrip("/")
-              + "/nuscrape-canary-" + str(random.randint(100000, 999999)))
+              + "/probe-canary-" + str(random.randint(100000, 999999)))
     try:
         resp = safe_get(canary, timeout=6)
         if not resp:
@@ -7445,7 +7445,7 @@ def check_technology_specific(base_url: str, domain: str,
             print(timestamp() + f" [!!] Laravel Horizon exposed: {domain}")
 
         # Debug mode — probe a nonexistent path and check for Whoops/Ignition
-        rand_path = f"/nuscrape-laravel-debug-{random.randint(10000, 99999)}"
+        rand_path = f"/debug-probe-{random.randint(10000, 99999)}"
         status, body, ct = _probe(rand_path)
         if "whoops" in body.lower() or "ignition" in body.lower() \
                 or ("stack trace" in body.lower() and "laravel" in body.lower()):
@@ -7465,7 +7465,7 @@ def check_technology_specific(base_url: str, domain: str,
     # (which runs unconditionally in _exposure_tasks). Here we only confirm
     # that the Whitelabel error page is present as a secondary signal.
     if "Spring Boot" in tech_set:
-        rand_path = f"/nuscrape-spring-{random.randint(10000, 99999)}"
+        rand_path = f"/spring-probe-{random.randint(10000, 99999)}"
         status, body, ct = _probe(rand_path)
         if "whitelabel error page" in body.lower():
             print(timestamp() + f" [*] Spring Boot Whitelabel error page confirmed: {domain}")
@@ -7474,7 +7474,7 @@ def check_technology_specific(base_url: str, domain: str,
     # ── Django ────────────────────────────────────────────────────────────────
     if "Django" in tech_set:
         # Trigger a 404 on a nonexistent path and check for the debug page
-        rand_path = f"/nuscrape-django-{random.randint(10000, 99999)}"
+        rand_path = f"/django-probe-{random.randint(10000, 99999)}"
         status, body, ct = _probe(rand_path)
         if status == 404 and (
             "using the urlconf" in body.lower()
@@ -8187,7 +8187,7 @@ def check_ssrf_oob(page_url: str, html_content) -> None:
         oob_payloads = [
             f"http://{oob_url}",
             f"https://{oob_url}",
-            f"http://{oob_url}/nuscrape-ssrf-test",
+            f"http://{oob_url}/ssrf-probe-2a1f",
         ]
         for payload in oob_payloads:
             new_query = "&".join(
@@ -8256,7 +8256,7 @@ REDIRECT_PARAMS = {
     "to", "uri", "path",
 }
 
-REDIRECT_CANARY  = "https://example.com/nuscrape-redirect-test"
+REDIRECT_CANARY  = "https://example.com/redirect-probe-5c8b"
 _redirect_tested  = set()
 _redirect_domains = set()
 
@@ -9622,8 +9622,8 @@ def check_ssti(page_url, html_content):
 # CRLF injection detection
 # ─────────────────────────────────────────────
 
-_CRLF_CANARY_HEADER = "X-CRLF-Test"
-_CRLF_CANARY_VALUE  = "nuscrape-crlf-canary"
+_CRLF_CANARY_HEADER = "X-Cache-Status"
+_CRLF_CANARY_VALUE  = "probe-1a2b"
 # URL-encoded CR+LF followed by the injected header
 _CRLF_PAYLOAD       = f"%0d%0a{_CRLF_CANARY_HEADER}:%20{_CRLF_CANARY_VALUE}"
 
@@ -9736,18 +9736,18 @@ def check_crlf_injection(page_url, html_content):
 # Safe canary — confirms entity processing without reading sensitive files.
 # The DOCTYPE declares a static string entity; if the parser resolves it and
 # reflects it in the response we know entity expansion is enabled.
-_XXE_CANARY      = "xxe-test-nuscrape"
+_XXE_CANARY      = "xxe-probe-4f7c"
 _XXE_PAYLOAD     = (
     '<?xml version="1.0"?>\n'
     '<!DOCTYPE test [\n'
-    '  <!ENTITY xxe "xxe-test-nuscrape">\n'
+    '  <!ENTITY xxe "xxe-probe-4f7c">\n'
     ']>\n'
     '<test>&xxe;</test>'
 )
 _XXE_SOAP_PAYLOAD = (
     '<?xml version="1.0"?>\n'
     '<!DOCTYPE test [\n'
-    '  <!ENTITY xxe "xxe-test-nuscrape">\n'
+    '  <!ENTITY xxe "xxe-probe-4f7c">\n'
     ']>\n'
     '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">\n'
     '  <soapenv:Body>\n'
@@ -9954,18 +9954,18 @@ def check_xxe_injection(page_url: str, html_content: str, response_headers: dict
 # Prototype pollution detection
 # ─────────────────────────────────────────────
 
-_PP_CANARY = "pp-test"
+_PP_CANARY = "3e6d"
 
 # JSON body payloads — one per probe slot; sent alongside any existing fields
 _PP_BODY_PAYLOADS = [
-    {"__proto__":              {"nuscrape": "pp-test"}},
-    {"constructor":            {"prototype": {"nuscrape": "pp-test"}}},
+    {"__proto__":              {"pp-probe": "3e6d"}},
+    {"constructor":            {"prototype": {"pp-probe": "3e6d"}}},
 ]
 
 # URL query-string payloads — appended to existing params
 _PP_QUERY_PAYLOADS = [
-    "__proto__[nuscrape]=pp-test",
-    "constructor[prototype][nuscrape]=pp-test",
+    "__proto__[pp-probe]=3e6d",
+    "constructor[prototype][pp-probe]=3e6d",
 ]
 
 # Client-side sink patterns searched in first-party JS bundles.
@@ -10552,7 +10552,7 @@ def check_sqli(page_url: str, html_content) -> None:
 # Command Injection detection
 # ─────────────────────────────────────────────
 
-_CMDI_CANARY = "nuscrape-ci-canary"
+_CMDI_CANARY = "probe-test-7f3a"
 
 # Linux/Unix payloads
 _CMDI_UNIX_PAYLOADS = [
@@ -11163,8 +11163,8 @@ def check_ldap_injection(page_url: str, html_content) -> None:
         # Baseline with obviously invalid credentials
         baseline_data = {
             **field_defaults,
-            user_field: "nuscrape_ldap_baseline_user",
-            pass_field: "nuscrape_ldap_baseline_pass",
+            user_field: "ldap-probe-user",
+            pass_field: "ldap-probe-pass",
         }
         try:
             stealth_delay(domain)
@@ -11423,7 +11423,7 @@ def check_insecure_deserialization(
             # StreamCorruptedException fires before any class is resolved — safe.
             java_probe = (
                 _JAVA_SERIAL_MAGIC
-                + b"\x73\x72\x00\x09NuScrape"   # TC_OBJECT TC_CLASSDESC len=9 "NuScrape"
+                + b"\x73\x72\x00\x09ProbeTest"   # TC_OBJECT TC_CLASSDESC len=9 "ProbeTest"
                 + b"\x00" * 8                    # serialVersionUID placeholder
                 + b"\x02\x00\x00"                # flags + field count = 0
             )
@@ -11463,7 +11463,7 @@ def check_insecure_deserialization(
         if akey not in _deserial_active_tested:
             _deserial_active_tested.add(akey)
             # Intentionally malformed — truncated object body triggers unserialize() error
-            php_probe = 'O:9:"NuScrape":1:{'
+            php_probe = 'O:9:"ProbeTest":1:{'
             try:
                 stealth_delay(domain)
                 print(timestamp() + f" PHP deserial active probe: {page_url}")
@@ -12664,7 +12664,7 @@ def check_race_condition(page_url: str, html_content) -> None:
 # ─────────────────────────────────────────────
 
 _HPP_XSS_SPLIT = ("<scr", "ipt>")   # split across two param values to evade WAF concat checks
-_HPP_CANARY    = "nuscrape-hpp"      # benign canary reflected in response → parsing discrepancy
+_HPP_CANARY    = "hpp-probe-6a9b"    # benign canary reflected in response → parsing discrepancy
 _hpp_tested: set = set()             # (base_url, param) pairs already probed
 
 
@@ -12929,7 +12929,7 @@ def check_hpp(page_url: str, html_content) -> None:
 # Web cache poisoning detection
 # ─────────────────────────────────────────────
 
-_WCP_CANARY      = "nuscrape-cache-test"
+_WCP_CANARY      = "cache-probe-8b2c"
 _WCP_UNKEYED_HEADERS: list[tuple[str, str]] = [
     ("X-Forwarded-Host",           _WCP_CANARY + ".com"),
     ("X-Forwarded-Scheme",         _WCP_CANARY),
@@ -13185,7 +13185,7 @@ def check_web_cache_poisoning(page_url: str, html_content,
     cloak_key = (base, "__cloak__")
     if cloak_key not in _wcp_tested:
         _wcp_tested.add(cloak_key)
-        cloak_canary = _WCP_CANARY + "-cloak"
+        cloak_canary = "cloak-probe-9d4e"
         # Append after semicolon — some caches strip the semicolon-delimited
         # portion from the cache key while backends process it
         if parsed.query:
