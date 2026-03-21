@@ -18,6 +18,7 @@ import statistics
 import difflib
 import hashlib
 from dataclasses import dataclass, field
+import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor as _BLThreadPoolExecutor
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
@@ -9465,6 +9466,12 @@ _endpoint_baseline_futures: dict = {} # key → Future[EndpointBaseline | None] 
 # Background thread pool for non-blocking baseline collection (max 3 concurrent fetches).
 _baseline_pool = _BLThreadPoolExecutor(max_workers=3, thread_name_prefix="nuscrape-bl")
 
+# Dedicated per-request thread pool used inside _collect_baseline_worker so each
+# HTTP fetch can be awaited with future.result(timeout=5), enforcing the hard
+# per-request cap at the thread level (catches DNS stalls and SSL hangs that
+# bypass requests' own timeout parameter).
+_baseline_req_pool = _BLThreadPoolExecutor(max_workers=6, thread_name_prefix="nuscrape-bl-req")
+
 # Static file extensions — never worth baselining.
 _BL_STATIC_EXT_RE = re.compile(
     r'\.(?:js|css|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|eot|map)$',
@@ -9522,75 +9529,92 @@ def _collect_baseline_worker(base: str, params: dict):
     """
     Background worker: collect a 2-sample baseline for (base, params).
 
+    Each HTTP request is submitted to _baseline_req_pool and awaited with
+    future.result(timeout=5).  concurrent.futures.TimeoutError is caught and
+    causes the entire baseline to be skipped — this enforces the hard per-request
+    cap at the thread level, which also catches DNS stalls and SSL hangs that
+    can bypass requests' own timeout parameter.
+
     Hard timeouts:
-      - Per-request: 5 seconds (requests.exceptions.Timeout)
+      - Per-request: 5 seconds (future.result + requests.exceptions.Timeout)
       - Total budget: 12 seconds across both requests
 
-    Returns EndpointBaseline or None. Called via _baseline_pool only.
+    The entire worker body is wrapped in a top-level try/except so any
+    unexpected failure skips baseline gracefully rather than hanging or crashing.
+
+    Returns EndpointBaseline or None.  Called via _baseline_pool only.
     """
     _PER_REQ_TIMEOUT = 5
     _TOTAL_BUDGET    = 12.0
 
-    query = "&".join(f"{k}={v}" for k, v in params.items())
-    samples_body: list = []
-    samples_len:  list = []
-    samples_time: list = []
-    last_status = None
-    last_ct     = ""
-    budget_start = time.monotonic()
+    def _do_fetch(url: str):
+        return _get_session().get(
+            url,
+            headers=create_request_header(),
+            timeout=_PER_REQ_TIMEOUT,
+            allow_redirects=True,
+            verify=False,
+        )
 
-    for i in range(2):
-        if time.monotonic() - budget_start > _TOTAL_BUDGET:
-            print(timestamp() + f" [Baseline] Skipping {base} — timeout")
-            return None
-        bust = f"_cb={int(time.time() * 1000) + i}"
-        sep  = "&" if query else ""
-        url  = base + "?" + query + sep + bust
-        try:
-            t0   = time.monotonic()
-            resp = _get_session().get(
-                url,
-                headers=create_request_header(),
-                timeout=_PER_REQ_TIMEOUT,
-                allow_redirects=True,
-                verify=False,
-            )
-            elapsed_ms  = (time.monotonic() - t0) * 1000
-            body        = resp.text or ""
-            last_status = resp.status_code
-            last_ct     = resp.headers.get("Content-Type", "")
-            samples_body.append(body)
-            samples_len.append(len(body))
-            samples_time.append(elapsed_ms)
-        except requests.exceptions.Timeout:
-            print(timestamp() + f" [Baseline] Skipping {base} — timeout")
-            return None
-        except Exception:
-            pass
+    try:
+        query = "&".join(f"{k}={v}" for k, v in params.items())
+        samples_body: list = []
+        samples_len:  list = []
+        samples_time: list = []
+        last_status = None
+        last_ct     = ""
+        budget_start = time.monotonic()
 
-    if not samples_body:
+        for i in range(2):
+            if time.monotonic() - budget_start > _TOTAL_BUDGET:
+                print(timestamp() + f" [Baseline] Skipping {base} — timeout")
+                return None
+            bust = f"_cb={int(time.time() * 1000) + i}"
+            sep  = "&" if query else ""
+            url  = base + "?" + query + sep + bust
+            try:
+                fut = _baseline_req_pool.submit(_do_fetch, url)
+                try:
+                    t0   = time.monotonic()
+                    resp = fut.result(timeout=_PER_REQ_TIMEOUT)
+                    elapsed_ms  = (time.monotonic() - t0) * 1000
+                    body        = resp.text or ""
+                    last_status = resp.status_code
+                    last_ct     = resp.headers.get("Content-Type", "")
+                    samples_body.append(body)
+                    samples_len.append(len(body))
+                    samples_time.append(elapsed_ms)
+                except concurrent.futures.TimeoutError:
+                    print(timestamp() + f" [Baseline] Skipping {base} — timed out")
+                    return None
+            except Exception:
+                pass
+
+        if not samples_body:
+            return None
+
+        dynamic_regions = _bl_find_dynamic_regions(samples_body)
+        masked          = _bl_mask_body(samples_body[-1])
+        fingerprint     = _bl_fingerprint(masked)
+
+        bl = EndpointBaseline(
+            url=base,
+            status_code=last_status or 0,
+            content_type=last_ct,
+            response_length_mean=statistics.mean(samples_len),
+            response_length_std=statistics.pstdev(samples_len) if len(samples_len) > 1 else 0.0,
+            response_time_mean=statistics.mean(samples_time),
+            response_time_std=statistics.pstdev(samples_time) if len(samples_time) > 1 else 0.0,
+            content_fingerprint=fingerprint,
+            dynamic_regions=dynamic_regions,
+            body=samples_body[-1],
+        )
+        print(timestamp() + f" [Baseline] {base} — status={bl.status_code} "
+              f"len={bl.response_length_mean:.0f}±{bl.response_length_std:.0f} "
+              f"fp={bl.content_fingerprint}")
+        return bl
+    except Exception:
         return None
-
-    dynamic_regions = _bl_find_dynamic_regions(samples_body)
-    masked          = _bl_mask_body(samples_body[-1])
-    fingerprint     = _bl_fingerprint(masked)
-
-    bl = EndpointBaseline(
-        url=base,
-        status_code=last_status or 0,
-        content_type=last_ct,
-        response_length_mean=statistics.mean(samples_len),
-        response_length_std=statistics.pstdev(samples_len) if len(samples_len) > 1 else 0.0,
-        response_time_mean=statistics.mean(samples_time),
-        response_time_std=statistics.pstdev(samples_time) if len(samples_time) > 1 else 0.0,
-        content_fingerprint=fingerprint,
-        dynamic_regions=dynamic_regions,
-        body=samples_body[-1],
-    )
-    print(timestamp() + f" [Baseline] {base} — status={bl.status_code} "
-          f"len={bl.response_length_mean:.0f}±{bl.response_length_std:.0f} "
-          f"fp={bl.content_fingerprint}")
-    return bl
 
 
 def _schedule_endpoint_baseline(base: str, params: dict) -> None:
@@ -9600,11 +9624,14 @@ def _schedule_endpoint_baseline(base: str, params: dict) -> None:
     Returns immediately — never blocks.  Call _get_endpoint_baseline() later
     to retrieve the result.  No-op when:
       - BASELINE_ENABLED is False
+      - ACTIVE_PROBES is False (baseline is only useful for probe comparison)
       - endpoint path matches a static asset extension
       - endpoint host is a third-party CDN
       - baseline already completed or is already in-flight
     """
     if not BASELINE_ENABLED:
+        return
+    if not ACTIVE_PROBES:
         return
     if _BL_STATIC_EXT_RE.search(urlparse(base).path):
         return
@@ -9631,6 +9658,8 @@ def _get_endpoint_baseline(base: str, params: dict, timeout: int = 8):
     longer used here — timeouts are enforced inside _collect_baseline_worker.
     """
     if not BASELINE_ENABLED:
+        return None
+    if not ACTIVE_PROBES:
         return None
     key = (base, frozenset(params.items()))
     # Fast path: already completed
