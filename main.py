@@ -6123,6 +6123,15 @@ _ENT_URL_ATTR_CTX_RE = re.compile(
     re.IGNORECASE,
 )
 
+# URL query parameter assignment in look-behind — used by the base64url suppressor.
+# Matches ?name=  or  &name=  at the end of the look-behind window.
+_ENT_QUERY_PARAM_RE = re.compile(r'[?&][^=&\s]{1,50}=\s*$', re.IGNORECASE)
+
+# Character set used when reconstructing the full base64url token length.
+_ENT_B64URL_CHARS = frozenset(
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_='
+)
+
 # ── Meta verification tag suppression ────────────────────────────────────────
 
 # Exact name= values used by search engines / security vendors for domain ownership
@@ -6309,9 +6318,13 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         # Known public key prefixes
         if is_public_key(candidate):
             return
-        # Entropy threshold gate
+        # Entropy threshold gate.
+        # Strings over 80 chars are likely cryptographic payloads (signatures,
+        # encoded tokens, PKCE verifiers) rather than API keys — raise the bar.
         threshold = _ENT_THRESHOLDS.get(string_class, 3.8)
-        entropy   = _shannon_entropy(candidate)
+        if len(candidate) > 80:
+            threshold = max(threshold, 5.2)
+        entropy = _shannon_entropy(candidate)
         if entropy <= threshold:
             return
 
@@ -6515,6 +6528,41 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
             return True
         return False
 
+    def _in_b64url_query_param(m_start: int, m_end: int) -> bool:
+        """
+        Return True if the match is a fragment of a base64url-encoded string that
+        is longer than 60 characters and appears as a URL query parameter value.
+
+        These strings are almost always OAuth tokens, authorization codes,
+        cryptographic signatures, or JWT components — never API keys or secrets.
+
+        All three conditions must hold:
+          1. The character immediately before or after the match is '-' or '_',
+             confirming the match is a segment of a base64url-encoded value
+             (base64url uses '-' and '_' as its 62nd and 63rd alphabet characters,
+             neither of which appears in _ENT_B64_RE or _ENT_ALNUM_RE, so a
+             base64url string is always split into alnum fragments at those chars).
+          2. The 150-char look-behind contains a query parameter assignment
+             (?name= or &name=) — the value is a URL query param, not body content.
+          3. Reconstructing the full base64url token by expanding left and right
+             through [A-Za-z0-9_-=] characters gives a total length greater than 60.
+        """
+        pre_char  = scan_body[m_start - 1: m_start] if m_start > 0 else ""
+        post_char = scan_body[m_end: m_end + 1]
+        if pre_char not in ('-', '_') and post_char not in ('-', '_'):
+            return False
+        # Confirm query param context
+        if not _ENT_QUERY_PARAM_RE.search(scan_body[max(0, m_start - 150): m_start]):
+            return False
+        # Reconstruct full token length by expanding past base64url chars
+        left = m_start - 1
+        while left >= 0 and scan_body[left] in _ENT_B64URL_CHARS:
+            left -= 1
+        right = m_end
+        while right < len(scan_body) and scan_body[right] in _ENT_B64URL_CHARS:
+            right += 1
+        return (right - left - 1) > 60
+
     # ── Scan response body ────────────────────────────────────────────────────
     for m in _ENT_B64_RE.finditer(scan_body):
         if _in_cdn_skip_url(m.start()):
@@ -6544,6 +6592,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         if _in_url_path_context(m.start(), m.end()):
             continue
         if _in_fb_cdn_token(m.start(), m.end()):
+            continue
+        if _in_b64url_query_param(m.start(), m.end()):
             continue
         # Only flag alnum if it wasn't already caught by B64/hex
         val = m.group()

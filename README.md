@@ -704,6 +704,9 @@ Inline `<script>` blocks are stripped from HTML before scanning to avoid minifie
 | Candidate contains URL characters | The string itself contains `://` (protocol separator) or a percent-encoded sequence (`%XX`) — indicates URL data, not key material |
 | Facebook CDN signature param proximity | The 300-char window around the candidate contains a Facebook CDN signature parameter (`&oh=`, `&oe=`, `&_nc_cat=`, `&_nc_sid=`, `&_nc_ohc=`, `&_nc_ht=`, `&ccb=`) — these appear exclusively in Facebook CDN URLs; adjacent high-entropy strings are CDN cache/auth tokens, never secrets |
 | Facebook/Instagram CDN domain (wide window) | The 300-char window contains `facebook.com`, `fbcdn.net`, `fbsbx.com`, or `cdninstagram.com` — catches base64url token fragments (alphanumeric parts of `oh=`-style values) whose CDN hostname falls beyond the 200-char range of the standard CDN host check |
+| Base64url fragment in query param (>60 chars) | Alphanumeric match is adjacent to a `-` or `_` (base64url separator), a `?name=` or `&name=` assignment appears in the 150-char look-behind, and reconstructing the full base64url token (expanding through `[A-Za-z0-9_-=]` chars) gives a length >60 — OAuth tokens, authorization codes, PKCE verifiers, and cryptographic signatures, never API keys |
+
+**Length-based threshold** — for any candidate string longer than 80 characters the entropy threshold is raised to **5.2** (from the per-class default of 4.5/4.0/3.8). Long base64url-encoded payloads (PKCE verifiers, JWT signatures, multi-part tokens) regularly exceed the standard threshold but are almost never application secrets.
 
 Deduplicates by the first 8 characters of each flagged string to avoid repeated alerts for the same token across pages.
 
