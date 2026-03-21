@@ -13270,7 +13270,7 @@ def _race_run_burst(url: str, method: str) -> list:
         t.start()
     for t in threads:
         t.join(timeout=_RACE_TIMEOUT + 2)
-    return [(s, ms, b) for s, ms, b in results if s is not None]
+    return [r for r in results if r is not None and len(r) == 3 and r[0] is not None]
 
 
 # ── Response-analysis helpers ─────────────────────────────────────────────────
