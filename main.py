@@ -5082,6 +5082,19 @@ def _tutorial_note(alert_type: str) -> str:
             "Use MXToolbox or dig to confirm the DNS record state. "
             "Include the raw DNS response in your report."
         )
+    elif "race condition" in atype:
+        guidance = (
+            "Confirm the finding is reproducible by running the burst manually using curl "
+            "or Burp Suite's Turbo Intruder. Send 10 simultaneous requests and check if "
+            "multiple succeed where only one should. "
+            "Confirm impact by checking if multiple distinct resource IDs, tokens, or "
+            "confirmations are returned across the concurrent responses — identical responses "
+            "indicate idempotency, not a race condition. "
+            "Only test on your own account and authorized targets. "
+            "Do not attempt to redeem coupons, complete purchases, or obtain goods/services "
+            "— confirm the vulnerability exists and stop. "
+            "Document the concurrent request burst and response differences as proof of concept."
+        )
     else:
         return ""
 

@@ -1271,6 +1271,41 @@ Applied to: SQL injection (diffing + DB-specific time payloads), command injecti
 
 ---
 
+## Tutorial Mode
+
+Enable with `--tutorial` (CLI) or the **Tutorial Mode** toggle in the UI (off by default).
+
+When active, NuScrape appends a `HOW TO VERIFY` block to the stored detail of each finding. The block is invisible in the console (to keep terminal output clean) but appears in the Flask UI as a collapsible **▶ How to verify** section under each finding row.
+
+Every block opens with the authorisation note:
+
+> ⚠ Only test on authorized targets covered by a bug bounty program or with explicit written permission.
+
+Followed by finding-specific verification steps:
+
+| Finding type | Keyword matched | Guidance summary |
+|---|---|---|
+| SQL Injection | `sql inject` | Reproduce with curl, confirm error message is consistent; do NOT extract data |
+| Command Injection | `command inject`, `cmdi` | Confirm canary appears as plain text output, not URL-encoded in an attribute |
+| SSRF | `ssrf` | Use interact.sh to confirm outbound DNS/HTTP; document the interaction as proof |
+| IDOR | `idor` | Use two test accounts; access B's resources with A's session; never touch real user data |
+| Subdomain Takeover | `takeover` | Confirm CNAME returns service-specific 404; verify namespace is unclaimed; do NOT claim it |
+| XSS | `xss` | Confirm payload executes in browser; use `alert(1)` only; document with screenshot |
+| Open Redirect | `open redirect` | Confirm `Location` header contains injected URL; demonstrate additional impact for higher severity |
+| JWT (any) | `jwt` | Crack with PyJWT, forge token with fake claim value; do NOT use forged token against real endpoints |
+| Default Credentials | `default credential` | Confirm authenticated content in body (logout button, dashboard); bare 200 is not sufficient |
+| Mass Assignment | `mass assignment` | Send GET after POST to confirm field persisted; use `false`/`none`, never `true`/`admin` |
+| Path Traversal | `path traversal` | Check `/etc/hostname` (safe); do NOT read `/etc/passwd` or private keys |
+| Missing Security Headers | `missing hsts/csp/x-frame/…`, `security header` | Confirm with `curl -I`; informational — combine with impact demo for higher severity |
+| SPF / DMARC | `spf`, `dmarc` | Confirm DNS record state with MXToolbox or `dig`; include raw DNS response in report |
+| Race Condition | `race condition` | Re-run burst with Turbo Intruder (10 simultaneous); confirm distinct IDs/tokens in responses; identical responses indicate idempotency; do NOT redeem coupons or complete purchases — confirm and stop |
+
+Findings with no matching keyword receive no tutorial block and are stored unchanged.
+
+The `HOW TO VERIFY:` marker in the detail string is used by the Flask UI to split the main finding text from the collapsible section — the format is stable and safe to parse in custom tooling.
+
+---
+
 ## Database
 
 All findings are stored in `ScrapeDB` (SQLite) in the same directory as `main.py`. The database persists between runs and accumulates findings across multiple scans.
