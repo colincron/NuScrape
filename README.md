@@ -1281,24 +1281,24 @@ Every block opens with the authorisation note:
 
 > ⚠ Only test on authorized targets covered by a bug bounty program or with explicit written permission.
 
-Followed by finding-specific verification steps:
+Followed by finding-specific verification steps. Each entry includes concrete numbered steps with `curl` and/or Python commands ready to adapt:
 
-| Finding type | Keyword matched | Guidance summary |
+| Finding type | Keyword matched | Verification approach |
 |---|---|---|
-| SQL Injection | `sql inject` | Reproduce with curl, confirm error message is consistent; do NOT extract data |
-| Command Injection | `command inject`, `cmdi` | Confirm canary appears as plain text output, not URL-encoded in an attribute |
-| SSRF | `ssrf` | Use interact.sh to confirm outbound DNS/HTTP; document the interaction as proof |
-| IDOR | `idor` | Use two test accounts; access B's resources with A's session; never touch real user data |
-| Subdomain Takeover | `takeover` | Confirm CNAME returns service-specific 404; verify namespace is unclaimed; do NOT claim it |
-| XSS | `xss` | Confirm payload executes in browser; use `alert(1)` only; document with screenshot |
-| Open Redirect | `open redirect` | Confirm `Location` header contains injected URL; demonstrate additional impact for higher severity |
-| JWT (any) | `jwt` | Crack with PyJWT, forge token with fake claim value; do NOT use forged token against real endpoints |
-| Default Credentials | `default credential` | Confirm authenticated content in body (logout button, dashboard); bare 200 is not sufficient |
-| Mass Assignment | `mass assignment` | Send GET after POST to confirm field persisted; use `false`/`none`, never `true`/`admin` |
-| Path Traversal | `path traversal` | Check `/etc/hostname` (safe); do NOT read `/etc/passwd` or private keys |
-| Missing Security Headers | `missing hsts/csp/x-frame/…`, `security header` | Confirm with `curl -I`; informational — combine with impact demo for higher severity |
-| SPF / DMARC | `spf`, `dmarc` | Confirm DNS record state with MXToolbox or `dig`; include raw DNS response in report |
-| Race Condition | `race condition` | Re-run burst with Turbo Intruder (10 simultaneous); confirm distinct IDs/tokens in responses; identical responses indicate idempotency; do NOT redeem coupons or complete purchases — confirm and stop |
+| SQL Injection | `sql inject` | (1) `curl` the parameter with a trailing `'` and grep for DB error strings; (2) safe time-based check with `SLEEP(2)` — measure `%{time_total}` with `curl -w`; do NOT extract data |
+| Command Injection | `command inject`, `cmdi` | (1) `curl` with `%3Becho%20verify-123` and look for plain-text `verify-123` in response body (not inside a URL or attribute); (2) document with `curl -v`; do NOT run destructive commands |
+| SSRF | `ssrf` | (1) Register an interact.sh session via API; (2) inject subdomain as the parameter value; (3) poll interact.sh for DNS/HTTP callbacks — target IP in callback = confirmed |
+| IDOR | `idor` | (1) Two test accounts (A and B); (2) `curl` Account B's resource ID with Account A's `Authorization` header; (3) Account B's data in response = confirmed; use test accounts only |
+| Subdomain Takeover | `takeover` | (1) `dig CNAME` to confirm dangling record; (2) `curl` subdomain for unclaimed-service fingerprint; (3) `curl` service's org/app namespace for 404 (unregistered); do NOT claim the resource |
+| XSS | `xss` | (1) `curl` with `<script>alert(1)</script>` payload and grep response for `script`; (2) open URL in browser and confirm alert fires; (3) screenshot the dialog; use `alert(1)` only |
+| Open Redirect | `open redirect` | (1) `curl -o /dev/null -w '%{redirect_url}'` — if `Location` contains the injected domain, confirmed; (2) craft a realistic phishing URL to demonstrate impact |
+| JWT | `jwt` | Python one-liner: iterate common secrets with `jwt.decode()` in a `try/except`; print cracked secret and decoded payload; do NOT forge tokens to access other accounts |
+| Default Credentials | `default credential` | (1) `curl` admin path and grep body for service-specific signatures (`adminer`, `Select database`, `Dashboard`); (2) POST default credentials and grep response for authenticated content; document and stop |
+| Mass Assignment | `mass assignment` | (1) POST with injected field (`"role":"test-role-probe"`); (2) GET same endpoint and grep for `test-role-probe`; if the string appears in GET response, field persisted — confirmed; use `false`/`none` values only |
+| Path Traversal | `path traversal` | (1) `curl` with `../../../etc/hostname` — `/etc/hostname` contains only the server hostname, safe to read; (2) confirm response is a hostname string, not an error; do NOT read `/etc/passwd` or private keys |
+| Missing Security Headers | `missing hsts/csp/x-frame/…`, `security header` | `curl -sI` and grep for `strict-transport`, `x-frame`, `x-content-type`, `content-security`; absent = missing; informational — combine with impact demo for higher severity |
+| SPF / DMARC | `spf`, `dmarc` | (1) `dig TXT target.com` → grep `v=spf`; (2) `dig TXT _dmarc.target.com` → grep `v=DMARC`; (3) `dig TXT default._domainkey.target.com` for DKIM; include raw `dig` output in report |
+| Race Condition | `race condition` | Python: spin up 10 `threading.Thread` instances all calling `requests.post()` simultaneously; collect `(status_code, body[:100])` tuples; distinct IDs/tokens across responses = confirmed race; do NOT complete purchases or redeem coupons |
 
 Findings with no matching keyword receive no tutorial block and are stored unchanged.
 

