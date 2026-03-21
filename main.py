@@ -5975,6 +5975,9 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                 # Race condition — barrier-synchronised simultaneous probing of
                 # state-changing endpoints (coupon, reset, payment, vote, etc.)
                 check_race_condition(url, html)
+                # HTTP Parameter Pollution — duplicate-param parsing discrepancy,
+                # WAF bypass via split payloads, first/last-wins detection
+                check_hpp(url, html)
             # IDOR candidate detection — runs in background thread with timeout
             # to prevent hung verification requests stalling the crawl
             _idor_thread = threading.Thread(
@@ -10815,6 +10818,272 @@ def check_race_condition(page_url: str, html_content) -> None:
 
 
 # ─────────────────────────────────────────────
+# HTTP Parameter Pollution (HPP) detection
+# ─────────────────────────────────────────────
+
+_HPP_XSS_SPLIT = ("<scr", "ipt>")   # split across two param values to evade WAF concat checks
+_HPP_CANARY    = "nuscrape-hpp"      # benign canary reflected in response → parsing discrepancy
+_hpp_tested: set = set()             # (base_url, param) pairs already probed
+
+
+def check_hpp(page_url: str, html_content) -> None:
+    """
+    HTTP Parameter Pollution detection.
+
+    For each URL query parameter found on the page (current URL + linked hrefs
+    + form actions), sends three probes:
+
+      1. Duplicate order-A  ?param=orig&param=canary  — does the server use the
+         second value?  (reverse: ?param=canary&param=orig)
+      2. WAF bypass split  ?param=<scr&param=ipt>alert(1)</script>  — does
+         duplicating split a payload around a WAF filter boundary?
+      3. Frontend/backend discrepancy  ?param=safe&param=payload  — does the
+         response body echo either value unexpectedly?
+
+    Severity:
+      HIGH   — duplicate parameter changes auth/session-relevant response
+               (cookie Set, redirect to admin path, privilege keyword in body)
+      MEDIUM — WAF bypass confirmed (first request blocked/400, second not) OR
+               canary reflected only from second value, not first
+      LOW    — canary appears in response at all (unexpected behaviour worth noting)
+
+    Detection only — no destructive payloads, no session manipulation beyond
+    confirming parsing behaviour.
+    Deduplicates per (base_url, param).
+    8-second timeout per probe.
+    Only called when --active-probes is enabled.
+    """
+    if not is_in_scope(page_url):
+        return
+    domain = urlparse(page_url).netloc
+    if is_third_party_cdn(domain):
+        return
+
+    try:
+        text = html_content if isinstance(html_content, str) \
+               else html_content.decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(text, "lxml")
+    except Exception:
+        return
+
+    # Build candidate URL list: current page + hrefs + form actions
+    all_urls = [page_url]
+    for tag in soup.find_all(["a", "form"]):
+        href = tag.get("href") or tag.get("action") or ""
+        if href:
+            all_urls.append(href)
+
+    waf_note = ""
+    waf_vendor = _waf_results.get(domain)
+    if waf_vendor:
+        waf_note = f" [WAF: {waf_vendor} detected]"
+
+    for raw_url in all_urls:
+        try:
+            resolved = urljoin(page_url, raw_url)
+            parsed   = urlparse(resolved)
+            if is_third_party_cdn(parsed.netloc):
+                continue
+            if not parsed.query:
+                continue
+            if _SQLI_STATIC_RE.search(parsed.path):
+                continue
+            base = parsed.scheme + "://" + parsed.netloc + parsed.path
+            # Preserve all params in insertion order
+            param_pairs: list[tuple[str, str]] = []
+            for pair in parsed.query.split("&"):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    param_pairs.append((k, v))
+        except Exception:
+            continue
+
+        if not param_pairs:
+            continue
+
+        for param, orig_val in param_pairs:
+            test_key = (base, param)
+            if test_key in _hpp_tested:
+                continue
+            _hpp_tested.add(test_key)
+
+            print(timestamp() + f" HPP probe: {base} param={param}")
+            stealth_delay(domain)
+
+            # Build the baseline query string (original, single values)
+            def _qs(overrides: dict[str, list[str]]) -> str:
+                """Build a query string; overrides replaces values for named params."""
+                parts = []
+                seen = set()
+                for k, v in param_pairs:
+                    if k in overrides and k not in seen:
+                        for ov in overrides[k]:
+                            parts.append(f"{k}={ov}")
+                        seen.add(k)
+                    elif k not in overrides:
+                        parts.append(f"{k}={v}")
+                return "&".join(parts)
+
+            # ── Baseline ─────────────────────────────────────────────────────
+            baseline_url = base + "?" + _qs({})
+            try:
+                baseline_resp = _get_session().get(
+                    baseline_url,
+                    headers=create_request_header(),
+                    timeout=8,
+                    allow_redirects=True,
+                    verify=False,
+                )
+                baseline_status = baseline_resp.status_code
+                baseline_body   = baseline_resp.text or ""
+            except Exception:
+                continue
+
+            # ── Probe 1A: orig first, canary second ?param=orig&param=canary ─
+            url_1a = base + "?" + _qs({param: [orig_val, _HPP_CANARY]})
+            # ── Probe 1B: canary first, orig second ?param=canary&param=orig ─
+            url_1b = base + "?" + _qs({param: [_HPP_CANARY, orig_val]})
+
+            body_1a = body_1b = ""
+            status_1a = status_1b = None
+            cookies_1a: dict = {}
+            try:
+                r = _get_session().get(url_1a, headers=create_request_header(),
+                                       timeout=8, allow_redirects=True, verify=False)
+                status_1a = r.status_code
+                body_1a   = r.text or ""
+                cookies_1a = dict(r.cookies)
+                stealth_delay(domain)
+            except Exception:
+                pass
+            try:
+                r = _get_session().get(url_1b, headers=create_request_header(),
+                                       timeout=8, allow_redirects=True, verify=False)
+                status_1b = r.status_code
+                body_1b   = r.text or ""
+                stealth_delay(domain)
+            except Exception:
+                pass
+
+            # ── Probe 2: WAF-bypass split ?param=<scr&param=ipt>... ──────────
+            # First send the full unsplit payload — if blocked it supports bypass theory
+            xss_full = f"{_HPP_XSS_SPLIT[0]}{_HPP_XSS_SPLIT[1]}alert(1)</script>"
+            url_xss_single = base + "?" + _qs({param: [xss_full]})
+            url_xss_split  = base + "?" + _qs({param: [_HPP_XSS_SPLIT[0],
+                                                        _HPP_XSS_SPLIT[1] + "alert(1)</script>"]})
+            status_xss_single = status_xss_split = None
+            body_xss_split = ""
+            try:
+                r = _get_session().get(url_xss_single, headers=create_request_header(),
+                                       timeout=8, allow_redirects=False, verify=False)
+                status_xss_single = r.status_code
+                stealth_delay(domain)
+            except Exception:
+                pass
+            try:
+                r = _get_session().get(url_xss_split, headers=create_request_header(),
+                                       timeout=8, allow_redirects=False, verify=False)
+                status_xss_split = r.status_code
+                body_xss_split   = r.text or ""
+                stealth_delay(domain)
+            except Exception:
+                pass
+
+            # ── Analysis ─────────────────────────────────────────────────────
+            _AUTH_KEYWORDS = frozenset({
+                "admin", "dashboard", "privilege", "role", "superuser",
+                "moderator", "staff", "welcome", "logged in", "sign out",
+            })
+
+            detail_prefix = (
+                f"HTTP Parameter Pollution on param '{param}' at {base} — "
+                f"original value: {orig_val!r}.{waf_note}"
+            )
+
+            # HIGH — duplicate param triggers auth/session change
+            auth_hit = False
+            for body_check, lbl in [(body_1a, "second-value"), (body_1b, "first-value")]:
+                if any(kw in body_check.lower() for kw in _AUTH_KEYWORDS) \
+                        and not any(kw in baseline_body.lower() for kw in _AUTH_KEYWORDS):
+                    alert(
+                        "HTTP PARAMETER POLLUTION (AUTH/PRIVILEGE CHANGE)",
+                        "HIGH",
+                        base,
+                        detail_prefix + (
+                            f" Duplicating param with canary ({lbl} taken) introduced "
+                            f"auth/privilege keywords absent in baseline. "
+                            f"Values tested: {orig_val!r} + {_HPP_CANARY!r}."
+                        ),
+                    )
+                    print(timestamp() + f" [!!] HPP auth change on param={param} at {base}")
+                    auth_hit = True
+                    break
+
+            if auth_hit:
+                continue
+
+            # MEDIUM — WAF bypass: single payload blocked (4xx) but split succeeded (2xx)
+            if (status_xss_single is not None and status_xss_split is not None
+                    and status_xss_single in (400, 403, 406, 429)
+                    and status_xss_split not in (400, 403, 406, 429)):
+                alert(
+                    "HTTP PARAMETER POLLUTION (WAF BYPASS)",
+                    "MEDIUM",
+                    base,
+                    detail_prefix + (
+                        f" Single-param XSS payload returned {status_xss_single} (blocked), "
+                        f"but split across two duplicate params returned {status_xss_split} "
+                        f"(not blocked) — WAF may concatenate or use only one value. "
+                        f"Split payload: {_HPP_XSS_SPLIT[0]!r} + {_HPP_XSS_SPLIT[1]!r}."
+                    ),
+                )
+                print(timestamp() + f" [!] HPP WAF bypass on param={param} at {base}")
+                continue
+
+            # MEDIUM — canary only reflected when it is the second (last-wins) value
+            canary_in_1a = _HPP_CANARY in body_1a   # canary is second — reflected if last-wins
+            canary_in_1b = _HPP_CANARY in body_1b   # canary is first  — reflected if first-wins
+            if canary_in_1a and not canary_in_1b:
+                alert(
+                    "HTTP PARAMETER POLLUTION (LAST-WINS PARSING)",
+                    "MEDIUM",
+                    base,
+                    detail_prefix + (
+                        f" Canary '{_HPP_CANARY}' reflected only when it is the second "
+                        f"(last) duplicate value — server uses last occurrence. "
+                        f"Probes: {url_1a!r} (canary reflected) vs {url_1b!r} (not reflected)."
+                    ),
+                )
+                print(timestamp() + f" [!] HPP last-wins on param={param} at {base}")
+            elif canary_in_1b and not canary_in_1a:
+                alert(
+                    "HTTP PARAMETER POLLUTION (FIRST-WINS PARSING)",
+                    "MEDIUM",
+                    base,
+                    detail_prefix + (
+                        f" Canary '{_HPP_CANARY}' reflected only when it is the first "
+                        f"duplicate value — server uses first occurrence. "
+                        f"Probes: {url_1b!r} (canary reflected) vs {url_1a!r} (not reflected)."
+                    ),
+                )
+                print(timestamp() + f" [!] HPP first-wins on param={param} at {base}")
+
+            # LOW — canary appears in either response (unexpected parameter behaviour)
+            elif canary_in_1a or canary_in_1b:
+                alert(
+                    "HTTP PARAMETER POLLUTION (UNEXPECTED REFLECTION)",
+                    "LOW",
+                    base,
+                    detail_prefix + (
+                        f" Canary '{_HPP_CANARY}' reflected in response to duplicate-param "
+                        f"probe — server processes duplicate values in an unexpected way. "
+                        f"Reflected in: {'both probes' if canary_in_1a and canary_in_1b else '1A' if canary_in_1a else '1B'}."
+                    ),
+                )
+                print(timestamp() + f" [*] HPP canary reflection on param={param} at {base}")
+
+
+# ─────────────────────────────────────────────
 # IDOR parameter detection (with auto-verification)
 # ─────────────────────────────────────────────
 
@@ -11467,7 +11736,7 @@ def _reset_per_domain_state() -> None:
     global _sqli_tested, _sqli_domains, _cmdi_tested, _cmdi_domains
     global _ldapi_tested, _ldapi_form_tested
     global _deserial_passive_seen, _deserial_active_tested
-    global _price_tested, _jwt_tested
+    global _price_tested, _jwt_tested, _hpp_tested
     global _idor_tested, _takeover_checked, _s3_checked, _s3_permutation_checked
     global _subdomain_enriched, _ct_queried, _cookie_seen, _js_analysis_threads
     _zone_transfer_checked  = set()
@@ -11516,6 +11785,7 @@ def _reset_per_domain_state() -> None:
     _deserial_active_tested = set()
     _price_tested           = set()
     _jwt_tested             = set()
+    _hpp_tested             = set()
     _idor_tested            = set()
     _takeover_checked       = set()
     _s3_checked             = set()
