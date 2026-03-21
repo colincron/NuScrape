@@ -8605,30 +8605,106 @@ def check_open_redirects(page_url, html_content):
 # Mass assignment detection
 # ─────────────────────────────────────────────
 
-# Field names that should never be accepted from client input but are
-# commonly left writable in frameworks that auto-bind request bodies
-# to model objects (Rails, Spring, Django, Laravel, etc.).
-_MASS_ASSIGN_FIELDS = [
-    "role", "admin", "is_admin", "isAdmin", "user_role", "permission",
-    "permissions", "is_superuser", "verified", "is_verified", "balance",
-    "credits", "group_id",
-]
+# High-value fields — flag as HIGH / CRITICAL when confirmed.
+# All boolean fields are injected as False; string fields use recognisable
+# probe tokens; numeric fields use 0.  None of these values can grant
+# elevated access if accidentally persisted.
+_MA_HIGH_FIELDS: dict = {
+    "role":              "test-role-probe",
+    "user_role":         "test-role-probe",
+    "group":             "test-group-probe",
+    "admin":             False,
+    "is_admin":          False,
+    "isAdmin":           False,
+    "permission":        "none",
+    "permissions":       "none",
+    "verified":          False,
+    "is_verified":       False,
+    "email_verified":    False,
+    "balance":           0,
+    "credits":           0,
+    "points":            0,
+    "subscription_tier": "test-tier-probe",
+    "plan":              "test-plan-probe",
+}
 
-_mass_assign_tested = set()
+# Medium-value fields — flag as MEDIUM when confirmed.
+_MA_MEDIUM_FIELDS: dict = {
+    "status":         "test-status-probe",
+    "account_status": "test-status-probe",
+    "activated":      False,
+    "disabled":       False,
+    "internal":       False,
+    "debug":          False,
+}
 
-def check_mass_assignment(page_url, html_content):
+# Noisy / always-present fields — skip entirely.
+_MA_SKIP_FIELDS: frozenset = frozenset({
+    "created_at", "updated_at", "created", "updated",
+    "id", "uuid", "timestamp", "date", "time",
+})
+
+# Static file extensions — skip these endpoints entirely.
+_MA_STATIC_EXT_RE = re.compile(
+    r'\.(?:js|css|png|jpe?g|gif|svg|ico|woff2?|ttf|eot|map|txt|xml|pdf|zip|gz)$',
+    re.IGNORECASE,
+)
+
+# Timestamp / session-token noise — masked before response diffing so that
+# rotating session values don't produce false "meaningful diff" signals.
+_MA_NOISE_RE = re.compile(
+    r'\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\s"\'<>]{0,25}\b'
+    r'|\b\d{10,13}\b'
+    r'|[0-9a-fA-F]{32,}',
+)
+
+_mass_assign_tested: set = set()
+
+
+def check_mass_assignment(page_url: str, html_content) -> None:
     """
-    Discover POST/PUT endpoints from page forms, inject the sensitive field
-    names alongside legitimate form fields, and check whether any injected
-    name appears reflected in the response body or headers.
+    Two-stage mass assignment detection for JSON-accepting API endpoints.
 
-    A reflection indicates the server accepted and echoed the field — strong
-    signal that mass assignment is possible. Flags HIGH; manual verification
-    of whether the server *processed* (not just echoed) the field is required.
+    Stage 0 — Baseline:
+      Sends the original request body (no injected fields) and records the
+      response.  Only continues to Stage 1 if the endpoint returns JSON.
 
-    Only runs when --active-probes is enabled. Deduplicates per endpoint URL.
+    Stage 1 — Inject and capture:
+      Sends a probe request with each sensitive field set to a safe,
+      clearly-fake test value.  Compares the probe response against the
+      baseline after masking timestamps and session tokens.  Only proceeds
+      if the diff is meaningful AND a test value or field name is newly
+      present in the probe response.
+
+    Stage 2 — Verify persistence:
+      Immediately sends a clean GET to the same endpoint.  If any injected
+      string test value (e.g. "test-role-probe") appears in the GET response,
+      the field was persisted server-side and the finding is CONFIRMED.
+      Otherwise it is reported as NEEDS VERIFICATION.
+
+    Safe test values — all boolean fields are injected as False; string
+    privilege fields use recognisable probe tokens ("test-role-probe",
+    "none", "test-tier-probe"); numeric fields use 0.  None of these values
+    can grant elevated access if accidentally persisted.
+
+    Field tiers:
+      HIGH    — role, user_role, group, admin, is_admin, permission,
+                verified, balance, credits, subscription_tier, plan
+      MEDIUM  — status, account_status, activated, disabled, internal, debug
+      Skipped — created_at, updated_at, id, uuid (noisy / always present)
+
+    Endpoint filter:
+      Only tests POST/PUT/PATCH endpoints that return JSON responses and
+      are not static file paths or third-party CDN domains.
+
+    Only runs when --active-probes is enabled.
+    Deduplicates per endpoint URL.  8-second timeout per probe.
     """
+    if not is_in_scope(page_url):
+        return
     domain = urlparse(page_url).netloc
+    if is_third_party_cdn(domain):
+        return
 
     try:
         text = html_content if isinstance(html_content, str) \
@@ -8637,72 +8713,177 @@ def check_mass_assignment(page_url, html_content):
     except Exception:
         return
 
-    # Build a list of (endpoint_url, method, base_fields) from page forms
+    # ── Collect endpoints ─────────────────────────────────────────────────
     endpoints = []
     for form in soup.find_all("form"):
         method = form.get("method", "get").upper()
-        if method not in ("POST", "PUT"):
+        if method not in ("POST", "PUT", "PATCH"):
             continue
-        action = form.get("action") or page_url
+        action       = form.get("action") or page_url
         endpoint_url = urljoin(page_url, action)
-        # Stay in scope — skip cross-origin form actions
         if urlparse(endpoint_url).netloc != domain:
             continue
-        # Collect existing field values to send alongside injected fields
+        if _MA_STATIC_EXT_RE.search(urlparse(endpoint_url).path):
+            continue
         fields = {}
         for inp in form.find_all(["input", "textarea", "select"]):
             name = inp.get("name", "")
             val  = inp.get("value") or "test"
-            if name and inp.get("type", "").lower() not in ("submit", "button", "image", "reset"):
+            itype = inp.get("type", "").lower()
+            if name and itype not in ("submit", "button", "image", "reset", "file"):
                 fields[name] = val
         endpoints.append((endpoint_url, method, fields))
 
-    # Also probe the current page URL if it looks like a REST API endpoint
+    # Also probe REST-style page URLs
     parsed_page = urlparse(page_url)
-    if any(seg in parsed_page.path for seg in ("/api/", "/v1/", "/v2/", "/v3/", "/rest/")):
-        endpoints.append((page_url, "POST", {}))
+    if any(seg in parsed_page.path
+           for seg in ("/api/", "/v1/", "/v2/", "/v3/", "/v4/", "/rest/")):
+        if not _MA_STATIC_EXT_RE.search(parsed_page.path):
+            endpoints.append((page_url, "POST", {}))
 
+    # ── Per-endpoint probing ──────────────────────────────────────────────
     for endpoint_url, method, base_fields in endpoints:
         if endpoint_url in _mass_assign_tested:
             continue
         _mass_assign_tested.add(endpoint_url)
 
-        # Build payload: existing fields + all injected sensitive fields
-        payload = dict(base_fields)
-        injected = {}
-        for field in _MASS_ASSIGN_FIELDS:
-            if field not in payload:
-                # Use truthy values to maximise chance of reflection
-                injected[field] = True if ("is_" in field or field in ("admin", "verified")) else 1
-        payload.update(injected)
+        if is_third_party_cdn(urlparse(endpoint_url).netloc):
+            continue
 
+        # Determine which fields to inject — skip any already in base_fields
+        # or in the noisy skip-list.
+        inj_high   = {k: v for k, v in _MA_HIGH_FIELDS.items()
+                      if k not in base_fields and k not in _MA_SKIP_FIELDS}
+        inj_medium = {k: v for k, v in _MA_MEDIUM_FIELDS.items()
+                      if k not in base_fields and k not in _MA_SKIP_FIELDS}
+        inj_all    = {**inj_high, **inj_medium}
+        if not inj_all:
+            continue
+
+        probe_headers = {**create_request_header(), "Content-Type": "application/json"}
+
+        # ── Stage 0: Baseline (no injected fields) ────────────────────────
         try:
             stealth_delay(domain)
-            resp = _get_session().request(
-                method,
-                endpoint_url,
-                json=payload,
-                headers={**create_request_header(), "Content-Type": "application/json"},
-                timeout=6,
+            bl_resp = _get_session().request(
+                method, endpoint_url,
+                json=base_fields or {},
+                headers=probe_headers,
+                timeout=8,
                 allow_redirects=False,
                 verify=False,
             )
-            body             = resp.text
-            resp_headers_str = str(dict(resp.headers))
-            reflected = [f for f in injected if f in body or f in resp_headers_str]
-            if reflected:
-                alert(
-                    "MASS ASSIGNMENT CANDIDATE",
-                    "HIGH",
-                    endpoint_url,
-                    f"{method} {endpoint_url} reflected injected field(s): "
-                    f"{', '.join(reflected)} — verify manually whether the server "
-                    f"accepted and processed these privileged fields"
-                )
-                print(timestamp() + f" [!!] Mass assignment candidate: {endpoint_url} "
-                                    f"reflected: {', '.join(reflected)}")
-        except Exception as e:
-            print_error(f"check_mass_assignment failed for {endpoint_url}: {e}")
+            bl_ct   = bl_resp.headers.get("Content-Type", "").lower()
+            bl_body = bl_resp.text or ""
+            bl_status = bl_resp.status_code
+        except Exception:
+            continue
+
+        # Only test JSON endpoints
+        if "json" not in bl_ct:
+            continue
+
+        # ── Stage 1: Probe with injected fields ───────────────────────────
+        probe_payload = {**base_fields, **inj_all}
+        try:
+            stealth_delay(domain)
+            pr_resp = _get_session().request(
+                method, endpoint_url,
+                json=probe_payload,
+                headers=probe_headers,
+                timeout=8,
+                allow_redirects=False,
+                verify=False,
+            )
+            pr_body   = pr_resp.text or ""
+            pr_status = pr_resp.status_code
+        except Exception:
+            continue
+
+        # ── Response diff gate ────────────────────────────────────────────
+        bl_masked = _MA_NOISE_RE.sub("__X__", bl_body)
+        pr_masked = _MA_NOISE_RE.sub("__X__", pr_body)
+        len_bl    = max(len(bl_masked), 1)
+        len_delta = abs(len(pr_masked) - len(bl_masked))
+        diff_meaningful = (
+            pr_status != bl_status
+            or (len_delta > 50 and len_delta / len_bl > 0.05)
+        )
+        # Also allow through when a distinctive string test value newly appears
+        new_str_values = [
+            (k, v) for k, v in inj_all.items()
+            if isinstance(v, str) and v in pr_body and v not in bl_body
+        ]
+        if not diff_meaningful and not new_str_values:
+            continue
+
+        # ── Identify reflected fields (new in probe, absent in baseline) ──
+        def _is_reflected(field: str, val) -> bool:
+            name_new  = field in pr_body and field not in bl_body
+            val_new   = isinstance(val, str) and val in pr_body and val not in bl_body
+            return name_new or val_new
+
+        ref_high   = [(k, v) for k, v in inj_high.items()   if _is_reflected(k, v)]
+        ref_medium = [(k, v) for k, v in inj_medium.items() if _is_reflected(k, v)]
+        reflected  = ref_high + ref_medium
+        if not reflected:
+            continue
+
+        print(timestamp() + f" [*] Mass assignment Stage 1: {endpoint_url} "
+              f"reflected {[k for k, _ in reflected]}")
+
+        # ── Stage 2: Verify persistence via GET ───────────────────────────
+        confirmed: set = set()
+        try:
+            stealth_delay(domain)
+            get_resp = _get_session().get(
+                endpoint_url,
+                headers=create_request_header(),
+                timeout=8,
+                allow_redirects=True,
+                verify=False,
+            )
+            get_body = get_resp.text or ""
+            for field, val in reflected:
+                if isinstance(val, str) and val in get_body:
+                    confirmed.add(field)
+        except Exception:
+            get_body = ""
+
+        # ── Alert ─────────────────────────────────────────────────────────
+        for field, val in reflected:
+            is_confirmed = field in confirmed
+            tier_high    = field in inj_high
+            if is_confirmed and tier_high:
+                sev   = "CRITICAL"
+                title = "MASS ASSIGNMENT — CONFIRMED"
+            elif is_confirmed:
+                sev   = "HIGH"
+                title = "MASS ASSIGNMENT — CONFIRMED"
+            elif tier_high:
+                sev   = "HIGH"
+                title = "MASS ASSIGNMENT CANDIDATE"
+            else:
+                sev   = "MEDIUM"
+                title = "MASS ASSIGNMENT CANDIDATE"
+
+            conf_note = (
+                "CONFIRMED — injected value persisted in subsequent GET response"
+                if is_confirmed else
+                "NEEDS VERIFICATION — reflected in probe response only; "
+                "persistence not confirmed"
+            )
+            detail = (
+                f"{method} {endpoint_url} accepted injected field "
+                f"'{field}' = {val!r} (safe test value). "
+                f"Field was reflected in the {method} response body. "
+                f"Confirmation: {conf_note}. "
+                f"Verify manually whether the server processed this "
+                f"privileged field."
+            )
+            alert(title, sev, endpoint_url, detail)
+            print(timestamp() + f" [!!] {title}: {endpoint_url} "
+                  f"field={field!r} val={val!r} confirmed={is_confirmed}")
 
 
 # ─────────────────────────────────────────────

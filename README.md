@@ -255,7 +255,46 @@ Parses all links on every crawled page looking for 30 common redirect parameter 
 ---
 
 #### Mass Assignment Detection
-For each POST/PUT form endpoint found on crawled pages, sends the normal form fields plus a set of 13 privileged field names (`role`, `admin`, `is_admin`, `isAdmin`, `user_role`, `permissions`, `is_superuser`, `verified`, `balance`, `credits`, `group_id`, etc.) in a JSON body. If any injected field name appears in the response body or headers, the server reflected it — strong indicator that the field was bound to a model object. Also probes the current URL directly when the path contains `/api/`, `/v1/`, `/v2/`, or `/rest/`. Requires `--active-probes`. Deduplicated per endpoint URL. **HIGH** — manual verification required to confirm the server processed (not just echoed) the field.
+
+Three-stage detection for JSON-accepting API endpoints. Requires `--active-probes`. Deduplicated per endpoint URL. 8-second timeout per probe.
+
+**Endpoint discovery:**
+- POST/PUT/PATCH form actions on each crawled page (same-domain only)
+- REST-style page URLs whose path contains `/api/`, `/v1/`–`/v4/`, or `/rest/`
+- Skips static file extensions (`.js`, `.css`, `.png`, `.woff2`, etc.) and third-party CDN domains
+
+**Three-stage confirmation flow:**
+
+| Stage | Action | Gate |
+|---|---|---|
+| 0 — Baseline | Send original fields (no injection) as JSON | Skip if response `Content-Type` is not JSON |
+| 1 — Inject & capture | Send all injected fields with safe test values | Skip if response diff is not meaningful AND no string probe value newly appears |
+| 2 — Verify persistence | Clean GET to the same endpoint | If any injected string value appears in the GET body → field is **CONFIRMED** persisted |
+
+**Response diff gate (Stage 1):** A diff is considered meaningful when the noise-masked response length delta is >50 bytes and >5% of baseline, or when the HTTP status code changes. Timestamps, epoch integers, and long hex strings are masked by `_MA_NOISE_RE` before comparison to avoid session-token noise producing false signals.
+
+**Safe test values — no value can grant elevated access if accidentally persisted:**
+
+| Field type | Injected value |
+|---|---|
+| Boolean privilege fields (`admin`, `is_admin`, `verified`, …) | `False` |
+| Numeric fields (`balance`, `credits`, `points`) | `0` |
+| Role / group strings | `"test-role-probe"`, `"test-group-probe"` |
+| Permission strings | `"none"` |
+| Subscription / plan strings | `"test-tier-probe"`, `"test-plan-probe"` |
+| Status strings | `"test-status-probe"` |
+
+**Field tiers:**
+
+| Tier | Fields | Alert when confirmed | Alert when unconfirmed |
+|---|---|---|---|
+| HIGH | `role`, `user_role`, `group`, `admin`, `is_admin`, `isAdmin`, `permission`, `permissions`, `verified`, `is_verified`, `email_verified`, `balance`, `credits`, `points`, `subscription_tier`, `plan` | **CRITICAL** | **HIGH** CANDIDATE |
+| MEDIUM | `status`, `account_status`, `activated`, `disabled`, `internal`, `debug` | **HIGH** | **MEDIUM** CANDIDATE |
+| Skip | `created_at`, `updated_at`, `id`, `uuid`, `timestamp`, `date`, `time` | — (omitted entirely) | — |
+
+Fields already present in the original form body are excluded from injection to avoid false positives from normally-accepted fields.
+
+**Confirmation note in alert detail:** `CONFIRMED — injected value persisted in subsequent GET response` or `NEEDS VERIFICATION — reflected in probe response only; persistence not confirmed`.
 
 ---
 
