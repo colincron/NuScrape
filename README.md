@@ -685,6 +685,7 @@ Inline `<script>` blocks are stripped from HTML before scanning to avoid minifie
 | Cache-busting filename hash | Hex preceded by `-` or `_` and followed by `-` or `.` (e.g. `main-a3f2b1c9.js`) |
 | Image filename extension | Hex immediately followed by `.jpg`, `.png`, `.webp`, `.gif`, `.svg`, `.ico`, `.bmp`, `.avif` |
 | CMS image hash filename | Matches `[-_]<hex8+>[-_<text>].<img_ext>` — CMS-generated cache-busting filenames |
+| Ad/tracking URL parameter | Hex value is preceded by a known tracking param name: `msockid`, `msclkid`, `fbclid`, `gclid`, `dclid`, `twclid`, `ttclid`, `li_fat_id` — high-entropy by design, never secrets |
 | CDN/image CDN URL context | 200-char window contains a known CDN hostname (Google Fonts/CDN, Cloudinary, imgix, Contentful, Shopify CDN, Unsplash, Akamai, Squarespace, WordPress, Gravatar, Giphy, Twitter CDN, Facebook CDN, GCS) |
 | HTML entity | Matches `&amp;`, `&#123;`, `&#x1F;`, etc. |
 | String longer than 500 chars | Likely serialised binary or minified content |

@@ -5863,6 +5863,20 @@ _ENT_IMG_HASH_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Ad/session tracking URL parameter names — their values are high-entropy hex
+# strings by design and are never secrets.
+_ENT_TRACKING_PARAMS = frozenset({
+    "msockid", "msclkid", "fbclid", "gclid", "dclid",
+    "twclid", "ttclid", "li_fat_id",
+})
+
+# Pre-compiled regex to detect a tracking param assignment immediately before a match.
+# Matches patterns like  msclkid=  or  gclid=  within the look-behind window.
+_ENT_TRACKING_PARAM_RE = re.compile(
+    r'(?:^|[?&])(' + '|'.join(re.escape(p) for p in sorted(_ENT_TRACKING_PARAMS)) + r')=\s*$',
+    re.IGNORECASE,
+)
+
 # Strings that are almost certainly HTML entities or encoded text
 _ENT_HTML_ENTITY_RE = re.compile(r'&[a-zA-Z]{2,8};|&#\d{2,5};|&#x[0-9a-fA-F]{2,5};')
 
@@ -6029,6 +6043,11 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         window = scan_body[max(0, m_start - 200): m_start + 200]
         return any(h in window for h in _ENT_SKIP_CDN_HOSTS)
 
+    def _in_tracking_param(m_start: int) -> bool:
+        """Return True if the hex match is the value of a known ad/tracking URL param."""
+        pre = scan_body[max(0, m_start - 60): m_start]
+        return bool(_ENT_TRACKING_PARAM_RE.search(pre))
+
     def _in_image_filename_context(m_start: int, m_end: int) -> bool:
         """
         Return True if the hex match sits inside an image filename — i.e. it is
@@ -6058,6 +6077,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         _try_flag(m.group(), "base64", "body")
     for m in _ENT_HEX_RE.finditer(scan_body):
         if _in_cdn_skip_url(m.start()):
+            continue
+        if _in_tracking_param(m.start()):
             continue
         if _in_image_filename_context(m.start(), m.end()):
             continue
