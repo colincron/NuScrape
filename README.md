@@ -1112,9 +1112,35 @@ Log output:
 [Verify] Failed — downgrading to HIGH (UNVERIFIED)
 ```
 
-**Response diffing**
+**Per-endpoint baseline profiling**
 
-Before flagging a finding, NuScrape fetches and caches a clean baseline response (no payload) for each `(endpoint, params)` combination. A finding is only raised if the difference between the probe response and the baseline is meaningful:
+Before running active probes, NuScrape collects a **3-sample baseline** for each `(endpoint, params)` combination using cache-busted GET requests. The multi-sample baseline captures response variability and produces richer metrics than a single reference fetch:
+
+| Metric | How collected | Used for |
+|---|---|---|
+| `status_code` | Last sample's HTTP status | Status-change anomaly detection |
+| `response_length_mean` / `_std` | Mean ± population std of 3 body lengths | Length-change anomaly gating |
+| `response_time_mean` / `_std` | Mean ± std of 3 round-trip times (ms) | Timing-anomaly gating (time-based blind) |
+| `content_fingerprint` | SHA-256 (first 16 hex chars) of dynamic-masked body | Structural-change detection |
+| `dynamic_regions` | Character ranges that differ across samples | Excluded from fingerprint comparison |
+| `body` | Last sample's raw body | Backward-compatible diff logic |
+
+**Dynamic content masking** — before fingerprinting, the following patterns are replaced with `__DYNAMIC__`:
+ISO timestamps, 10–13-digit Unix epochs, 32+-char hex strings, 40+-char base64 strings, and UUIDs.
+
+**Anomaly gate (`_is_probe_anomalous`)** — a probe response is considered anomalous (worth alerting) when any of the following are true:
+
+| Condition | Reason logged |
+|---|---|
+| HTTP status code changed from baseline | `status changed N→M` |
+| Body length changed by >10% **and** >50 bytes | `body length changed N→M (X%)` |
+| Dynamic-masked content fingerprint changed | `content fingerprint changed (old→new)` |
+| Response time > mean + 3 × std (time-based probes) | `response time Xms > threshold Yms` |
+| No baseline available (collection failed) | `no baseline` — **never suppresses** |
+
+Log format: `[Baseline] <url> — status=200 len=4821±12 fp=a3f0b2c1e7d8f094`
+
+**Response diffing** — for diff-based detections (SQL injection, command injection, SSTI, path traversal, CRLF injection) the baseline `status_code` and `body` are passed to `_diff_is_meaningful`:
 
 | Condition | Verdict |
 |---|---|
@@ -1125,7 +1151,20 @@ Before flagging a finding, NuScrape fetches and caches a clean baseline response
 | Only change is <50 bytes (timestamp / session noise) | Not meaningful — suppressed |
 | Error string was already present in baseline | Not meaningful — suppressed |
 
-Applied to: SQL injection, command injection, SSTI, path traversal, CRLF injection.
+**Coverage** — baseline profiling is applied to all 9 active-probe check functions:
+
+| Function | Integration |
+|---|---|
+| `check_path_traversal` | Multi-sample baseline replaces single-request `_get_probe_baseline` |
+| `check_ssti` | Multi-sample baseline; used for context detection and diff gating |
+| `check_crlf_injection` | Multi-sample baseline; canary-absence check |
+| `check_sqli` | Multi-sample baseline; diff + context detection |
+| `check_cmdi` | Multi-sample baseline; diff + context + timing gating |
+| `check_xxe_injection` | GET baseline per endpoint; gates canary-reflection alert |
+| `check_ldap_injection` | Baseline per URL+params; suppresses if error string in baseline |
+| `check_hpp` | Multi-sample baseline replaces inline single-request fetch |
+| `check_prototype_pollution` | GET baseline per endpoint; gates 500-status crash alert |
+| `check_web_cache_poisoning` | Baseline for base URL; gates unkeyed-header reflection alert |
 
 **Context-aware payload selection**
 

@@ -14,6 +14,10 @@ import requests
 import dns.resolver
 import whois
 import threading
+import statistics
+import difflib
+import hashlib
+from dataclasses import dataclass, field
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -8788,6 +8792,192 @@ def check_websocket_security(ws_url: str, page_url: str) -> None:
 
 _probe_baseline: dict = {}   # (base_url, params_frozen) → (status_int, body_str)
 
+# ── Per-endpoint baseline profiling ───────────────────────────────────────────
+
+@dataclass
+class EndpointBaseline:
+    """Rich multi-sample baseline for an endpoint+params pair."""
+    url: str
+    status_code: int
+    content_type: str
+    response_length_mean: float
+    response_length_std: float
+    response_time_mean: float
+    response_time_std: float
+    content_fingerprint: str
+    dynamic_regions: list = field(default_factory=list)
+    body: str = ""
+
+
+_endpoint_baselines: dict = {}   # (base_url, params_frozen) → EndpointBaseline | None
+
+# Masks dynamic content before fingerprinting (timestamps, epochs, hex, base64, UUIDs)
+_BL_DYNAMIC_RE = re.compile(
+    r'\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?\b'
+    r'|\b\d{10,13}\b'
+    r'|[0-9a-f]{32,}'
+    r'|[A-Za-z0-9+/]{40,}={0,2}'
+    r'|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+    re.IGNORECASE,
+)
+
+
+def _bl_mask_body(body: str) -> str:
+    """Replace dynamic tokens in body with a stable placeholder."""
+    return _BL_DYNAMIC_RE.sub("__DYNAMIC__", body)
+
+
+def _bl_fingerprint(masked_body: str) -> str:
+    """SHA-256 of masked body, truncated to 16 hex chars."""
+    return hashlib.sha256(masked_body.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+def _bl_find_dynamic_regions(bodies: list) -> list:
+    """
+    Return a merged list of (start, end) character-offset ranges that differ
+    across the collected baseline samples.  Used to mask noise before fingerprinting.
+    """
+    if len(bodies) < 2:
+        return []
+    regions = []
+    a = bodies[0]
+    for b in bodies[1:]:
+        sm = difflib.SequenceMatcher(None, a, b, autojunk=False)
+        for tag, i1, i2, _j1, _j2 in sm.get_opcodes():
+            if tag != "equal":
+                regions.append((i1, i2))
+    if not regions:
+        return []
+    regions.sort()
+    merged = [list(regions[0])]
+    for start, end in regions[1:]:
+        if start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [tuple(r) for r in merged]
+
+
+def _get_endpoint_baseline(base: str, params: dict, timeout: int = 8):
+    """
+    Collect a 3-sample baseline for (base, params).
+
+    Each request uses a unique cache-busting nonce so CDN/proxy caching does
+    not flatten all three samples into the same cached copy.
+
+    Returns an EndpointBaseline or None on total failure.
+    Cached per (base, frozenset(params.items())).
+    """
+    key = (base, frozenset(params.items()))
+    if key in _endpoint_baselines:
+        return _endpoint_baselines[key]
+
+    query = "&".join(f"{k}={v}" for k, v in params.items())
+    samples_body: list = []
+    samples_len: list = []
+    samples_time: list = []
+    last_status = None
+    last_ct = ""
+
+    for i in range(3):
+        bust = f"_cb={int(time.time() * 1000) + i}"
+        sep = "&" if query else ""
+        url = base + "?" + query + sep + bust
+        try:
+            t0 = time.monotonic()
+            resp = _get_session().get(
+                url,
+                headers=create_request_header(),
+                timeout=timeout,
+                allow_redirects=True,
+                verify=False,
+            )
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            body = resp.text or ""
+            last_status = resp.status_code
+            last_ct = resp.headers.get("Content-Type", "")
+            samples_body.append(body)
+            samples_len.append(len(body))
+            samples_time.append(elapsed_ms)
+        except Exception:
+            pass
+
+    if not samples_body:
+        _endpoint_baselines[key] = None
+        return None
+
+    dynamic_regions = _bl_find_dynamic_regions(samples_body)
+    masked = _bl_mask_body(samples_body[-1])
+    fingerprint = _bl_fingerprint(masked)
+
+    bl = EndpointBaseline(
+        url=base,
+        status_code=last_status or 0,
+        content_type=last_ct,
+        response_length_mean=statistics.mean(samples_len),
+        response_length_std=statistics.pstdev(samples_len) if len(samples_len) > 1 else 0.0,
+        response_time_mean=statistics.mean(samples_time),
+        response_time_std=statistics.pstdev(samples_time) if len(samples_time) > 1 else 0.0,
+        content_fingerprint=fingerprint,
+        dynamic_regions=dynamic_regions,
+        body=samples_body[-1],
+    )
+    _endpoint_baselines[key] = bl
+    print(timestamp() + f" [Baseline] {base} — status={bl.status_code} "
+          f"len={bl.response_length_mean:.0f}±{bl.response_length_std:.0f} "
+          f"fp={bl.content_fingerprint}")
+    return bl
+
+
+def _is_probe_anomalous(
+    baseline,
+    probe_body: str,
+    probe_status: int,
+    probe_time_ms: float = 0.0,
+) -> tuple:
+    """
+    Return (is_anomalous: bool, reason: str).
+
+    When baseline is None, returns (False, "no baseline") so callers never
+    suppress a finding purely because baseline collection failed.
+
+    An anomaly is any of:
+      1. HTTP status code differs from baseline
+      2. Body length changed by >10% AND >50 bytes
+      3. Dynamic-masked content fingerprint changed
+      4. Response time > mean + 3 × std  (useful for time-based detections)
+    """
+    if baseline is None:
+        return False, "no baseline"
+
+    # 1. Status code change
+    if probe_status != baseline.status_code:
+        return True, f"status changed {baseline.status_code}→{probe_status}"
+
+    # 2. Body length change
+    probe_len = len(probe_body)
+    bl_len = baseline.response_length_mean
+    if bl_len > 0:
+        delta = abs(probe_len - bl_len)
+        if delta > 50 and (delta / bl_len) > 0.10:
+            return True, (f"body length changed "
+                          f"{bl_len:.0f}→{probe_len} ({delta / bl_len:.0%})")
+
+    # 3. Content fingerprint change
+    probe_fp = _bl_fingerprint(_bl_mask_body(probe_body))
+    if probe_fp != baseline.content_fingerprint:
+        return True, (f"content fingerprint changed "
+                      f"({baseline.content_fingerprint}→{probe_fp})")
+
+    # 4. Timing anomaly
+    if probe_time_ms > 0 and baseline.response_time_std > 0:
+        threshold = baseline.response_time_mean + 3 * baseline.response_time_std
+        if probe_time_ms > threshold:
+            return True, (f"response time {probe_time_ms:.0f} ms "
+                          f"> threshold {threshold:.0f} ms")
+
+    return False, "within baseline parameters"
+
 # ── Multi-stage verification ──────────────────────────────────────────────────
 
 _MSV_DOWNGRADE = {"CRITICAL": "HIGH", "HIGH": "MEDIUM"}
@@ -9174,7 +9364,9 @@ def check_path_traversal(page_url, html_content):
             _traversal_tested.add(test_key)
 
             print(timestamp() + f" Path traversal probe: {base_endpoint} param={param}")
-            bl_status, bl_body = _get_probe_baseline(base_endpoint, params)
+            _bl = _get_endpoint_baseline(base_endpoint, params)
+            bl_status = _bl.status_code if _bl else None
+            bl_body   = _bl.body if _bl else None
 
             for payload, os_hint in PATH_TRAVERSAL_PAYLOADS:
                 if domain in _traversal_domains:
@@ -9584,7 +9776,9 @@ def check_ssti(page_url, html_content):
         # Baseline for diff and context detection
         base_params = {k: v for k, v in
                        (p.split("=", 1) for p in query.split("&") if "=" in p)}
-        bl_status, bl_body = _get_probe_baseline(base, base_params)
+        _bl = _get_endpoint_baseline(base, base_params)
+        bl_status = _bl.status_code if _bl else None
+        bl_body   = _bl.body if _bl else None
 
         # Context detection — log for audit trail
         ctx = _detect_input_context(bl_body or "", original_val)
@@ -9698,7 +9892,9 @@ def check_crlf_injection(page_url, html_content):
             continue
 
         # Baseline for diff check (we verify the canary header is absent in clean response)
-        bl_status, bl_body = _get_probe_baseline(base, params)
+        _bl = _get_endpoint_baseline(base, params)
+        bl_status = _bl.status_code if _bl else None
+        bl_body   = _bl.body if _bl else None
 
         for param, value in params.items():
             if domain in _crlf_domains:
@@ -9918,6 +10114,16 @@ def check_xxe_injection(page_url: str, html_content: str, response_headers: dict
             except Exception:
                 pass
 
+        # ── Endpoint baseline (GET) for anomaly gating ────────────────────
+        parsed_ep2 = urlparse(endpoint_url)
+        ep_params = {}
+        for pair in (parsed_ep2.query or "").split("&"):
+            if "=" in pair:
+                k2, v2 = pair.split("=", 1)
+                ep_params[k2] = v2
+        ep_base = parsed_ep2.scheme + "://" + parsed_ep2.netloc + parsed_ep2.path
+        _xxe_bl = _get_endpoint_baseline(ep_base, ep_params)
+
         # ── XXE entity reflection probes ──────────────────────────────────
         payloads = [("text/xml", _XXE_PAYLOAD)]
         if is_soap:
@@ -9933,6 +10139,7 @@ def check_xxe_injection(page_url: str, html_content: str, response_headers: dict
                 stealth_delay(domain)
                 hdrs = create_request_header()
                 hdrs["Content-Type"] = content_type
+                t0_xxe = time.monotonic()
                 resp = _get_session().post(
                     endpoint_url,
                     data=payload.encode("utf-8"),
@@ -9941,7 +10148,15 @@ def check_xxe_injection(page_url: str, html_content: str, response_headers: dict
                     verify=False,
                     allow_redirects=True,
                 )
+                xxe_ms = (time.monotonic() - t0_xxe) * 1000
                 if _XXE_CANARY in resp.text:
+                    _xxe_anom, _xxe_reason = _is_probe_anomalous(
+                        _xxe_bl, resp.text, resp.status_code, xxe_ms
+                    )
+                    if _xxe_bl is not None and not _xxe_anom:
+                        print(timestamp() + f" [Baseline] XXE canary matched but response "
+                              f"not anomalous ({_xxe_reason}) — suppressing")
+                        continue
                     label = "SOAP XXE" if "soap" in content_type else "XXE"
                     _eu  = endpoint_url
                     _ct  = content_type
@@ -10096,6 +10311,15 @@ def check_prototype_pollution(page_url: str, html_content: str) -> None:
         _pp_body_tested.add(endpoint_url)
 
         baseline_status, _ = _pp_baseline(endpoint_url, method, base_fields)
+        # Rich multi-sample GET baseline for anomaly gating
+        parsed_pp = urlparse(endpoint_url)
+        pp_params = {}
+        for pair in (parsed_pp.query or "").split("&"):
+            if "=" in pair:
+                _pk, _pv = pair.split("=", 1)
+                pp_params[_pk] = _pv
+        _pp_ep_base = parsed_pp.scheme + "://" + parsed_pp.netloc + parsed_pp.path
+        _pp_ep_bl = _get_endpoint_baseline(_pp_ep_base, pp_params)
         probes_sent = 0
 
         for payload_extra in _PP_BODY_PAYLOADS:
@@ -10131,16 +10355,20 @@ def check_prototype_pollution(page_url: str, html_content: str) -> None:
                     break  # one confirmed finding per endpoint is sufficient
 
                 elif resp.status_code == 500 and baseline_status is not None and baseline_status != 500:
-                    alert(
-                        "PROTOTYPE POLLUTION — POSSIBLE SERVER CRASH",
-                        "MEDIUM",
-                        endpoint_url,
-                        f"Server returned 500 (baseline: {baseline_status}) after "
-                        f"injecting prototype pollution payload {list(payload_extra.keys())[0]!r} "
-                        f"into {method} {endpoint_url} — the injection may have corrupted "
-                        f"a shared prototype, causing a runtime exception; manual "
-                        f"verification required"
-                    )
+                    _pp_anom, _ = _is_probe_anomalous(_pp_ep_bl, body, resp.status_code)
+                    if _pp_ep_bl is not None and not _pp_anom:
+                        pass   # baseline shows 500 is normal — suppress
+                    else:
+                        alert(
+                            "PROTOTYPE POLLUTION — POSSIBLE SERVER CRASH",
+                            "MEDIUM",
+                            endpoint_url,
+                            f"Server returned 500 (baseline: {baseline_status}) after "
+                            f"injecting prototype pollution payload {list(payload_extra.keys())[0]!r} "
+                            f"into {method} {endpoint_url} — the injection may have corrupted "
+                            f"a shared prototype, causing a runtime exception; manual "
+                            f"verification required"
+                        )
                     print(timestamp() + f" [!] Prototype pollution possible crash: {endpoint_url}")
 
             except requests.exceptions.Timeout:
@@ -10375,7 +10603,9 @@ def check_sqli(page_url: str, html_content) -> None:
             continue
 
         # Baseline for this URL — used for diff check and context detection
-        bl_status, bl_body = _get_probe_baseline(base, params)
+        _bl = _get_endpoint_baseline(base, params)
+        bl_status = _bl.status_code if _bl else None
+        bl_body   = _bl.body if _bl else None
 
         for param, orig_val in params.items():
             if domain in _sqli_domains:
@@ -10729,7 +10959,9 @@ def check_cmdi(page_url: str, html_content) -> None:
             continue
 
         # Baseline for diff check and context detection
-        bl_status, bl_body = _get_probe_baseline(base, params)
+        _bl = _get_endpoint_baseline(base, params)
+        bl_status = _bl.status_code if _bl else None
+        bl_body   = _bl.body if _bl else None
 
         for param, orig_val in params.items():
             if domain in _cmdi_domains:
@@ -11099,6 +11331,9 @@ def check_ldap_injection(page_url: str, html_content) -> None:
         except Exception:
             continue
 
+        # Baseline for anomaly gating (collect once per URL before param loop)
+        _ldap_bl = _get_endpoint_baseline(base, params)
+
         for param, orig_val in params.items():
             test_key = (base, param)
             if test_key in _ldapi_tested:
@@ -11122,8 +11357,16 @@ def check_ldap_injection(page_url: str, html_content) -> None:
                         allow_redirects=True,
                     )
                     body = resp.text or ""
+                    _ldap_anom, _ = _is_probe_anomalous(
+                        _ldap_bl, body, resp.status_code
+                    )
+                    if _ldap_bl is not None and not _ldap_anom:
+                        continue   # baseline-identical response — not a real injection
                     for err_str in _LDAP_ERROR_STRINGS:
                         if err_str.lower() in body.lower():
+                            # Suppress if error was already present in baseline
+                            if _ldap_bl is not None and err_str.lower() in (_ldap_bl.body or "").lower():
+                                continue
                             idx     = body.lower().find(err_str.lower())
                             snippet = body[max(0, idx - 40):idx + 120].strip()
                             _tu = test_url
@@ -12785,20 +13028,12 @@ def check_hpp(page_url: str, html_content) -> None:
                         parts.append(f"{k}={v}")
                 return "&".join(parts)
 
-            # ── Baseline ─────────────────────────────────────────────────────
-            baseline_url = base + "?" + _qs({})
-            try:
-                baseline_resp = _get_session().get(
-                    baseline_url,
-                    headers=create_request_header(),
-                    timeout=8,
-                    allow_redirects=True,
-                    verify=False,
-                )
-                baseline_status = baseline_resp.status_code
-                baseline_body   = baseline_resp.text or ""
-            except Exception:
+            # ── Baseline (multi-sample via _get_endpoint_baseline) ───────────
+            _hpp_bl = _get_endpoint_baseline(base, dict(param_pairs))
+            if _hpp_bl is None:
                 continue
+            baseline_status = _hpp_bl.status_code
+            baseline_body   = _hpp_bl.body
 
             # ── Probe 1A: orig first, canary second ?param=orig&param=canary ─
             url_1a = base + "?" + _qs({param: [orig_val, _HPP_CANARY]})
@@ -13126,6 +13361,15 @@ def check_web_cache_poisoning(page_url: str, html_content,
         cache_indicators.insert(0, f"cache-control: {cc_val}")
     cache_summary = "; ".join(cache_indicators) if cache_indicators else "static extension"
 
+    # ── Endpoint baseline for anomaly gating ─────────────────────────────────
+    parsed_wcp = urlparse(page_url)
+    wcp_params = {}
+    for pair in (parsed_wcp.query or "").split("&"):
+        if "=" in pair:
+            _wk, _wv = pair.split("=", 1)
+            wcp_params[_wk] = _wv
+    _wcp_bl = _get_endpoint_baseline(base, wcp_params)
+
     # ── 1. Unkeyed header injection ───────────────────────────────────────────
     for hdr_name, hdr_val in _WCP_UNKEYED_HEADERS:
         test_key = (base, hdr_name)
@@ -13150,6 +13394,13 @@ def check_web_cache_poisoning(page_url: str, html_content,
 
         reflected, location = _wcp_canary_in_response(resp, canary)
         if reflected:
+            _wcp_anom, _wcp_reason = _is_probe_anomalous(
+                _wcp_bl, resp.text or "", resp.status_code
+            )
+            if _wcp_bl is not None and not _wcp_anom:
+                print(timestamp() + f" [Baseline] WCP header {hdr_name} reflected but "
+                      f"response not anomalous ({_wcp_reason}) — suppressing")
+                continue
             alert(
                 "WEB CACHE POISONING: UNKEYED HEADER REFLECTED",
                 "HIGH",
@@ -14081,7 +14332,7 @@ def _reset_per_domain_state() -> None:
     global _ldapi_tested, _ldapi_form_tested
     global _deserial_passive_seen, _deserial_active_tested
     global _price_tested, _jwt_tested, _hpp_tested, _wcp_tested, _probe_baseline, _entropy_seen
-    global _timing_profiles
+    global _timing_profiles, _endpoint_baselines
     global _ssrf_flagged, _ssrf_candidates, _ssrf_tested
     global _idor_tested, _takeover_checked, _s3_checked, _s3_permutation_checked
     global _subdomain_enriched, _ct_queried, _cookie_seen, _js_analysis_threads
@@ -14134,6 +14385,7 @@ def _reset_per_domain_state() -> None:
     _hpp_tested             = set()
     _wcp_tested             = set()
     _probe_baseline         = {}
+    _endpoint_baselines     = {}
     _entropy_seen           = set()
     _timing_profiles        = {}
     _ssrf_flagged           = set()
