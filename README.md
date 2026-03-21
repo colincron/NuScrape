@@ -1032,6 +1032,19 @@ Tests cacheable endpoints for web cache poisoning vectors using safe canary valu
 
 **3. Parameter cloaking** — appends `;param=nuscrape-cache-test-cloak` to the URL. If the cloaked value appears in the response, the cache may key on the URL before the semicolon while the backend processes the full string.
 
+Two false-positive filters are applied before alerting:
+
+**FP filter 1 — URL-only reflection suppression.** Every occurrence of the canary in the response is inspected via a look-behind context window. If all occurrences fall inside a URL-carrying attribute or tag, the finding is suppressed:
+
+| Suppressed context | Example |
+|---|---|
+| `src=` / `href=` / `action=` attribute value | `<script src="...canary...">`, `<a href="...">` |
+| `<link rel="canonical">` tag | Canonical URL echoing the request |
+| `<meta property="og:url">` tag | Open Graph URL tag |
+| Analytics / tracking call | `gtag('config', ..., {page_location: '...canary...'})`, `fbq(...)` |
+
+**FP filter 2 — Baseline comparison.** When the canary appears in a non-URL context, a second request is sent to the original URL (without the cloaked parameter). The probe response body is stripped of the canary string and compared to the baseline. If the two bodies are identical, the server did not process the parameter — the canary appeared only as part of some other reflection — and the finding is suppressed. If the baseline fetch fails, the primary signal is preserved and the alert fires.
+
 | Finding | Severity | Signal |
 |---|---|---|
 | Unkeyed header reflected in response | HIGH | Injected header value appears in body or response headers |

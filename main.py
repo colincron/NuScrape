@@ -12991,6 +12991,66 @@ def _wcp_canary_in_response(resp, canary: str) -> tuple[bool, str]:
     return False, ""
 
 
+# ── URL-reflection FP filter for parameter cloaking ──────────────────────────
+
+# Attribute patterns whose value is always a URL — the canary is just reflected
+_CLOAK_URL_ATTR_RE = re.compile(
+    r'(?:src|href|action|data-url|data-href|data-src)\s*=\s*["\'][^"\']*$',
+    re.IGNORECASE,
+)
+# Meta-tag patterns whose content is a URL, not a processed value
+_CLOAK_META_URL_RE = re.compile(
+    r'(?:property\s*=\s*["\']og:url["\']'
+    r'|name\s*=\s*["\'](?:canonical|twitter:url)["\'])',
+    re.IGNORECASE,
+)
+# Analytics / tracking snippet patterns — the URL is passed as an argument
+_CLOAK_ANALYTICS_RE = re.compile(
+    r'(?:gtag|ga|fbq|_paq|dataLayer\.push|analytics\.track|trackPageview)\s*\(',
+    re.IGNORECASE,
+)
+
+
+def _cloak_is_url_only_reflection(canary: str, body: str) -> bool:
+    """
+    Return True if every occurrence of *canary* in *body* sits inside a
+    URL-carrying context that indicates simple URL reflection rather than
+    genuine backend parameter processing.
+
+    Suppressed contexts (evaluated via look-behind / surrounding window):
+      • src= / href= / action= / data-url= attribute values
+      • <link rel="canonical"> and <meta property="og:url"> tags
+      • Analytics / tracking function calls (gtag, ga, fbq, _paq, dataLayer)
+
+    Returns False (do not suppress) when at least one occurrence falls
+    outside all of these contexts — i.e. the backend produced the value
+    as plain text or in a non-URL structural position.
+
+    Returns False immediately if *canary* is not present (caller's guard).
+    """
+    pos = 0
+    found_any = False
+    while True:
+        idx = body.find(canary, pos)
+        if idx == -1:
+            break
+        found_any = True
+        pre    = body[max(0, idx - 300): idx]
+        window = body[max(0, idx - 400): idx + 400]
+        if _CLOAK_URL_ATTR_RE.search(pre):
+            pos = idx + 1
+            continue
+        if _CLOAK_META_URL_RE.search(window):
+            pos = idx + 1
+            continue
+        if _CLOAK_ANALYTICS_RE.search(pre):
+            pos = idx + 1
+            continue
+        # At least one occurrence is NOT in a URL context
+        return False
+    return found_any  # True → all occurrences were URL-only → suppress
+
+
 def check_web_cache_poisoning(page_url: str, html_content,
                                response_headers: dict) -> None:
     """
@@ -13143,20 +13203,52 @@ def check_web_cache_poisoning(page_url: str, html_content,
                 verify=False,
             )
             body = resp.text or ""
-            if cloak_canary in body:
-                pos  = body.find(cloak_canary)
-                snip = body[max(0, pos - 60): pos + len(cloak_canary) + 60].strip()
-                alert(
-                    "WEB CACHE POISONING: PARAMETER CLOAKING DETECTED",
-                    "MEDIUM",
-                    base,
-                    f"Semicolon-cloaked parameter 'param={cloak_canary}' appeared in the "
-                    f"response body (snippet: {snip!r}) at {cloak_url}. If the cache key "
-                    f"excludes the semicolon-delimited suffix, an attacker can inject values "
-                    f"processed by the backend but invisible to the cache key. "
-                    f"Cache indicators: {cache_summary}.{waf_note}",
-                )
-                print(timestamp() + f" [!] WCP parameter cloaking at {base}")
+            if cloak_canary not in body:
+                pass  # canary absent — no finding
+            elif _cloak_is_url_only_reflection(cloak_canary, body):
+                # Canary only appeared inside src=/href=/og:url/analytics —
+                # this is URL reflection, not backend parameter processing.
+                print(timestamp() + f" [~] WCP cloak suppressed (URL-only reflection) at {base}")
+            else:
+                # Canary appeared in a meaningful position.  Secondary check:
+                # fetch the original URL without the cloaked parameter and
+                # compare responses.  If identical (after removing the canary),
+                # the server ignored the parameter and the reflection is noise.
+                _suppress_baseline = False
+                stealth_delay(domain)
+                try:
+                    base_resp = _get_session().get(
+                        page_url,
+                        headers=create_request_header(),
+                        timeout=8,
+                        allow_redirects=False,
+                        verify=False,
+                    )
+                    base_body = base_resp.text or ""
+                    stripped  = body.replace(cloak_canary, "").strip()
+                    if stripped == base_body.strip():
+                        _suppress_baseline = True
+                        print(
+                            timestamp() +
+                            f" [~] WCP cloak suppressed (baseline identical) at {base}"
+                        )
+                except Exception:
+                    pass  # baseline fetch failed — fall through to alert
+
+                if not _suppress_baseline:
+                    pos  = body.find(cloak_canary)
+                    snip = body[max(0, pos - 60): pos + len(cloak_canary) + 60].strip()
+                    alert(
+                        "WEB CACHE POISONING: PARAMETER CLOAKING DETECTED",
+                        "MEDIUM",
+                        base,
+                        f"Semicolon-cloaked parameter 'param={cloak_canary}' appeared in the "
+                        f"response body (snippet: {snip!r}) at {cloak_url}. If the cache key "
+                        f"excludes the semicolon-delimited suffix, an attacker can inject values "
+                        f"processed by the backend but invisible to the cache key. "
+                        f"Cache indicators: {cache_summary}.{waf_note}",
+                    )
+                    print(timestamp() + f" [!] WCP parameter cloaking at {base}")
         except Exception:
             pass
 
