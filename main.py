@@ -9309,6 +9309,13 @@ def _get_endpoint_baseline(base: str, params: dict, timeout: int = 8):
     Each request uses a unique cache-busting nonce so CDN/proxy caching does
     not flatten all three samples into the same cached copy.
 
+    Hard timeouts:
+      - Per-request: 8 seconds (requests.exceptions.Timeout).  On timeout the
+        endpoint is skipped entirely and None is returned.
+      - Total budget: 20 seconds across all 3 requests.  If the budget is
+        exhausted before all samples are collected, the function aborts early
+        and skips the endpoint.
+
     Returns an EndpointBaseline or None on total failure.
     Cached per (base, frozenset(params.items())).
     """
@@ -9323,7 +9330,16 @@ def _get_endpoint_baseline(base: str, params: dict, timeout: int = 8):
     last_status = None
     last_ct = ""
 
+    _BASELINE_BUDGET = 20.0   # seconds — total across all 3 requests
+    budget_start = time.monotonic()
+
     for i in range(3):
+        # Abort if the total baseline budget is exhausted
+        if time.monotonic() - budget_start > _BASELINE_BUDGET:
+            print(timestamp() + f" [Baseline] Skipping {base} — timeout on baseline request")
+            _endpoint_baselines[key] = None
+            return None
+
         bust = f"_cb={int(time.time() * 1000) + i}"
         sep = "&" if query else ""
         url = base + "?" + query + sep + bust
@@ -9343,6 +9359,10 @@ def _get_endpoint_baseline(base: str, params: dict, timeout: int = 8):
             samples_body.append(body)
             samples_len.append(len(body))
             samples_time.append(elapsed_ms)
+        except requests.exceptions.Timeout:
+            print(timestamp() + f" [Baseline] Skipping {base} — timeout on baseline request")
+            _endpoint_baselines[key] = None
+            return None
         except Exception:
             pass
 
