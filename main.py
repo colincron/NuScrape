@@ -5787,10 +5787,12 @@ _ENT_B64_RE   = re.compile(r'[A-Za-z0-9+/]{20,}={0,2}')
 _ENT_HEX_RE   = re.compile(r'[0-9a-fA-F]{32,}')
 _ENT_ALNUM_RE = re.compile(r'[A-Za-z0-9]{20,}')
 
-# Thresholds per string class
+# Thresholds per string class.
+# hex raised to 4.0: MD5 hashes typically score 3.5–3.8 and are rarely secrets;
+# real API keys and tokens score higher.
 _ENT_THRESHOLDS = {
     "base64": 4.5,
-    "hex":    3.5,
+    "hex":    4.0,
     "alnum":  3.8,
 }
 
@@ -5818,6 +5820,17 @@ _ENT_CDN_HASH_RE = re.compile(
     r'[0-9a-f]{8,32}\.(?:min\.js|min\.css|bundle\.js|chunk\.js|\.js|\.css)$',
     re.IGNORECASE,
 )
+
+# Cache-busting filename hashes — hex preceded by - or _ and followed by - or .
+# e.g. main-a3f2b1c9.js, styles_8e4d2a1f.css, vendor-chunk-1b3e5a7c9d2f.min.js
+_ENT_CACHE_HASH_RE = re.compile(r'[-_][0-9a-fA-F]{8,32}[-.]')
+
+# Google Fonts / Google CDN hostnames — strings from these URLs carry no secrets
+_ENT_GOOGLE_CDN_HOSTS = frozenset({
+    "fonts.googleapis.com",
+    "fonts.gstatic.com",
+    "ajax.googleapis.com",
+})
 
 # Strings that are almost certainly HTML entities or encoded text
 _ENT_HTML_ENTITY_RE = re.compile(r'&[a-zA-Z]{2,8};|&#\d{2,5};|&#x[0-9a-fA-F]{2,5};')
@@ -5922,6 +5935,9 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         # CDN content-hash filename
         if _ENT_CDN_HASH_RE.search(candidate):
             return
+        # Cache-busting filename hash (e.g. main-a3f2b1c9.js, styles_8e4d2a1f.css)
+        if string_class == "hex" and _ENT_CACHE_HASH_RE.search(candidate):
+            return
         # HTML entities
         if _ENT_HTML_ENTITY_RE.search(candidate):
             return
@@ -5977,12 +5993,23 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         )
         print(timestamp() + f" [!] Entropy: {secret_type} (entropy={entropy:.2f}) at {page_url}")
 
+    def _in_google_cdn_url(m_start: int) -> bool:
+        """Return True if the 200-char window around the match contains a Google CDN host."""
+        window = scan_body[max(0, m_start - 200): m_start + 200]
+        return any(h in window for h in _ENT_GOOGLE_CDN_HOSTS)
+
     # ── Scan response body ────────────────────────────────────────────────────
     for m in _ENT_B64_RE.finditer(scan_body):
+        if _in_google_cdn_url(m.start()):
+            continue
         _try_flag(m.group(), "base64", "body")
     for m in _ENT_HEX_RE.finditer(scan_body):
+        if _in_google_cdn_url(m.start()):
+            continue
         _try_flag(m.group(), "hex", "body")
     for m in _ENT_ALNUM_RE.finditer(scan_body):
+        if _in_google_cdn_url(m.start()):
+            continue
         # Only flag alnum if it wasn't already caught by B64/hex
         val = m.group()
         if not _ENT_B64_RE.fullmatch(val) and not _ENT_HEX_RE.fullmatch(val):
