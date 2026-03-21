@@ -5978,6 +5978,9 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                 # HTTP Parameter Pollution — duplicate-param parsing discrepancy,
                 # WAF bypass via split payloads, first/last-wins detection
                 check_hpp(url, html)
+                # Web cache poisoning — unkeyed header injection, fat GET,
+                # parameter cloaking on cacheable endpoints
+                check_web_cache_poisoning(url, html, headers)
             # IDOR candidate detection — runs in background thread with timeout
             # to prevent hung verification requests stalling the crawl
             _idor_thread = threading.Thread(
@@ -11084,6 +11087,242 @@ def check_hpp(page_url: str, html_content) -> None:
 
 
 # ─────────────────────────────────────────────
+# Web cache poisoning detection
+# ─────────────────────────────────────────────
+
+_WCP_CANARY      = "nuscrape-cache-test"
+_WCP_UNKEYED_HEADERS: list[tuple[str, str]] = [
+    ("X-Forwarded-Host",           _WCP_CANARY + ".com"),
+    ("X-Forwarded-Scheme",         _WCP_CANARY),
+    ("X-Original-URL",             "/" + _WCP_CANARY),
+    ("X-Rewrite-URL",              "/" + _WCP_CANARY),
+    ("X-Custom-IP-Authorization",  "127.0.0.1"),
+    ("X-Forwarded-For",            "127.0.0.1"),
+]
+
+# Headers whose presence in a crawled response suggest caching is active
+_WCP_CACHE_INDICATOR_HEADERS = frozenset({
+    "x-cache", "cf-cache-status", "x-amz-cf-id", "x-amz-cf-pop",
+    "x-cache-hits", "x-served-by", "x-varnish", "age",
+    "cdn-cache-control", "surrogate-control",
+})
+
+# Static file extensions that browsers/CDNs cache aggressively
+_WCP_STATIC_RE = re.compile(
+    r'\.(js|css|html?|json|xml|svg|ico|woff2?|ttf|eot)(\?|$)',
+    re.IGNORECASE,
+)
+
+_wcp_tested: set = set()   # (base_url, header_name) pairs already probed
+
+
+def _wcp_is_cacheable(url: str, response_headers: dict) -> bool:
+    """
+    Return True if the response looks like it may be cached.
+    Checks: Cache-Control public/max-age, Vary header, CDN indicator
+    headers, or static file extension.
+    """
+    path = urlparse(url).path
+    if _WCP_STATIC_RE.search(path):
+        return True
+    h = {k.lower(): v for k, v in (response_headers or {}).items()}
+    cc = h.get("cache-control", "")
+    if "public" in cc or "max-age" in cc:
+        return True
+    if h.get("vary"):
+        return True
+    if any(ind in h for ind in _WCP_CACHE_INDICATOR_HEADERS):
+        return True
+    return False
+
+
+def _wcp_canary_in_response(resp, canary: str) -> tuple[bool, str]:
+    """
+    Check whether *canary* appears in the response body or any header value.
+    Returns (found: bool, location: str).
+    """
+    for hdr_name, hdr_val in resp.headers.items():
+        if canary.lower() in hdr_val.lower():
+            return True, f"response header '{hdr_name}: {hdr_val}'"
+    body = resp.text or ""
+    if canary.lower() in body.lower():
+        pos  = body.lower().find(canary.lower())
+        snip = body[max(0, pos - 60): pos + len(canary) + 60].strip()
+        return True, f"response body snippet: {snip!r}"
+    return False, ""
+
+
+def check_web_cache_poisoning(page_url: str, html_content,
+                               response_headers: dict) -> None:
+    """
+    Web cache poisoning detection via safe unkeyed header injection.
+
+    Only runs on endpoints that look cacheable (Cache-Control: public/max-age,
+    CDN indicator headers, Vary header, or static file extensions).
+
+    Three detection classes:
+      1. Unkeyed header injection — sends each probe header individually;
+         flags HIGH if the injected value is reflected in the response body
+         or any response header (Location, Link, etc.).
+      2. Fat GET — sends a GET with a conflicting body param; flags MEDIUM
+         if the body value appears in the response instead of the URL value.
+      3. Parameter cloaking — appends canary param after semicolon delimiter;
+         flags MEDIUM if the cloaked value appears in the response.
+
+    Safety rules enforced:
+      - One probe per (endpoint, header/test) — never re-sends the same
+        poisoned header to avoid cache pollution for real users.
+      - Canary is a harmless string — no XSS or HTML payloads.
+      - Stops testing an endpoint the moment a reflection is confirmed.
+      - Does NOT fetch the cached copy — detecting reflection in the direct
+        response is sufficient; manual verification confirms cacheability.
+
+    Deduplicates per (base_url, test_name).
+    8-second timeout per probe.
+    Only called when --active-probes is enabled.
+    """
+    if not is_in_scope(page_url):
+        return
+    domain = urlparse(page_url).netloc
+    if is_third_party_cdn(domain):
+        return
+    if not _wcp_is_cacheable(page_url, response_headers):
+        return
+
+    parsed  = urlparse(page_url)
+    base    = parsed.scheme + "://" + parsed.netloc + parsed.path
+
+    waf_note = ""
+    waf_vendor = _waf_results.get(domain)
+    if waf_vendor:
+        waf_note = f" [WAF: {waf_vendor} detected — manual verification required]"
+
+    # Build cache indicator summary for finding detail
+    h_lower = {k.lower(): v for k, v in (response_headers or {}).items()}
+    cache_indicators = [
+        f"{k}: {h_lower[k]}" for k in sorted(_WCP_CACHE_INDICATOR_HEADERS)
+        if k in h_lower
+    ]
+    cc_val = h_lower.get("cache-control", "")
+    if cc_val:
+        cache_indicators.insert(0, f"cache-control: {cc_val}")
+    cache_summary = "; ".join(cache_indicators) if cache_indicators else "static extension"
+
+    # ── 1. Unkeyed header injection ───────────────────────────────────────────
+    for hdr_name, hdr_val in _WCP_UNKEYED_HEADERS:
+        test_key = (base, hdr_name)
+        if test_key in _wcp_tested:
+            continue
+        _wcp_tested.add(test_key)
+
+        canary = hdr_val   # the injected value is our canary
+        print(timestamp() + f" WCP probe: {base} header={hdr_name}: {hdr_val}")
+        stealth_delay(domain)
+        try:
+            probe_headers = {**create_request_header(), hdr_name: hdr_val}
+            resp = _get_session().get(
+                base,
+                headers=probe_headers,
+                timeout=8,
+                allow_redirects=False,   # don't follow — Location reflection is the signal
+                verify=False,
+            )
+        except Exception:
+            continue
+
+        reflected, location = _wcp_canary_in_response(resp, canary)
+        if reflected:
+            alert(
+                "WEB CACHE POISONING: UNKEYED HEADER REFLECTED",
+                "HIGH",
+                base,
+                f"Injected header '{hdr_name}: {hdr_val}' was reflected in the response "
+                f"({location}) — if this response is cached, downstream users will receive "
+                f"the poisoned value. Cache indicators: {cache_summary}.{waf_note} "
+                f"Manual verification required to confirm actual cache storage.",
+            )
+            print(timestamp() + f" [!!] WCP unkeyed header reflected: {hdr_name} at {base}")
+            return   # stop — one confirmed reflection is enough; don't risk further poisoning
+
+    # ── 2. Fat GET detection ─────────────────────────────────────────────────
+    # Only attempt if the URL has an existing query parameter to conflict with
+    fat_key = (base, "__fat_get__")
+    if fat_key not in _wcp_tested and parsed.query:
+        _wcp_tested.add(fat_key)
+        # Pick first param name from query string
+        first_param = parsed.query.split("&")[0].split("=")[0]
+        fat_canary  = _WCP_CANARY + "-fat"
+        print(timestamp() + f" WCP fat-GET probe: {base} param={first_param}")
+        stealth_delay(domain)
+        try:
+            resp = _get_session().get(
+                page_url,
+                headers=create_request_header(),
+                data=f"{first_param}={fat_canary}",
+                timeout=8,
+                allow_redirects=False,
+                verify=False,
+            )
+            body = resp.text or ""
+            if fat_canary in body:
+                pos  = body.find(fat_canary)
+                snip = body[max(0, pos - 60): pos + len(fat_canary) + 60].strip()
+                alert(
+                    "WEB CACHE POISONING: FAT GET DETECTED",
+                    "MEDIUM",
+                    base,
+                    f"Server reflected body parameter '{first_param}={fat_canary}' in a GET "
+                    f"request response (snippet: {snip!r}). Fat GET handling may allow cache "
+                    f"poisoning if the body parameter overrides the URL parameter and the "
+                    f"response is cached by key on the URL alone. "
+                    f"Cache indicators: {cache_summary}.{waf_note}",
+                )
+                print(timestamp() + f" [!] WCP fat GET on param={first_param} at {base}")
+                return
+        except Exception:
+            pass
+
+    # ── 3. Parameter cloaking ────────────────────────────────────────────────
+    cloak_key = (base, "__cloak__")
+    if cloak_key not in _wcp_tested:
+        _wcp_tested.add(cloak_key)
+        cloak_canary = _WCP_CANARY + "-cloak"
+        # Append after semicolon — some caches strip the semicolon-delimited
+        # portion from the cache key while backends process it
+        if parsed.query:
+            cloak_url = page_url + f";param={cloak_canary}"
+        else:
+            cloak_url = base + f"?param={cloak_canary}"
+        print(timestamp() + f" WCP cloak probe: {cloak_url}")
+        stealth_delay(domain)
+        try:
+            resp = _get_session().get(
+                cloak_url,
+                headers=create_request_header(),
+                timeout=8,
+                allow_redirects=False,
+                verify=False,
+            )
+            body = resp.text or ""
+            if cloak_canary in body:
+                pos  = body.find(cloak_canary)
+                snip = body[max(0, pos - 60): pos + len(cloak_canary) + 60].strip()
+                alert(
+                    "WEB CACHE POISONING: PARAMETER CLOAKING DETECTED",
+                    "MEDIUM",
+                    base,
+                    f"Semicolon-cloaked parameter 'param={cloak_canary}' appeared in the "
+                    f"response body (snippet: {snip!r}) at {cloak_url}. If the cache key "
+                    f"excludes the semicolon-delimited suffix, an attacker can inject values "
+                    f"processed by the backend but invisible to the cache key. "
+                    f"Cache indicators: {cache_summary}.{waf_note}",
+                )
+                print(timestamp() + f" [!] WCP parameter cloaking at {base}")
+        except Exception:
+            pass
+
+
+# ─────────────────────────────────────────────
 # IDOR parameter detection (with auto-verification)
 # ─────────────────────────────────────────────
 
@@ -11736,7 +11975,7 @@ def _reset_per_domain_state() -> None:
     global _sqli_tested, _sqli_domains, _cmdi_tested, _cmdi_domains
     global _ldapi_tested, _ldapi_form_tested
     global _deserial_passive_seen, _deserial_active_tested
-    global _price_tested, _jwt_tested, _hpp_tested
+    global _price_tested, _jwt_tested, _hpp_tested, _wcp_tested
     global _idor_tested, _takeover_checked, _s3_checked, _s3_permutation_checked
     global _subdomain_enriched, _ct_queried, _cookie_seen, _js_analysis_threads
     _zone_transfer_checked  = set()
@@ -11786,6 +12025,7 @@ def _reset_per_domain_state() -> None:
     _price_tested           = set()
     _jwt_tested             = set()
     _hpp_tested             = set()
+    _wcp_tested             = set()
     _idor_tested            = set()
     _takeover_checked       = set()
     _s3_checked             = set()
