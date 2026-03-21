@@ -181,6 +181,7 @@ BUG_BOUNTY_HEADER = None   # Set via --bug-bounty-header CLI arg. None = disable
 SAME_DOMAIN_ONLY = False   # overridden by --same-domain-only CLI arg
 START_URL        = ""      # set at crawler startup; used by is_in_scope()
 ACTIVE_PROBES    = False   # overridden by --active-probes CLI arg; gates payload-injecting checks
+BASELINE_ENABLED = True    # overridden by --no-baseline CLI arg; disables per-endpoint baseline profiling
 
 # ─────────────────────────────────────────────
 # Third-party CDN / external service exclusion
@@ -9319,6 +9320,9 @@ def _get_endpoint_baseline(base: str, params: dict, timeout: int = 8):
     Returns an EndpointBaseline or None on total failure.
     Cached per (base, frozenset(params.items())).
     """
+    if not BASELINE_ENABLED:
+        return None
+
     key = (base, frozenset(params.items()))
     if key in _endpoint_baselines:
         return _endpoint_baselines[key]
@@ -15043,6 +15047,9 @@ if __name__ == "__main__":
                         help="Enable payload-injecting checks: path traversal, SSTI, CRLF injection, "
                              "CORS evil-origin probes, default credential tests, and dangerous HTTP method testing. "
                              "Only use against targets you are authorised to test.")
+    parser.add_argument("--no-baseline", action="store_true",
+                        help="Disable per-endpoint baseline profiling for faster scans. "
+                             "Active probe anomaly gating is skipped; all probe responses are treated as anomalous.")
     parser.add_argument("--min-workers", type=int, default=1,
                         help="Minimum adaptive concurrency workers (default: 1)")
     parser.add_argument("--max-workers", type=int, default=10,
@@ -15073,6 +15080,10 @@ if __name__ == "__main__":
         print("[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)")
         print("[!] Only scan targets you are authorised to test.")
         print("=" * 60)
+
+    if args.no_baseline:
+        BASELINE_ENABLED = False
+        print("[*] Baseline profiling disabled — active probe anomaly gating skipped")
 
     if args.rate_min:    RATE_LIMIT_MIN = args.rate_min
     if args.rate_max:    RATE_LIMIT_MAX = args.rate_max
@@ -15166,5 +15177,6 @@ if __name__ == "__main__":
         print("  --no-social             Skip social media domains (Facebook, X, YouTube, etc.)")
         print("  --stealth LOUD|NORMAL|GHOST  Stealth profile (default: LOUD)")
         print("  --domains FILE          Scan multiple domains from a text file (one per line)")
-        print("  --parallel              Run up to 3 domain scans concurrently (requires --domains)\n")
+        print("  --parallel              Run up to 3 domain scans concurrently (requires --domains)")
+        print("  --no-baseline           Disable per-endpoint baseline profiling (faster, less accurate)\n")
 

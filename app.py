@@ -150,7 +150,8 @@ def api_start():
     if not isinstance(bug_bounty_header, str):
         bug_bounty_header = ""
     bug_bounty_header = bug_bounty_header.strip()
-    active_probes = bool(data.get("active_probes", False))
+    active_probes   = bool(data.get("active_probes", False))
+    no_baseline     = bool(data.get("no_baseline", False))
 
     # Multi-domain: optional list of domains from the UI textarea
     domains_list = data.get("domains_list", [])
@@ -213,6 +214,8 @@ def api_start():
             cmd.extend(["--bug-bounty-header", bug_bounty_header])
         if active_probes:
             cmd.append("--active-probes")
+        if no_baseline:
+            cmd.append("--no-baseline")
 
         with log_lock:
             log_buffer.clear()
@@ -753,6 +756,10 @@ td a:hover{text-decoration:underline}
       <div class="toggle-row">
         <label>Skip Google Tracking/CDN URLs</label>
         <label class="toggle"><input type="checkbox" id="skipGoogleTracking" checked><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label>Baseline Profiling</label>
+        <label class="toggle"><input type="checkbox" id="baselineProfiling" checked><span class="toggle-slider"></span></label>
       </div>
       <div class="toggle-row" style="margin-top:.6rem">
         <label style="color:var(--yellow)">Active Probes</label>
@@ -1316,6 +1323,7 @@ async function startCrawler(){
     playwright:document.getElementById('usePW').checked,
     no_social:document.getElementById('noSocial').checked,
     skip_google_tracking:document.getElementById('skipGoogleTracking').checked,
+    no_baseline:!document.getElementById('baselineProfiling').checked,
     active_probes:document.getElementById('activeProbes').checked,
     stealth_profile:document.querySelector('input[name="stealthProfile"]:checked')?.value||'LOUD',
     ...(document.getElementById('bugBountyToggle').checked && document.getElementById('bugBountyValue').value.trim()
