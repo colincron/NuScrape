@@ -6078,6 +6078,25 @@ _ENT_TRACKING_PARAM_RE = re.compile(
 # Strings that are almost certainly HTML entities or encoded text
 _ENT_HTML_ENTITY_RE = re.compile(r'&[a-zA-Z]{2,8};|&#\d{2,5};|&#x[0-9a-fA-F]{2,5};')
 
+# ── Meta verification tag suppression ────────────────────────────────────────
+
+# Exact name= values used by search engines / security vendors for domain ownership
+_ENT_META_VERIFY_NAMES = frozenset({
+    "google-site-verification",
+    "msvalidate.01",
+    "p:domain_verify",
+    "norton-safeweb-site-verification",
+    "yandex-verification",
+    "baidu-site-verification",
+    "facebook-domain-verification",
+})
+
+# Keyword patterns that catch vendor-specific names not in the explicit list
+_ENT_META_VERIFY_KEYWORDS_RE = re.compile(
+    r'verification|validate|confirm',
+    re.IGNORECASE,
+)
+
 # ── AWS Secret Access Key decoded-content FP check ───────────────────────────
 
 def _aws_b64_decoded_fp(candidate: str) -> bool:
@@ -6305,6 +6324,45 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         pre = scan_body[max(0, m_start - 60): m_start]
         return bool(_ENT_TRACKING_PARAM_RE.search(pre))
 
+    def _in_meta_verification_content(m_start: int) -> bool:
+        """
+        Return True if the base64 match is the content= value of an HTML <meta>
+        domain-verification tag.  Tokens issued by Google, Bing, Pinterest,
+        Norton, Yandex, Baidu, and Facebook for site ownership confirmation are
+        never AWS secrets.
+
+        Detection (all three must hold):
+          1. content= appears immediately before the candidate (optional quote).
+          2. An unclosed <meta tag is present in the 600-char look-behind window
+             (no '>' has closed the tag between <meta and the candidate).
+          3. The tag's name= attribute is either a known verification name
+             (_ENT_META_VERIFY_NAMES) or contains a keyword: verification,
+             validate, confirm.
+        """
+        pre = scan_body[max(0, m_start - 600): m_start]
+        # Condition 1: content= assignment immediately precedes the candidate
+        if not re.search(r'content\s*=\s*["\']?\s*$', pre, re.IGNORECASE):
+            return False
+        # Condition 2: find the last <meta and verify the tag is still open
+        lower_pre = pre.lower()
+        last_meta = lower_pre.rfind('<meta')
+        if last_meta == -1:
+            return False
+        tag_segment = pre[last_meta:]
+        if '>' in tag_segment:
+            return False
+        # Condition 3: name= attribute matches a known name or keyword
+        name_m = re.search(
+            r'\bname\s*=\s*["\']?([^"\'>\s]+)', tag_segment, re.IGNORECASE
+        )
+        if not name_m:
+            return False
+        name_val = name_m.group(1).lower()
+        return (
+            name_val in _ENT_META_VERIFY_NAMES
+            or bool(_ENT_META_VERIFY_KEYWORDS_RE.search(name_val))
+        )
+
     def _in_html_input_value(m_start: int) -> bool:
         """
         Return True if the base64 match is the value of an HTML <input> element's
@@ -6354,6 +6412,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
     # ── Scan response body ────────────────────────────────────────────────────
     for m in _ENT_B64_RE.finditer(scan_body):
         if _in_cdn_skip_url(m.start()):
+            continue
+        if _in_meta_verification_content(m.start()):
             continue
         if _in_html_input_value(m.start()):
             continue
