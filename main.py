@@ -6352,11 +6352,40 @@ def check_default_credentials(base_url, domain):
                     )
                     if (success_sigs and any(s.lower() in body for s in success_sigs)) or header_match:
                         cred_str = str(creds)
-                        alert(
-                            f"DEFAULT CREDENTIALS ACCEPTED: {service}",
-                            "CRITICAL",
+                        _lu   = login_url
+                        _cr   = dict(creds)
+                        _mt   = method
+                        _ss   = list(success_sigs)
+                        _sh   = list(success_hdrs)
+                        _fail = list(panel.get("fail_body", []))
+
+                        def _re_req(_u=_lu, _c=_cr, _m=_mt):
+                            if _m == "POST":
+                                return _get_session().post(_u, data=_c, headers=create_request_header(), timeout=6, allow_redirects=True)
+                            elif _m == "POST_JSON":
+                                return _get_session().post(_u, json=_c, headers={**create_request_header(), "Content-Type": "application/json"}, timeout=6, allow_redirects=True)
+                            elif _m == "GET_BASIC":
+                                return _get_session().get(_u, auth=(_c.get("username", ""), _c.get("password", "")), headers=create_request_header(), timeout=6)
+                            return _get_session().get(_u, headers=create_request_header(), timeout=6)
+
+                        def _confirm(r, _s=_ss, _h=_sh, _f=_fail):
+                            b = r.text.lower()
+                            if any(f.lower() in b for f in _f):
+                                return False
+                            hm = any(
+                                h.split(":")[0] in r.headers and (
+                                    len(h.split(":")) == 1
+                                    or h.split(":", 1)[1].lower() in r.headers.get(h.split(":")[0], "").lower()
+                                )
+                                for h in _h
+                            )
+                            return bool((_s and any(s.lower() in b for s in _s)) or hm)
+
+                        _msv_verify(
+                            "CRITICAL", f"DEFAULT CREDENTIALS ACCEPTED: {service}",
                             login_url,
-                            f"{service} login succeeded with credentials: {cred_str}"
+                            f"{service} login succeeded with credentials: {cred_str}",
+                            _re_req, _confirm,
                         )
                         print(timestamp() + f" [!!] DEFAULT CREDS WORK: {service} at {login_url} with {cred_str}")
                         success = True
@@ -7305,12 +7334,19 @@ def check_open_redirects(page_url, html_content):
                 if resp.status_code in (301, 302, 303, 307, 308) and \
                    _redirect_to_canary(location):
                     _redirect_domains.add(domain)
-                    alert(
-                        "OPEN REDIRECT",
-                        "HIGH",
-                        test_url,
+                    _tu = test_url
+                    _msv_verify(
+                        "HIGH", "OPEN REDIRECT", _tu,
                         f"Parameter '{param}' redirects to injected URL. "
-                        f"Location: {location[:120]}"
+                        f"Location: {location[:120]}",
+                        lambda _u=_tu: _get_session().get(
+                            _u, headers=create_request_header(),
+                            timeout=5, allow_redirects=False,
+                        ),
+                        lambda r: (
+                            r.status_code in (301, 302, 303, 307, 308)
+                            and _redirect_to_canary(r.headers.get("Location", ""))
+                        ),
                     )
                     print(timestamp() + f" [!!] Open redirect: {test_url} → {location[:80]}")
                     break
@@ -7712,6 +7748,58 @@ def check_websocket_security(ws_url: str, page_url: str) -> None:
 
 _probe_baseline: dict = {}   # (base_url, params_frozen) → (status_int, body_str)
 
+# ── Multi-stage verification ──────────────────────────────────────────────────
+
+_MSV_DOWNGRADE = {"CRITICAL": "HIGH", "HIGH": "MEDIUM"}
+
+
+def _msv_verify(
+    severity: str,
+    title: str,
+    target: str,
+    detail: str,
+    re_request_fn,
+    confirm_fn,
+) -> None:
+    """
+    Multi-stage verification for CRITICAL and HIGH findings.
+
+    Waits 2 seconds then re-sends an identical probe request.
+    - If the second response independently confirms the finding:
+        fires alert at original severity (confidence: CONFIRMED).
+    - If the second response does not reproduce the finding:
+        fires alert at one severity level lower and appends
+        "(UNVERIFIED)" to the detail.
+
+    For severities other than CRITICAL/HIGH, fires immediately.
+
+    Log format:
+      [Verify] Confirming CRITICAL <title> on <target> ...
+      [Verify] Confirmed — firing alert
+      [Verify] Failed — downgrading to HIGH (UNVERIFIED)
+    """
+    if severity not in _MSV_DOWNGRADE:
+        alert(title, severity, target, detail)
+        return
+
+    short = f"{title} on {target}"[:80]
+    print(timestamp() + f" [Verify] Confirming {severity} {short} ...")
+    time.sleep(2)
+    try:
+        verify_resp = re_request_fn()
+        if confirm_fn(verify_resp):
+            print(timestamp() + " [Verify] Confirmed — firing alert")
+            alert(title, severity, target, detail)
+            return
+    except Exception:
+        pass
+    downgraded = _MSV_DOWNGRADE[severity]
+    print(timestamp() + f" [Verify] Failed — downgrading to {downgraded} (UNVERIFIED)")
+    alert(
+        title, downgraded, target,
+        detail + " (UNVERIFIED — second probe did not reproduce the finding)",
+    )
+
 
 def _get_probe_baseline(base: str, params: dict, timeout: int = 8) -> tuple:
     """
@@ -7999,12 +8087,18 @@ def check_path_traversal(page_url, html_content):
                                 if s in body and s not in (bl_body or "")]
                     if unix_hit:
                         _traversal_domains.add(domain)
-                        alert(
-                            "PATH TRAVERSAL — FILE READ CONFIRMED",
-                            "CRITICAL",
-                            test_url,
+                        _tu  = test_url
+                        _sig = unix_hit[0]
+                        _b0  = bl_body or ""
+                        _msv_verify(
+                            "CRITICAL", "PATH TRAVERSAL — FILE READ CONFIRMED", _tu,
                             f"Parameter '{param}' reads arbitrary files. "
-                            f"Payload: {payload!r} — response contains: {unix_hit[0]!r}"
+                            f"Payload: {payload!r} — response contains: {_sig!r}",
+                            lambda _u=_tu: _get_session().get(
+                                _u, headers=create_request_header(),
+                                timeout=6, allow_redirects=True,
+                            ),
+                            lambda r, _s=_sig, _b=_b0: _s in (r.text or "") and _s not in _b,
                         )
                         print(timestamp() + f" [!!] Path traversal confirmed: {test_url} "
                               f"param={param} payload={payload!r}")
@@ -8016,12 +8110,18 @@ def check_path_traversal(page_url, html_content):
                                and s.lower() not in bl_lower]
                     if win_hit:
                         _traversal_domains.add(domain)
-                        alert(
-                            "PATH TRAVERSAL — FILE READ CONFIRMED",
-                            "CRITICAL",
-                            test_url,
+                        _tu  = test_url
+                        _sig = win_hit[0]
+                        _b0  = bl_body or ""
+                        _msv_verify(
+                            "CRITICAL", "PATH TRAVERSAL — FILE READ CONFIRMED", _tu,
                             f"Parameter '{param}' reads arbitrary files (Windows). "
-                            f"Payload: {payload!r} — response contains: {win_hit[0]!r}"
+                            f"Payload: {payload!r} — response contains: {_sig!r}",
+                            lambda _u=_tu: _get_session().get(
+                                _u, headers=create_request_header(),
+                                timeout=6, allow_redirects=True,
+                            ),
+                            lambda r, _s=_sig, _b=_b0: _s.lower() in (r.text or "").lower() and _s.lower() not in _b.lower(),
                         )
                         print(timestamp() + f" [!!] Path traversal confirmed (Windows): "
                               f"{test_url} param={param} payload={payload!r}")
@@ -8395,13 +8495,19 @@ def check_ssti(page_url, html_content):
                         and payload not in resp.text
                         and marker not in (bl_body or "")):
                     _ssti_domains.add(domain)
-                    alert(
-                        "SERVER-SIDE TEMPLATE INJECTION (SSTI)",
-                        "CRITICAL",
-                        test_url,
+                    _tu = test_url
+                    _mk = marker
+                    _pl = payload
+                    _msv_verify(
+                        "CRITICAL", "SERVER-SIDE TEMPLATE INJECTION (SSTI)", _tu,
                         f"Parameter '{param}' evaluated template expression. "
                         f"Payload: {payload} → response contains '{marker}'. "
-                        f"Engine hint: {engine_hint}. RCE may be possible."
+                        f"Engine hint: {engine_hint}. RCE may be possible.",
+                        lambda _u=_tu: _get_session().get(
+                            _u, headers=create_request_header(),
+                            timeout=5, allow_redirects=True,
+                        ),
+                        lambda r, _m=_mk, _p=_pl: _m in (r.text or "") and _p not in (r.text or ""),
                     )
                     print(timestamp() + f" [!!] SSTI confirmed: {test_url} (param={param}, engine={engine_hint})")
                     return
@@ -8715,16 +8821,24 @@ def check_xxe_injection(page_url: str, html_content: str, response_headers: dict
                 )
                 if _XXE_CANARY in resp.text:
                     label = "SOAP XXE" if "soap" in content_type else "XXE"
-                    alert(
-                        f"{label} INJECTION CONFIRMED",
-                        "HIGH",
-                        endpoint_url,
+                    _eu  = endpoint_url
+                    _ct  = content_type
+                    _pay = payload
+                    _msv_verify(
+                        "HIGH", f"{label} INJECTION CONFIRMED", _eu,
                         f"XML entity expansion is enabled at {endpoint_url} — "
                         f"the canary value '{_XXE_CANARY}' was reflected in the "
                         f"response body, confirming the XML parser resolves "
                         f"DOCTYPE entity declarations. An attacker can leverage "
                         f"this to read local files, probe internal services (SSRF), "
-                        f"or cause denial of service via entity expansion."
+                        f"or cause denial of service via entity expansion.",
+                        lambda _u=_eu, _c=_ct, _p=_pay: _get_session().post(
+                            _u,
+                            data=_p.encode("utf-8"),
+                            headers={**create_request_header(), "Content-Type": _c},
+                            timeout=8, verify=False, allow_redirects=True,
+                        ),
+                        lambda r: _XXE_CANARY in (r.text or ""),
                     )
                     print(timestamp() + f" [!!] XXE confirmed ({content_type}): {endpoint_url}")
             except requests.exceptions.Timeout:
@@ -9167,12 +9281,17 @@ def check_sqli(page_url: str, html_content) -> None:
                                         break
                             snippet = body[max(0, body.lower().find(err_str.lower()) - 40):
                                           body.lower().find(err_str.lower()) + 120].strip()
-                            alert(
-                                "SQL INJECTION (ERROR-BASED)",
-                                "CRITICAL",
-                                domain,
+                            _tu = test_url
+                            _es = err_str
+                            _msv_verify(
+                                "CRITICAL", "SQL INJECTION (ERROR-BASED)", domain,
                                 f"Parameter '{param}' on {base} reflects SQL error '{err_str}' "
                                 f"with payload: {payload!r} | Snippet: {snippet!r}{waf_note}",
+                                lambda _u=_tu: _get_session().get(
+                                    _u, headers=create_request_header(),
+                                    timeout=10, allow_redirects=True,
+                                ),
+                                lambda r, _e=_es: _e.lower() in (r.text or "").lower(),
                             )
                             _sqli_domains.add(domain)
                             break
@@ -9212,12 +9331,21 @@ def check_sqli(page_url: str, html_content) -> None:
                     )
                     elapsed = time.monotonic() - t0
                     if elapsed >= _SQLI_TIME_THRESHOLD:
-                        alert(
-                            "SQL INJECTION (TIME-BASED BLIND CANDIDATE)",
-                            "HIGH",
-                            domain,
+                        _tu = test_url
+                        _timing = [0.0]
+
+                        def _re_time(_u=_tu, _t=_timing):
+                            _t0 = time.monotonic()
+                            r = _get_session().get(_u, headers=create_request_header(), timeout=10, allow_redirects=True)
+                            _t[0] = time.monotonic() - _t0
+                            return r
+
+                        _msv_verify(
+                            "HIGH", "SQL INJECTION (TIME-BASED BLIND CANDIDATE)", domain,
                             f"Parameter '{param}' on {base} delayed {elapsed:.1f}s (>{_SQLI_TIME_THRESHOLD}s) "
                             f"with time-based payload: {payload!r} — manual verification required{waf_note}",
+                            _re_time,
+                            lambda r, _t=_timing: _t[0] >= _SQLI_TIME_THRESHOLD,
                         )
                         break
                 except Exception:
@@ -9431,12 +9559,16 @@ def check_cmdi(page_url: str, html_content) -> None:
                             and _CMDI_CANARY not in (bl_body or "")):
                         idx = body.find(_CMDI_CANARY)
                         snippet = body[max(0, idx - 30):idx + len(_CMDI_CANARY) + 60].strip()
-                        alert(
-                            "COMMAND INJECTION (CONFIRMED)",
-                            "CRITICAL",
-                            domain,
+                        _tu = test_url
+                        _msv_verify(
+                            "CRITICAL", "COMMAND INJECTION (CONFIRMED)", domain,
                             f"Parameter '{param}' on {base} echoed canary string with "
                             f"payload: {payload!r} | Snippet: {snippet!r}{waf_note}",
+                            lambda _u=_tu: _get_session().get(
+                                _u, headers=create_request_header(),
+                                timeout=10, allow_redirects=True,
+                            ),
+                            lambda r: _cmdi_canary_is_standalone(r.text or "", _CMDI_CANARY),
                         )
                         _cmdi_domains.add(domain)
                         break
@@ -9447,12 +9579,17 @@ def check_cmdi(page_url: str, html_content) -> None:
                                     and win_str not in (bl_body or "")):
                                 snippet = body[max(0, body.find(win_str) - 30):
                                                body.find(win_str) + 120].strip()
-                                alert(
-                                    "COMMAND INJECTION (WINDOWS INDICATOR)",
-                                    "CRITICAL",
-                                    domain,
+                                _tu = test_url
+                                _ws = win_str
+                                _msv_verify(
+                                    "CRITICAL", "COMMAND INJECTION (WINDOWS INDICATOR)", domain,
                                     f"Parameter '{param}' on {base} returned Windows shell output "
                                     f"'{win_str}' with payload: {payload!r} | Snippet: {snippet!r}{waf_note}",
+                                    lambda _u=_tu: _get_session().get(
+                                        _u, headers=create_request_header(),
+                                        timeout=10, allow_redirects=True,
+                                    ),
+                                    lambda r, _w=_ws: _w in (r.text or "") and _w != _CMDI_CANARY,
                                 )
                                 _cmdi_domains.add(domain)
                                 break
@@ -9667,13 +9804,18 @@ def check_ldap_injection(page_url: str, html_content) -> None:
                         if err_str.lower() in body.lower():
                             idx     = body.lower().find(err_str.lower())
                             snippet = body[max(0, idx - 40):idx + 120].strip()
-                            alert(
-                                "LDAP INJECTION (ERROR-BASED)",
-                                "CRITICAL",
-                                domain,
+                            _tu = test_url
+                            _es = err_str
+                            _msv_verify(
+                                "CRITICAL", "LDAP INJECTION (ERROR-BASED)", domain,
                                 f"Parameter '{param}' on {base} reflects LDAP error "
                                 f"'{err_str}' with payload: {payload!r} | "
                                 f"Snippet: {snippet!r}{waf_note}",
+                                lambda _u=_tu: _get_session().get(
+                                    _u, headers=create_request_header(),
+                                    timeout=8, allow_redirects=True,
+                                ),
+                                lambda r, _e=_es: _e.lower() in (r.text or "").lower(),
                             )
                             break   # one alert per parameter is enough
                 except Exception:
@@ -9752,14 +9894,21 @@ def check_ldap_injection(page_url: str, html_content) -> None:
                 )
                 if _ldap_login_success(bypass_resp, baseline_cookies):
                     body_snip = (bypass_resp.text or "")[:300].strip()
-                    alert(
-                        "LDAP AUTHENTICATION BYPASS",
-                        "HIGH",
-                        domain,
+                    _au = action_url
+                    _bd = dict(bypass_data)
+                    _bc = dict(baseline_cookies)
+                    _msv_verify(
+                        "HIGH", "LDAP AUTHENTICATION BYPASS", domain,
                         f"Login form at {action_url} accepted LDAP wildcard bypass — "
                         f"{user_field}={user_payload!r}, {pass_field}={pass_payload!r} | "
                         f"Final URL: {bypass_resp.url} | "
                         f"Snippet: {body_snip!r}{waf_note}",
+                        lambda _u=_au, _d=_bd: _get_session().post(
+                            _u, data=_d,
+                            headers=create_request_header(),
+                            timeout=8, allow_redirects=True,
+                        ),
+                        lambda r, _b=_bc: _ldap_login_success(r, _b),
                     )
                     break   # one alert per form
             except Exception:

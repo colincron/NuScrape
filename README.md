@@ -917,9 +917,30 @@ Tests cacheable endpoints for web cache poisoning vectors using safe canary valu
 
 ---
 
-#### Accuracy Improvements: Response Diffing and Context-Aware Payloads
+#### Accuracy Improvements: Response Diffing, Context-Aware Payloads, and Multi-Stage Verification
 
-Two cross-cutting accuracy mechanisms apply to all injection detection checks that require `--active-probes`.
+Three cross-cutting accuracy mechanisms apply to all injection detection checks that require `--active-probes`.
+
+**Multi-stage verification**
+
+Before firing a CRITICAL or HIGH alert, NuScrape automatically sends an identical second probe 2 seconds later to confirm the finding is independently reproducible.
+
+- If the second response confirms the finding → alert fires at original severity
+- If the second response does not reproduce the finding → severity is downgraded by one level and `(UNVERIFIED)` is appended to the finding detail
+
+| Original severity | Verified | Unverified |
+|---|---|---|
+| CRITICAL | CRITICAL | HIGH (UNVERIFIED) |
+| HIGH | HIGH | MEDIUM (UNVERIFIED) |
+
+Applied to: SQL injection (error-based and time-based), command injection, SSTI, path traversal, XXE injection, LDAP injection, open redirect, and default credential acceptance.
+
+Log output:
+```
+[Verify] Confirming CRITICAL SQL INJECTION (ERROR-BASED) on example.com ...
+[Verify] Confirmed — firing alert
+[Verify] Failed — downgrading to HIGH (UNVERIFIED)
+```
 
 **Response diffing**
 
@@ -1079,6 +1100,8 @@ Every finding stored in the `Alerts` table (and displayed in the UI) carries a *
 | Web cache poisoning — fat GET / parameter cloaking | NEEDS VERIFICATION |
 
 Confidence is inferred automatically from the `alert_type` string — no changes to existing call sites are needed. The level is stored in the `Alerts` database table and displayed in both the terminal alert banner and the UI findings table as a colored badge (green = CONFIRMED, yellow = LIKELY, cyan = NEEDS VERIFICATION).
+
+Findings that pass multi-stage verification are always CONFIRMED. Findings that fail verification carry `(UNVERIFIED)` in their detail and are downgraded one severity level.
 
 ---
 
