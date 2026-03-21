@@ -737,20 +737,45 @@ Probes each unique bucket name once. **CRITICAL** if the bucket returns a public
 ---
 
 #### Subdomain Takeover
-Checks the CNAME chain for every discovered live subdomain against 23 known takeover-vulnerable services including GitHub Pages, Heroku, AWS S3, Azure App Service, Fastly, Shopify, Netlify, Zendesk, Tumblr, Surge, Webflow, and others.
+Checks the CNAME chain for every discovered live subdomain against 24 known takeover-vulnerable services including GitHub Pages, Heroku, AWS S3, Azure App Service, Fastly, Shopify, Netlify, Zendesk, Tumblr, Pantheon, Surge, Webflow, and others.
 
-| Result | Severity | Meaning |
+Detection runs in five stages:
+
+1. **CNAME resolution** — resolves the full CNAME chain to find the target hostname
+2. **Dangling CNAME check** — resolves the CNAME target itself for A records; NXDOMAIN or no A record confirms the resource is fully deprovisioned at DNS level (included in finding detail)
+3. **Service signature match** — compares the CNAME target against patterns for 24 known vulnerable services
+4. **Body fingerprint** — fetches the subdomain and checks for service-specific unclaimed error strings
+5. **Claimability verification** — runs service-specific checks to confirm the resource is truly available to claim
+
+**Confidence → Severity mapping:**
+
+| Confidence | Severity | Meaning |
 |---|---|---|
-| CNAME matches + body fingerprint confirmed | CRITICAL | Subdomain is confirmed unclaimed and takeable |
-| CNAME matches + body unconfirmed | MEDIUM | Service is vulnerable class; verify manually whether the target is claimable |
-| CNAME matches + no HTTP response (confirm-required service) | MEDIUM | Azure internal LB / AWS EB internal DNS — dangling CNAME is common noise, verify manually |
-| CNAME matches + no HTTP response (standard service) | HIGH | Endpoint is dead but DNS record persists |
+| CONFIRMED | CRITICAL | Resource verifiably unclaimed (service-specific check passed) |
+| LIKELY | HIGH | Body fingerprint matched; claimability probable but not fully verified |
+| NEEDS VERIFICATION | MEDIUM | Fingerprint matched; manual check required |
+| Body fingerprint unconfirmed | MEDIUM | CNAME matches a vulnerable service class; verify manually |
+| No HTTP response (confirm-required service) | MEDIUM | Azure internal LB / AWS EB — dangling CNAME is common noise |
+| No HTTP response (standard service) | HIGH | Endpoint dead but DNS record persists |
 
-**GitHub Pages** requires both conditions before a CRITICAL alert fires:
-1. `github.com/<orgname>` returns non-200 (org does not exist — GitHub protects the namespace for existing orgs)
-2. `<orgname>.github.io` returns 404
+**Service-specific claimability checks:**
 
-If either condition is not met the finding is suppressed entirely.
+| Service | Verification method | CONFIRMED when |
+|---|---|---|
+| GitHub Pages | `github.com/<org>` + `<org>.github.io` probe | Org does not exist (404) AND `<org>.github.io` returns 404 |
+| AWS S3 | HEAD to CNAME target URL | Response is NoSuchBucket / 404 (403 = bucket exists, suppress) |
+| Heroku | `https://api.heroku.com/apps/<appname>` | API returns 404 (app name available) |
+| Fastly | Body fingerprint | "Fastly error: unknown domain" present (note: Fastly requires a paid account to claim) |
+| Azure App Service | Body fingerprint | "404 Web Site not found" present |
+| Zendesk | Body fingerprint | "Help Center Closed / Unavailable" present |
+| Shopify | Body fingerprint | "Sorry, this shop is currently unavailable" present |
+| Squarespace | Body fingerprint | "No Such Account" present |
+| Pantheon | Body fingerprint | "404 error unknown site" present |
+| Tumblr | Body fingerprint | "Whatever you were looking for doesn't currently exist" present |
+| Ghost | Body fingerprint | "Domain not configured" present |
+| All others | Body fingerprint only | LIKELY (manual verification required) |
+
+All HIGH and CRITICAL findings include the note: *"DO NOT claim this resource — document and report only. Claiming the resource constitutes unauthorized access even if technically possible."*
 
 ---
 
@@ -1218,7 +1243,9 @@ Every finding stored in the `Alerts` table (and displayed in the UI) carries a *
 | Laravel / Django / Drupal / Joomla file exposure (body-confirmed) | CONFIRMED |
 | Missing or misconfigured security headers | CONFIRMED (factual observation) |
 | Insecure cookies / JWT findings | CONFIRMED |
-| Subdomain takeover (404 on unclaimed service) | LIKELY |
+| Subdomain takeover — service-specific check passed (GitHub, S3, Heroku, etc.) | CONFIRMED |
+| Subdomain takeover — body fingerprint matched, claimability probable | LIKELY |
+| Subdomain takeover — CNAME matches service class, fingerprint unconfirmed | NEEDS VERIFICATION |
 | HTTP request smuggling (timing/status signal) | LIKELY |
 | GraphQL introspection (schema returned) | LIKELY |
 | CORS misconfiguration (header reflected) | LIKELY |

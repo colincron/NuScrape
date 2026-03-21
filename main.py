@@ -13630,19 +13630,187 @@ TAKEOVER_SIGNATURES = {
                                                            False),
     "fly.io":            (["fly.dev"],                    ["404 Not Found"],
                                                            False),
+    "pantheon":          (["pantheonsite.io"],            ["404 error unknown site", "The gods are wise, but do not know of any such site"],
+                                                           False),
 }
 
 _takeover_checked = set()
+
+# Warning included in every HIGH/CRITICAL takeover finding detail
+_SDT_DO_NOT_CLAIM = (
+    "DO NOT claim this resource — document and report only. "
+    "Claiming the resource constitutes unauthorized access even if technically possible."
+)
+
+
+def _sdt_cname_is_dangling(cname_target: str) -> tuple:
+    """
+    Attempt to resolve the CNAME target itself for A records.
+    Returns (is_dangling: bool, reason: str).
+
+    NXDOMAIN or no A record → dangling.  Any other DNS failure is treated as
+    "unknown" (False) so we don't suppress real findings due to transient errors.
+    """
+    try:
+        answers = dns.resolver.resolve(cname_target, "A")
+        ip = str(answers[0].address) if answers else "?"
+        return False, f"{cname_target} resolves ({ip})"
+    except dns.resolver.NXDOMAIN:
+        return True, f"{cname_target} → NXDOMAIN"
+    except dns.resolver.NoAnswer:
+        return True, f"{cname_target} → no A record"
+    except dns.exception.DNSException:
+        return False, f"{cname_target} DNS lookup failed (unknown)"
+
+
+def _sdt_claimability(fqdn: str, cname_target: str, service: str, body: str) -> tuple:
+    """
+    Run service-specific claimability verification after a body fingerprint match.
+
+    Returns (confidence, detail_note) where confidence is one of:
+      "SUPPRESS"          — finding should be suppressed (e.g. GitHub org exists)
+      "CONFIRMED"         — resource is verifiably unclaimed
+      "LIKELY"            — fingerprint matched, claimability probable but unverified
+      "NEEDS VERIFICATION"— fingerprint matched, manual check required
+    """
+    if service == "github-pages":
+        org = cname_target.split(".")[0]
+        org_exists = False
+        pages_404 = False
+        try:
+            r = _get_session().get(
+                f"https://github.com/{org}",
+                headers=create_request_header(),
+                timeout=8,
+                allow_redirects=True,
+            )
+            org_exists = (r.status_code == 200)
+        except Exception:
+            pass
+        if org_exists:
+            print(timestamp() + f" GitHub org '{org}' exists — suppressing Pages takeover FP for {fqdn}")
+            return "SUPPRESS", f"GitHub org '{org}' exists — namespace protected"
+        try:
+            r = _get_session().get(
+                f"https://{org}.github.io",
+                headers=create_request_header(),
+                timeout=8,
+                allow_redirects=True,
+            )
+            pages_404 = (r.status_code == 404)
+        except Exception:
+            pass
+        if not pages_404:
+            print(timestamp() + f" {org}.github.io did not return 404 — suppressing Pages takeover FP for {fqdn}")
+            return "SUPPRESS", f"{org}.github.io returned non-404 — namespace may be protected"
+        return "CONFIRMED", (
+            f"github.com/{org} → 404 (org does not exist); "
+            f"{org}.github.io → 404 (Pages namespace unclaimed)"
+        )
+
+    elif service == "aws-s3":
+        bucket_name = cname_target.split(".s3")[0] if ".s3" in cname_target else cname_target.split(".")[0]
+        try:
+            r = _get_session().request(
+                "HEAD",
+                f"https://{cname_target}",
+                headers=create_request_header(),
+                timeout=8,
+                allow_redirects=False,
+                verify=False,
+            )
+            if r.status_code in (404,) or "NoSuchBucket" in (r.text or ""):
+                return "CONFIRMED", f"S3 bucket '{bucket_name}' confirmed unclaimed (NoSuchBucket / 404)"
+            if r.status_code == 403:
+                return "SUPPRESS", f"S3 bucket '{bucket_name}' exists but is private (403 AccessDenied)"
+        except Exception:
+            pass
+        return "LIKELY", f"S3 bucket '{bucket_name}' — HEAD check inconclusive"
+
+    elif service == "heroku":
+        if "herokudns.com" in cname_target:
+            app_name = cname_target.split(".herokudns")[0]
+        elif "herokuapp.com" in cname_target:
+            app_name = cname_target.split(".herokuapp")[0]
+        else:
+            app_name = cname_target.split(".")[0]
+        try:
+            r = _get_session().get(
+                f"https://api.heroku.com/apps/{app_name}",
+                headers={**create_request_header(),
+                         "Accept": "application/vnd.heroku+json; version=3"},
+                timeout=8,
+                allow_redirects=False,
+                verify=False,
+            )
+            if r.status_code == 404:
+                return "CONFIRMED", f"Heroku app '{app_name}' confirmed available (API 404)"
+            return "LIKELY", f"Heroku app '{app_name}' — API returned {r.status_code}"
+        except Exception:
+            return "LIKELY", f"Heroku app '{app_name}' — API check failed"
+
+    elif service == "fastly":
+        if "Fastly error: unknown domain" in body:
+            return "CONFIRMED", "Fastly 'unknown domain' fingerprint confirmed (note: Fastly requires a paid account to claim)"
+        return "LIKELY", "Fastly CNAME matched — body fingerprint partial"
+
+    elif service == "zendesk":
+        if any(fp in body for fp in ["Help Center Closed", "Help Center Unavailable",
+                                      "Oops, this help center no longer exists"]):
+            return "CONFIRMED", "Zendesk help center unavailable fingerprint confirmed"
+        return "LIKELY", "Zendesk CNAME matched — body fingerprint partial"
+
+    elif service == "shopify":
+        if "Sorry, this shop is currently unavailable" in body:
+            return "CONFIRMED", "Shopify 'shop unavailable' fingerprint confirmed"
+        return "LIKELY", "Shopify CNAME matched — body fingerprint partial"
+
+    elif service == "squarespace":
+        if "No Such Account" in body:
+            return "CONFIRMED", "Squarespace 'No Such Account' fingerprint confirmed"
+        return "LIKELY", "Squarespace CNAME matched — body fingerprint partial"
+
+    elif service == "pantheon":
+        if "404 error unknown site" in body.lower() or "gods are wise" in body.lower():
+            return "CONFIRMED", "Pantheon 'unknown site' fingerprint confirmed"
+        return "LIKELY", "Pantheon CNAME matched — body fingerprint partial"
+
+    elif service == "tumblr":
+        if ("There's nothing here." in body
+                or "Whatever you were looking for doesn't currently exist" in body):
+            return "CONFIRMED", "Tumblr 'nothing here' fingerprint confirmed"
+        return "LIKELY", "Tumblr CNAME matched — body fingerprint partial"
+
+    elif service == "ghost":
+        if "Domain not configured" in body or "The thing you were looking for is no longer here" in body:
+            return "CONFIRMED", "Ghost 'domain not configured' fingerprint confirmed"
+        return "LIKELY", "Ghost CNAME matched — body fingerprint partial"
+
+    elif service == "azure-app":
+        if "404 Web Site not found" in body or "This web app has been stopped" in body:
+            return "CONFIRMED", "Azure 'Web Site not found' fingerprint confirmed"
+        return "LIKELY", "Azure App Service CNAME matched — body fingerprint partial"
+
+    else:
+        return "LIKELY", f"Body fingerprint matched for {service} — manual claimability check required"
+
 
 def check_subdomain_takeover(fqdn):
     """
     Check if a subdomain is vulnerable to takeover by:
     1. Resolving its CNAME chain
-    2. Matching the CNAME target against known takeover-vulnerable services
-    3. Fetching the page and confirming an unclaimed/error fingerprint
+    2. Confirming the CNAME target is dangling (NXDOMAIN or no A record)
+    3. Matching the CNAME target against known takeover-vulnerable services
+    4. Fetching the subdomain and confirming an unclaimed/error body fingerprint
+    5. Running service-specific claimability verification
 
-    Only alerts when BOTH the CNAME pattern AND the body fingerprint match,
-    to avoid false positives on services that return generic 404s.
+    Confidence levels drive severity:
+      CONFIRMED         → CRITICAL (resource verifiably unclaimed)
+      LIKELY            → HIGH     (fingerprint matched, claimability probable)
+      NEEDS VERIFICATION→ MEDIUM   (fingerprint matched, manual check required)
+
+    All HIGH/CRITICAL findings include a DO NOT CLAIM warning.
+    Deduplicates per subdomain.
     """
     if fqdn in _takeover_checked:
         return
@@ -13660,91 +13828,76 @@ def check_subdomain_takeover(fqdn):
         if not cname_target:
             return
 
+        # Confirm whether the CNAME target itself is dangling
+        is_dangling, dns_note = _sdt_cname_is_dangling(cname_target)
+
         # Match against takeover signatures
         for service, (cname_patterns, body_fingerprints, confirm_required) in TAKEOVER_SIGNATURES.items():
             if not any(p in cname_target for p in cname_patterns):
                 continue
 
-            # CNAME matches a vulnerable service — now confirm with body
-            resp = safe_get("https://" + fqdn, timeout=6)
+            # CNAME matches a vulnerable service — confirm with HTTP body
+            resp = safe_get("https://" + fqdn, timeout=8)
             if not resp:
-                resp = safe_get("http://" + fqdn, timeout=6)
+                resp = safe_get("http://" + fqdn, timeout=8)
             if not resp:
                 if confirm_required:
-                    # Infrastructure not publicly claimable (e.g. Azure cloudapp.net
-                    # internal LB, AWS EB internal DNS) — dangling CNAME with no
-                    # response is very common noise, downgrade to MEDIUM.
                     alert(
                         "SUBDOMAIN TAKEOVER — VERIFY MANUALLY",
                         "MEDIUM",
                         fqdn,
                         f"CNAME → {cname_target} ({service}) — no HTTP response. "
-                        f"Verify whether {cname_target} is claimable (confirm_required service)."
+                        f"DNS: {dns_note}. "
+                        f"Verify whether {cname_target} is claimable (infrastructure service)."
                     )
                 else:
                     alert(
                         "POTENTIAL SUBDOMAIN TAKEOVER",
                         "HIGH",
                         fqdn,
-                        f"CNAME → {cname_target} ({service}) — no HTTP response (possibly unclaimed)"
+                        f"CNAME → {cname_target} ({service}) — no HTTP response (possibly unclaimed). "
+                        f"DNS: {dns_note}. {_SDT_DO_NOT_CLAIM}"
                     )
                 return
 
-            body = resp.text
+            body = resp.text or ""
             matched_fp = [fp for fp in body_fingerprints if fp.lower() in body.lower()]
-            if matched_fp:
-                if service == "github-pages":
-                    # Require BOTH conditions before alerting:
-                    # 1. github.com/<orgname> returns non-200 (org doesn't exist)
-                    # 2. <orgname>.github.io returns 404
-                    # If the org exists GitHub protects its namespace — suppress entirely.
-                    org = cname_target.split(".")[0]  # "orgname" from "orgname.github.io"
-                    org_exists = False
-                    pages_404 = False
-                    try:
-                        org_resp = _get_session().get(
-                            f"https://github.com/{org}",
-                            headers=create_request_header(),
-                            timeout=6,
-                            allow_redirects=True,
-                        )
-                        org_exists = (org_resp.status_code == 200)
-                    except Exception:
-                        pass  # network error — treat org as unknown
-                    if org_exists:
-                        print(timestamp() + f" GitHub org '{org}' exists — suppressing Pages takeover FP for {fqdn}")
-                        return
-                    try:
-                        pages_resp = _get_session().get(
-                            f"https://{org}.github.io",
-                            headers=create_request_header(),
-                            timeout=6,
-                            allow_redirects=True,
-                        )
-                        pages_404 = (pages_resp.status_code == 404)
-                    except Exception:
-                        pass  # network error — treat as unknown
-                    if not pages_404:
-                        print(timestamp() + f" {org}.github.io did not return 404 — suppressing Pages takeover FP for {fqdn}")
-                        return
 
-                alert(
-                    "SUBDOMAIN TAKEOVER VULNERABLE",
-                    "CRITICAL",
-                    fqdn,
-                    f"CNAME → {cname_target} ({service}) — unclaimed. Body contains: {matched_fp[0][:80]}"
+            if matched_fp:
+                confidence, claim_notes = _sdt_claimability(fqdn, cname_target, service, body)
+
+                if confidence == "SUPPRESS":
+                    return
+
+                if confidence == "CONFIRMED":
+                    sev        = "CRITICAL"
+                    alert_type = "SUBDOMAIN TAKEOVER VULNERABLE"
+                elif confidence == "LIKELY":
+                    sev        = "HIGH"
+                    alert_type = "SUBDOMAIN TAKEOVER — LIKELY VULNERABLE"
+                else:
+                    sev        = "MEDIUM"
+                    alert_type = "SUBDOMAIN TAKEOVER — VERIFY MANUALLY"
+
+                detail = (
+                    f"CNAME → {cname_target} ({service}) — unclaimed. "
+                    f"Body fingerprint: {matched_fp[0][:80]!r}. "
+                    f"DNS: {dns_note}. "
+                    f"Claimability: {confidence} — {claim_notes}. "
+                    f"{_SDT_DO_NOT_CLAIM}"
                 )
-                print(timestamp() + f" [!!] SUBDOMAIN TAKEOVER: {fqdn} → {cname_target} ({service})")
+                alert(alert_type, sev, fqdn, detail)
+                print(timestamp() + f" [!!] SUBDOMAIN TAKEOVER ({confidence}): {fqdn} → {cname_target} ({service})")
+
             else:
                 # CNAME points to a known-vulnerable service but body fingerprint
-                # didn't match — could be a custom error page masking an unclaimed
-                # site (as with cdn.getwemail.io / Netlify). Always alert so it
-                # surfaces in the UI for manual verification.
+                # didn't match — surface for manual verification.
                 alert(
                     "SUBDOMAIN TAKEOVER — VERIFY MANUALLY",
                     "MEDIUM",
                     fqdn,
                     f"CNAME → {cname_target} ({service}) — body fingerprint unconfirmed. "
+                    f"DNS: {dns_note}. "
                     f"Check if {cname_target} is claimable on {service}."
                 )
                 print(timestamp() + f" Takeover candidate (unconfirmed): {fqdn} → {cname_target} ({service})")
