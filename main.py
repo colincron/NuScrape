@@ -183,6 +183,7 @@ SAME_DOMAIN_ONLY = False   # overridden by --same-domain-only CLI arg
 START_URL        = ""      # set at crawler startup; used by is_in_scope()
 ACTIVE_PROBES    = False   # overridden by --active-probes CLI arg; gates payload-injecting checks
 BASELINE_ENABLED = True    # overridden by --no-baseline CLI arg; disables per-endpoint baseline profiling
+TUTORIAL_MODE    = False   # overridden by --tutorial CLI arg; appends HOW TO VERIFY guidance to findings
 
 # ─────────────────────────────────────────────
 # Third-party CDN / external service exclusion
@@ -4989,6 +4990,104 @@ def write_to_alerts_database(alert_type, severity, target, detail, confidence=""
     finally:
         conn.close()
 
+# ── Tutorial mode — per-type verification guidance ────────────────────────────
+
+_TUTORIAL_AUTH_NOTE = (
+    "⚠ Only test on authorized targets covered by a bug bounty program "
+    "or with explicit written permission."
+)
+
+
+def _tutorial_note(alert_type: str) -> str:
+    """
+    Return a HOW TO VERIFY block for tutorial mode, or empty string if the
+    alert type has no specific guidance.  Appended to the stored detail field;
+    displayed as a collapsible section in the Flask UI.
+    """
+    atype = alert_type.lower()
+
+    if "sql inject" in atype:
+        guidance = (
+            "Reproduce the error manually using curl with the payload. "
+            "Confirm the error message appears consistently. "
+            "Do NOT attempt to extract data — error confirmation is sufficient for reporting."
+        )
+    elif "command inject" in atype or "cmdi" in atype:
+        guidance = (
+            "Check if canary appears as plain text output, not URL-encoded in an attribute. "
+            "A real finding shows command output, not reflected URL parameters."
+        )
+    elif "ssrf" in atype:
+        guidance = (
+            "Use an out-of-band interaction server like interact.sh to confirm the server "
+            "makes outbound requests. Document the DNS/HTTP interaction as proof."
+        )
+    elif "idor" in atype:
+        guidance = (
+            "Create two test accounts. Access Account B's resources using Account A's session. "
+            "Never access real user data — test accounts only."
+        )
+    elif "takeover" in atype:
+        guidance = (
+            "Confirm the CNAME target returns a service-specific 404 fingerprint. "
+            "Verify the GitHub org/S3 bucket/service namespace is unclaimed. "
+            "Do NOT claim the resource."
+        )
+    elif "xss" in atype:
+        guidance = (
+            "Confirm the payload executes in a browser context. "
+            "Use a benign alert(1) payload only. Document with a screenshot."
+        )
+    elif "open redirect" in atype:
+        guidance = (
+            "Confirm the Location header contains your injected URL. "
+            "Show the redirect chain. Demonstrate additional impact beyond the redirect "
+            "itself for higher severity."
+        )
+    elif "jwt" in atype:
+        guidance = (
+            "Confirm the secret cracks successfully with PyJWT. "
+            "Forge a test token with a modified claim using a clearly fake value. "
+            "Do NOT use the forged token against real endpoints."
+        )
+    elif "default credential" in atype:
+        guidance = (
+            "Confirm the response body contains service-specific authenticated content "
+            "(logout button, database listing, dashboard). "
+            "A bare 200 is not sufficient confirmation."
+        )
+    elif "mass assignment" in atype:
+        guidance = (
+            "Send a GET request after the POST to confirm the injected field was persisted. "
+            "Use false/none values for privilege fields, never true or admin."
+        )
+    elif "path traversal" in atype:
+        guidance = (
+            "Confirm the response contains expected file content "
+            "(etc/hostname is safe to check). "
+            "Do NOT read sensitive files like /etc/passwd or private keys."
+        )
+    elif any(k in atype for k in (
+        "missing hsts", "missing csp", "missing x-frame",
+        "missing x-content", "missing referrer", "missing permissions",
+        "security header",
+    )):
+        guidance = (
+            "Confirm with curl -I that the header is absent. "
+            "Note that this is informational — combine with a demonstration of "
+            "impact for higher severity."
+        )
+    elif "spf" in atype or "dmarc" in atype:
+        guidance = (
+            "Use MXToolbox or dig to confirm the DNS record state. "
+            "Include the raw DNS response in your report."
+        )
+    else:
+        return ""
+
+    return f"\n\nHOW TO VERIFY: {_TUTORIAL_AUTH_NOTE} {guidance}"
+
+
 def alert(alert_type, severity, target, detail, redact_detail=False, response_body=None):
     """
     Print a high-visibility alert and persist it to the Alerts table.
@@ -5015,6 +5114,11 @@ def alert(alert_type, severity, target, detail, redact_detail=False, response_bo
     print(f"  Confidence : {conf_label}")
     print(f"  Time       : {timestamp()}")
     print(f"{bar}\n")
+    # Append verification guidance to the stored detail (not the console display)
+    if TUTORIAL_MODE:
+        note = _tutorial_note(alert_type)
+        if note:
+            detail = detail + note
     write_to_alerts_database(alert_type, severity, target, detail, confidence)
 
 def write_to_js_database(page_url, js_url, finding_type, value, context=""):
@@ -15153,6 +15257,8 @@ if __name__ == "__main__":
     parser.add_argument("--no-baseline", action="store_true",
                         help="Disable per-endpoint baseline profiling for faster scans. "
                              "Active probe anomaly gating is skipped; all probe responses are treated as anomalous.")
+    parser.add_argument("--tutorial", action="store_true",
+                        help="Append HOW TO VERIFY instructions to each finding for bug bounty / learning use.")
     parser.add_argument("--min-workers", type=int, default=1,
                         help="Minimum adaptive concurrency workers (default: 1)")
     parser.add_argument("--max-workers", type=int, default=10,
@@ -15187,6 +15293,9 @@ if __name__ == "__main__":
     if args.no_baseline:
         BASELINE_ENABLED = False
         print("[*] Baseline profiling disabled — active probe anomaly gating skipped")
+    if args.tutorial:
+        TUTORIAL_MODE = True
+        print("[*] Tutorial mode enabled — HOW TO VERIFY guidance will be appended to findings")
 
     if args.rate_min:    RATE_LIMIT_MIN = args.rate_min
     if args.rate_max:    RATE_LIMIT_MAX = args.rate_max
@@ -15281,5 +15390,6 @@ if __name__ == "__main__":
         print("  --stealth LOUD|NORMAL|GHOST  Stealth profile (default: LOUD)")
         print("  --domains FILE          Scan multiple domains from a text file (one per line)")
         print("  --parallel              Run up to 3 domain scans concurrently (requires --domains)")
-        print("  --no-baseline           Disable per-endpoint baseline profiling (faster, less accurate)\n")
+        print("  --no-baseline           Disable per-endpoint baseline profiling (faster, less accurate)")
+        print("  --tutorial              Append HOW TO VERIFY guidance to each finding\n")
 

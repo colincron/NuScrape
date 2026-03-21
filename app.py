@@ -152,6 +152,7 @@ def api_start():
     bug_bounty_header = bug_bounty_header.strip()
     active_probes   = bool(data.get("active_probes", False))
     no_baseline     = bool(data.get("no_baseline", False))
+    tutorial_mode   = bool(data.get("tutorial_mode", False))
 
     # Multi-domain: optional list of domains from the UI textarea
     domains_list = data.get("domains_list", [])
@@ -216,6 +217,8 @@ def api_start():
             cmd.append("--active-probes")
         if no_baseline:
             cmd.append("--no-baseline")
+        if tutorial_mode:
+            cmd.append("--tutorial")
 
         with log_lock:
             log_buffer.clear()
@@ -596,6 +599,10 @@ header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;ba
 .stealth-btn{display:block;padding:.3rem .2rem;font-size:.68rem;font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:4px;cursor:pointer;transition:all .15s;text-align:center}
 .stealth-btn:hover{color:var(--text);border-color:var(--muted)}
 .stealth-btn.active{color:var(--accent);border-color:rgba(0,229,255,.5);background:rgba(0,229,255,.08);box-shadow:0 0 8px rgba(0,229,255,.1)}
+.tut-details{margin-top:.45rem;border:1px solid rgba(0,229,255,.18);border-radius:3px;background:rgba(0,229,255,.03)}
+.tut-summary{font-family:var(--mono);font-size:.68rem;color:var(--accent);padding:.3rem .55rem;cursor:pointer;user-select:none;list-style:none}
+.tut-summary::-webkit-details-marker{display:none}
+.tut-body{font-family:var(--mono);font-size:.68rem;color:var(--muted);padding:.4rem .7rem .5rem;white-space:pre-wrap;line-height:1.55;border-top:1px solid rgba(0,229,255,.1)}
 .btn-start{background:rgba(0,229,255,.1);color:var(--accent);border:1px solid rgba(0,229,255,.25)}
 .btn-start:hover{background:rgba(0,229,255,.2);box-shadow:0 0 14px rgba(0,229,255,.15)}
 .btn-start:disabled{opacity:.35;cursor:not-allowed}
@@ -760,6 +767,10 @@ td a:hover{text-decoration:underline}
       <div class="toggle-row">
         <label>Baseline Profiling</label>
         <label class="toggle"><input type="checkbox" id="baselineProfiling" checked><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label>Tutorial Mode <span style="font-size:.65rem;color:var(--muted)">(adds verify steps to findings)</span></label>
+        <label class="toggle"><input type="checkbox" id="tutorialMode"><span class="toggle-slider"></span></label>
       </div>
       <div class="toggle-row" style="margin-top:.6rem">
         <label style="color:var(--yellow)">Active Probes</label>
@@ -1324,6 +1335,7 @@ async function startCrawler(){
     no_social:document.getElementById('noSocial').checked,
     skip_google_tracking:document.getElementById('skipGoogleTracking').checked,
     no_baseline:!document.getElementById('baselineProfiling').checked,
+    tutorial_mode:document.getElementById('tutorialMode').checked,
     active_probes:document.getElementById('activeProbes').checked,
     stealth_profile:document.querySelector('input[name="stealthProfile"]:checked')?.value||'LOUD',
     ...(document.getElementById('bugBountyToggle').checked && document.getElementById('bugBountyValue').value.trim()
@@ -1414,6 +1426,14 @@ function clearLog(){
 }
 
 function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function renderDetail(detail){
+  const SEP='\n\nHOW TO VERIFY: ';
+  const idx=detail.indexOf(SEP);
+  if(idx===-1)return escHtml(detail);
+  const main=detail.substring(0,idx);
+  const verify=detail.substring(idx+SEP.length).trim();
+  return escHtml(main)+`<details class="tut-details"><summary class="tut-summary">▶ How to verify</summary><div class="tut-body">${escHtml(verify)}</div></details>`;
+}
 
 // ── Stats polling ──────────────────────────────────────
 async function pollStats(){
@@ -1562,7 +1582,7 @@ async function loadAlerts(){
         <td><span class="b ${ccls}" title="${escHtml(conf)}">${confIcon[conf]||'?'} ${escHtml(conf)}</span></td>
         <td style="font-family:var(--mono);font-size:.72rem;color:var(--red)">${escHtml(r.alert_type||'-')}</td>
         <td class="wrap" style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${escHtml(r.target||'-')}</td>
-        <td class="wrap" style="font-size:.72rem;white-space:normal;min-width:200px">${escHtml(r.detail||'-')}</td>
+        <td class="wrap" style="font-size:.72rem;white-space:normal;min-width:200px">${renderDetail(r.detail||'-')}</td>
         <td style="font-size:.72rem;white-space:nowrap;color:var(--muted)">${escHtml(r.found_at||'-')}</td>
       </tr>`;
     }).join('')
