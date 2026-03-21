@@ -6078,6 +6078,61 @@ _ENT_TRACKING_PARAM_RE = re.compile(
 # Strings that are almost certainly HTML entities or encoded text
 _ENT_HTML_ENTITY_RE = re.compile(r'&[a-zA-Z]{2,8};|&#\d{2,5};|&#x[0-9a-fA-F]{2,5};')
 
+# ── AWS Secret Access Key decoded-content FP check ───────────────────────────
+
+def _aws_b64_decoded_fp(candidate: str) -> bool:
+    """
+    Return True if a base64 candidate decodes to non-random content, meaning it
+    is almost certainly NOT a real AWS Secret Access Key.
+
+    Real AWS SAKs are 30 bytes of random binary data.  Three heuristics catch
+    the common false-positive classes:
+
+      1. Valid JSON  — the decoded bytes parse as a JSON object, array, or string.
+      2. Hex-only    — decoded UTF-8 text contains only hex digits, brackets,
+                       whitespace, and JSON punctuation.
+      3. Readable text — >85% of decoded bytes fall in the printable ASCII +
+                         whitespace range, indicating structured or human-readable
+                         content rather than random key material.
+
+    Returns False (not a FP) when the candidate cannot be base64-decoded, which
+    preserves the existing behaviour for truly malformed strings.
+    """
+    import base64 as _b64
+    import json   as _json_mod
+    # Pad to a valid multiple-of-4 length
+    padded = candidate + "=" * (-len(candidate) % 4)
+    try:
+        decoded = _b64.b64decode(padded, validate=False)
+    except Exception:
+        return False  # can't decode — treat as real candidate
+
+    # Heuristic 1: valid JSON
+    try:
+        parsed = _json_mod.loads(decoded.decode("utf-8", errors="strict"))
+        if isinstance(parsed, (dict, list, str)):
+            return True
+    except Exception:
+        pass
+
+    # Heuristic 2: decoded text is hex characters + brackets/whitespace only
+    try:
+        text = decoded.decode("utf-8", errors="strict")
+        if re.fullmatch(r'[0-9a-fA-F\[\]{}\(\)\s,":\']+', text):
+            return True
+    except Exception:
+        pass
+
+    # Heuristic 3: high ratio of printable ASCII → readable text, not random bytes
+    printable = sum(
+        1 for b in decoded if 0x20 <= b <= 0x7E or b in (0x09, 0x0A, 0x0D)
+    )
+    if len(decoded) > 0 and printable / len(decoded) > 0.85:
+        return True
+
+    return False
+
+
 # ── Content-type helpers ──────────────────────────────────────────────────────
 
 def _ent_content_type(headers: dict) -> str:
@@ -6217,6 +6272,10 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
             if pat.search(candidate):
                 secret_type = label
                 final_sev   = pat_sev
+                # AWS Secret Access Key: decode and verify the content looks random.
+                # JSON, hex-only, or readable text → FP, skip.
+                if label == "AWS Secret Access Key" and _aws_b64_decoded_fp(candidate):
+                    return
                 break
 
         # Generic very-high-entropy with no pattern match → still HIGH in JSON
@@ -6246,6 +6305,30 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         pre = scan_body[max(0, m_start - 60): m_start]
         return bool(_ENT_TRACKING_PARAM_RE.search(pre))
 
+    def _in_html_input_value(m_start: int) -> bool:
+        """
+        Return True if the base64 match is the value of an HTML <input> element's
+        value attribute.  Form state tokens, CSRF tokens, and session state are
+        routinely base64-encoded in hidden inputs and are never AWS secrets.
+
+        Detection: the few characters immediately preceding the match must end
+        with  value="  or  value='  (optional whitespace), AND there must be an
+        unclosed <input tag in the 400-char look-behind window (i.e. no '>' has
+        closed the tag between <input and the current position).
+        """
+        pre = scan_body[max(0, m_start - 400): m_start]
+        # Quick check: value= assignment must be immediately before the candidate
+        if not re.search(r'value\s*=\s*["\']?\s*$', pre, re.IGNORECASE):
+            return False
+        # Verify we are inside an <input tag, not some other element
+        lower_pre = pre.lower()
+        last_input = lower_pre.rfind('<input')
+        if last_input == -1:
+            return False
+        # If there is a '>' after <input and before our position, the tag is
+        # already closed and this value= belongs to a different element
+        return '>' not in pre[last_input:]
+
     def _in_image_filename_context(m_start: int, m_end: int) -> bool:
         """
         Return True if the hex match sits inside an image filename — i.e. it is
@@ -6271,6 +6354,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
     # ── Scan response body ────────────────────────────────────────────────────
     for m in _ENT_B64_RE.finditer(scan_body):
         if _in_cdn_skip_url(m.start()):
+            continue
+        if _in_html_input_value(m.start()):
             continue
         _try_flag(m.group(), "base64", "body")
     for m in _ENT_HEX_RE.finditer(scan_body):

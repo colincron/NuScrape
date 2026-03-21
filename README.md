@@ -695,6 +695,8 @@ Inline `<script>` blocks are stripped from HTML before scanning to avoid minifie
 | String longer than 500 chars | Likely serialised binary or minified content |
 | Known false-positive string | Matched by `is_secret_fp()` (placeholder/example values) |
 | Public key prefix | Matched by `is_public_key()` (Stripe `pk_`, Google `AIza`, etc.) |
+| AWS SAK decoded content | 40-char base64 that matches the AWS Secret Access Key pattern is decoded; suppressed if the result is valid JSON, hex-only text, or >85% printable ASCII — real AWS SAKs decode to random binary, not structured data |
+| HTML `<input>` value attribute | Base64 string appearing as the `value=` of an `<input>` element is skipped — form state tokens, CSRF tokens, and session state are routinely base64-encoded in hidden inputs and are never AWS secrets |
 
 Deduplicates by the first 8 characters of each flagged string to avoid repeated alerts for the same token across pages.
 
