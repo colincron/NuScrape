@@ -773,6 +773,81 @@ The Java probe uses a truncated class descriptor that triggers a deserialization
 
 ---
 
+#### Price Manipulation Detection
+
+Tests checkout, cart, order, and payment endpoints for client-side price/quantity bypass vulnerabilities. Requires `--active-probes`. Only fires on endpoints matching a URL pattern (`/checkout`, `/cart`, `/order`, `/payment`, `/purchase`, `/buy`, `/basket`, `/booking`, `/ticket`) that accept a JSON request body containing price or quantity fields.
+
+**Probes sent per detected field:**
+
+| Probe | Payload | Detection signal |
+|---|---|---|
+| Negative price | `-1` | 2xx response with different body → server accepted negative value |
+| Zero price | `0` | 2xx response with different body → zero-cost accepted |
+| Fractional negative | `-0.01` | 2xx response with different body → float underflow accepted |
+| Field removal | Field omitted from body | 2xx response with different body → missing field not validated |
+
+| Finding | Severity |
+|---|---|
+| Server accepted negative/zero price | HIGH |
+| Server accepted missing required price field | MEDIUM |
+
+- `allow_redirects=False` to avoid completing transactions
+- 8-second timeout per probe
+- Deduplicates per `(endpoint, field_path)` pair
+
+---
+
+#### JWT Algorithm Confusion Detection
+
+Tests for JWT security flaws on endpoints that return JWT tokens in response headers or body. Requires `--active-probes`. Three attack classes are probed:
+
+**alg:none** — Strips the signature and rewrites the header to `{"alg":"none","typ":"JWT"}`. If the server accepts the token (non-401/403 response), the signature requirement is completely disabled.
+
+**RS256 → HS256 confusion** — Fetches the server's public key from common JWKS paths (`/.well-known/jwks.json`, `/api/auth/keys`, etc.). Re-signs the original payload with the public key used as the HMAC-SHA256 secret. If the server accepts this token, it is verifying with the public key as a symmetric secret — a critical algorithm confusion vulnerability.
+
+**Weak HS256 secret brute-force** — Re-signs the original payload with each of ~20 common development secrets (`secret`, `password`, `123456`, etc.). If any is accepted, full token forgery is possible.
+
+| Finding | Severity |
+|---|---|
+| alg:none accepted | CRITICAL |
+| RS256 → HS256 confusion confirmed | CRITICAL |
+| Weak HS256 secret cracked | CRITICAL |
+
+- Requires `pyjwt[crypto]` — skipped gracefully if not installed
+- Deduplicates per `(endpoint, attack_class)` pair
+- Known documentation placeholder secrets suppressed from findings
+
+---
+
+#### Race Condition Detection
+
+Tests state-changing endpoints for race condition vulnerabilities by firing 10 simultaneous requests using a threading barrier. Requires `--active-probes`. Only fires on endpoints matching known sensitive operation patterns.
+
+**Endpoint categories tested:**
+
+| Pattern | Example paths | Risk |
+|---|---|---|
+| Coupon/promo redemption | `/coupon`, `/promo`, `/voucher`, `/redeem` | Double-spend a one-use code |
+| Password reset | `/reset-password`, `/forgot-password` | Multiple valid reset tokens issued |
+| Payment/checkout | `/checkout`, `/pay`, `/purchase` | Double-charge or double-fulfil |
+| Vote/like/reaction | `/vote`, `/like`, `/upvote` | Ballot stuffing |
+| Transfer/withdraw | `/transfer`, `/withdraw`, `/payout` | Balance race allowing overdraft |
+| Account/resource creation | `/register`, `/signup`, `/create` | Duplicate account creation |
+| Gift card/credit | `/gift-card`, `/credit`, `/redeem` | Multiple redemptions of single-use credit |
+
+**Detection logic:**
+
+| Finding | Severity | Signal |
+|---|---|---|
+| Race condition — inconsistent responses | HIGH | ≥2 distinct status codes across 10 simultaneous requests (e.g. mix of 200 and 409) |
+| Race condition — high timing variance | MEDIUM | Coefficient of variation of response times > 0.5 with ≥2 successful responses |
+
+- Destructive endpoints (`/delete`, `/drop`, `/purge`, etc.) are blocklisted and never tested
+- 10-second timeout per request
+- Deduplicates per endpoint URL
+
+---
+
 ### Alert Severity Levels
 
 | Severity | Meaning |
@@ -874,6 +949,15 @@ Every finding stored in the `Alerts` table (and displayed in the UI) carries a *
 | IDOR candidates | NEEDS VERIFICATION |
 | Admin panel 200 (generic, no body verification) | NEEDS VERIFICATION |
 | Prototype pollution crash (500 on injection) | NEEDS VERIFICATION |
+| Command injection (canary confirmed in body) | CONFIRMED |
+| SQL injection (error string reflected) | CONFIRMED |
+| LDAP injection (error string reflected) | CONFIRMED |
+| JWT algorithm confusion (alg:none / RS256→HS256 / weak secret) | CONFIRMED |
+| Price manipulation (server accepted probe) | CONFIRMED |
+| Race condition — inconsistent responses | CONFIRMED |
+| Race condition — timing variance only | LIKELY |
+| Insecure deserialization (active probe exception reflected) | CONFIRMED |
+| Insecure deserialization (passive format signal) | NEEDS VERIFICATION |
 
 Confidence is inferred automatically from the `alert_type` string — no changes to existing call sites are needed. The level is stored in the `Alerts` database table and displayed in both the terminal alert banner and the UI findings table as a colored badge (green = CONFIRMED, yellow = LIKELY, cyan = NEEDS VERIFICATION).
 

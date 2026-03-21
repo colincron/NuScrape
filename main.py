@@ -5972,6 +5972,9 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                 check_price_manipulation(url, html)
                 # JWT algorithm confusion — alg:none, RS256→HS256, weak secret
                 check_jwt_confusion(url, html, headers)
+                # Race condition — barrier-synchronised simultaneous probing of
+                # state-changing endpoints (coupon, reset, payment, vote, etc.)
+                check_race_condition(url, html)
             # IDOR candidate detection — runs in background thread with timeout
             # to prevent hung verification requests stalling the crawl
             _idor_thread = threading.Thread(
@@ -10559,6 +10562,256 @@ def check_jwt_confusion(page_url: str, html_content, response_headers: dict) -> 
                     f"arbitrary tokens with full control over all claims.{waf_note}",
                 )
                 print(timestamp() + f" [!!] JWT weak secret '{cracked_secret}' on {domain}")
+
+
+# ─────────────────────────────────────────────
+# Race condition detection
+# ─────────────────────────────────────────────
+
+# URL path patterns that indicate a state-changing endpoint worth probing.
+# Grouped by category so findings can name the likely operation.
+_RACE_ENDPOINT_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'/(?:coupon|promo|voucher|discount|redeem|code)',   re.I), "coupon/promo redemption"),
+    (re.compile(r'/(?:reset|forgot)[_-]?password|/password[_-]?reset', re.I), "password reset"),
+    (re.compile(r'/(?:register|signup|sign[_-]up|create[_-]account)', re.I), "account registration"),
+    (re.compile(r'/(?:upload|attach|import)',                         re.I), "file upload"),
+    (re.compile(r'/(?:checkout|payment|pay|purchase|order|buy)',      re.I), "payment/checkout"),
+    (re.compile(r'/(?:vote|like|upvote|downvote|react|favorite|fav)', re.I), "vote/like"),
+    (re.compile(r'/(?:transfer|withdraw|send|refund)',                 re.I), "financial transfer"),
+    (re.compile(r'/(?:verify|confirm|activate|token)',                 re.I), "token consumption"),
+    (re.compile(r'/(?:rate|limit|throttle)',                           re.I), "rate-limited endpoint"),
+]
+
+# Paths that should never be race-tested (destructive or noisy)
+_RACE_BLOCKLIST_RE = re.compile(
+    r'/(?:delete|destroy|remove|drop|purge|wipe|clear|flush|truncate'
+    r'|logout|signout|sign[_-]out|disable|deactivate|ban|suspend)',
+    re.I,
+)
+
+_RACE_THREADS    = 10        # simultaneous requests per probe
+_RACE_TIMEOUT    = 10        # seconds per request
+_RACE_MIN_OK     = 2         # minimum 200/201 count to flag HIGH
+_race_tested: set = set()    # endpoints already probed
+
+
+def _race_endpoint_category(path: str) -> str | None:
+    """
+    Return the human-readable category for *path* if it matches a race-prone
+    pattern, or None if it should not be tested.
+    """
+    if _RACE_BLOCKLIST_RE.search(path):
+        return None
+    for pattern, category in _RACE_ENDPOINT_PATTERNS:
+        if pattern.search(path):
+            return category
+    return None
+
+
+def _race_fire(url: str, method: str, barrier: threading.Barrier,
+               results: list, idx: int) -> None:
+    """
+    Worker thread: wait at the barrier, then fire one request and record
+    (status_code, elapsed_ms) in results[idx].
+    """
+    try:
+        barrier.wait()   # synchronise launch with all other threads
+        t0   = time.monotonic()
+        resp = _get_session().request(
+            method,
+            url,
+            headers=create_request_header(),
+            timeout=_RACE_TIMEOUT,
+            allow_redirects=False,   # don't follow — avoids unintended side-effects
+            verify=False,
+        )
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        results[idx] = (resp.status_code, elapsed_ms)
+    except Exception:
+        results[idx] = (None, 0)
+
+
+def check_race_condition(page_url: str, html_content) -> None:
+    """
+    Race condition detection via simultaneous barrier-synchronised requests.
+
+    Identifies endpoints on the page (URL + form actions/links) that match
+    state-changing path patterns (coupon redemption, password reset, file
+    upload, payment, vote/like, token consumption, rate-limited operations).
+
+    For each candidate endpoint:
+      1. Sends _RACE_THREADS (10) simultaneous requests using threading.Barrier
+         to release all threads at the same instant.
+      2. Collects (status_code, elapsed_ms) from every thread.
+      3. Flags HIGH  if ≥2 requests return 200/201 (only one should succeed)
+         or if response times show a high coefficient of variation (>50 %)
+         suggesting a TOCTOU window.
+      4. Flags MEDIUM if all requests succeed where rate-limiting should apply,
+         or if status codes are inconsistent across threads.
+
+    Detection only — no destructive commands, no financial transactions,
+    no more than 10 concurrent requests per endpoint.
+    Deduplicates per endpoint URL.
+    10-second timeout per request.
+    Only called when --active-probes is enabled.
+    """
+    if not is_in_scope(page_url):
+        return
+    domain = urlparse(page_url).netloc
+    if is_third_party_cdn(domain):
+        return
+
+    # ── Collect candidate URLs ────────────────────────────────────────────────
+    candidates: list[tuple[str, str]] = []   # (url, http_method)
+
+    def _add_if_race_worthy(raw_url: str, method: str) -> None:
+        try:
+            resolved = urljoin(page_url, raw_url)
+            parsed   = urlparse(resolved)
+            if is_third_party_cdn(parsed.netloc):
+                return
+            path = parsed.path
+            if _race_endpoint_category(path) is None:
+                return
+            # Normalise to scheme+host+path (drop query — we test the endpoint, not params)
+            base = parsed.scheme + "://" + parsed.netloc + path
+            if base not in _race_tested:
+                candidates.append((base, method.upper()))
+        except Exception:
+            pass
+
+    # Page URL itself
+    _add_if_race_worthy(page_url, "GET")
+
+    # Form actions and anchor hrefs from the page
+    if html_content:
+        try:
+            body_s = (html_content if isinstance(html_content, str)
+                      else html_content.decode("utf-8", errors="ignore"))
+            soup = BeautifulSoup(body_s, "lxml")
+        except Exception:
+            soup = None
+
+        if soup:
+            for form in soup.find_all("form"):
+                action = form.get("action") or page_url
+                method = (form.get("method") or "POST").strip().upper()
+                if method not in ("GET", "POST"):
+                    method = "POST"
+                _add_if_race_worthy(action, method)
+            for tag in soup.find_all("a", href=True):
+                _add_if_race_worthy(tag["href"], "GET")
+
+    if not candidates:
+        return
+
+    waf_note = ""
+    waf_vendor = _waf_results.get(domain)
+    if waf_vendor:
+        waf_note = f" [WAF: {waf_vendor} detected]"
+
+    for endpoint, method in candidates:
+        if endpoint in _race_tested:
+            continue
+        _race_tested.add(endpoint)
+
+        category = _race_endpoint_category(urlparse(endpoint).path)
+        if category is None:
+            continue
+
+        print(timestamp() + f" Race condition probe: {endpoint} [{method}] ({category})")
+        stealth_delay(domain)
+
+        results:  list = [None] * _RACE_THREADS
+        barrier = threading.Barrier(_RACE_THREADS)
+        threads  = [
+            threading.Thread(
+                target=_race_fire,
+                args=(endpoint, method, barrier, results, i),
+                daemon=True,
+            )
+            for i in range(_RACE_THREADS)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=_RACE_TIMEOUT + 2)
+
+        # ── Analyse results ───────────────────────────────────────────────
+        valid      = [(s, ms) for s, ms in results if s is not None]
+        if not valid:
+            continue
+
+        status_codes = [s for s, _ in valid]
+        ok_count     = sum(1 for s in status_codes if s in (200, 201))
+        times_ms     = [ms for _, ms in valid if ms > 0]
+
+        # Coefficient of variation for response times
+        cv = 0.0
+        if len(times_ms) > 1:
+            mean = sum(times_ms) / len(times_ms)
+            if mean > 0:
+                variance = sum((t - mean) ** 2 for t in times_ms) / len(times_ms)
+                cv = (variance ** 0.5) / mean
+
+        status_summary = ", ".join(str(s) for s in sorted(set(status_codes)))
+        time_summary   = (f"min={min(times_ms)}ms max={max(times_ms)}ms "
+                          f"cv={cv:.0%}" if times_ms else "n/a")
+
+        detail_base = (
+            f"Race condition probe on {category} endpoint {endpoint} — "
+            f"sent {_RACE_THREADS} simultaneous {method} requests. "
+            f"Status codes: {status_summary} ({ok_count}/{len(valid)} succeeded). "
+            f"Response times: {time_summary}.{waf_note}"
+        )
+
+        if ok_count >= _RACE_MIN_OK:
+            alert(
+                "RACE CONDITION: MULTIPLE SUCCESSES",
+                "HIGH",
+                endpoint,
+                detail_base + (
+                    f" Multiple requests returned success status — "
+                    f"endpoint may lack atomic state guards."
+                ),
+            )
+            print(timestamp() + f" [!!] Race condition ({ok_count} successes) at {endpoint}")
+
+        elif cv > 0.5 and ok_count >= 1:
+            alert(
+                "RACE CONDITION: HIGH TIMING VARIANCE",
+                "HIGH",
+                endpoint,
+                detail_base + (
+                    f" High response-time coefficient of variation ({cv:.0%}) "
+                    f"with {ok_count} success(es) suggests a TOCTOU window."
+                ),
+            )
+            print(timestamp() + f" [!!] Race condition (timing variance {cv:.0%}) at {endpoint}")
+
+        elif len(set(status_codes)) > 1 and ok_count >= 1:
+            alert(
+                "RACE CONDITION: INCONSISTENT RESPONSES",
+                "MEDIUM",
+                endpoint,
+                detail_base + (
+                    f" Mixed status codes across simultaneous requests suggest "
+                    f"non-atomic state handling."
+                ),
+            )
+            print(timestamp() + f" [!] Race condition (inconsistent statuses) at {endpoint}")
+
+        elif ok_count == len(valid) and category == "rate-limited endpoint":
+            alert(
+                "RACE CONDITION: RATE LIMIT BYPASS",
+                "MEDIUM",
+                endpoint,
+                detail_base + (
+                    f" All {_RACE_THREADS} simultaneous requests succeeded on a "
+                    f"rate-limited endpoint — rate limiting may not be enforced atomically."
+                ),
+            )
+            print(timestamp() + f" [!] Race condition (rate limit bypass) at {endpoint}")
 
 
 # ─────────────────────────────────────────────
