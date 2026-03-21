@@ -2269,6 +2269,12 @@ def record_http_response(url, status_code):
 # Cache so each IP is only looked up once per crawl session
 _asn_cache = {}
 
+# IPs already PTR-queried this session (session-scoped — PTR records don't change per target)
+_ptr_looked_up: set = set()
+
+# ASN numbers already queried for prefix enumeration this session
+_asn_prefixes_fetched: set = set()
+
 # Known CDN/hosting ASN patterns — checked against org field from ipinfo.io
 CDN_PATTERNS = {
     "Akamai":      ["akamai"],
@@ -2358,6 +2364,173 @@ def write_to_asn_database(ip, asn, org, country, is_cdn, cdn_name):
         print_error("write_to_asn_database: " + str(e))
     finally:
         conn.close()
+
+# ─────────────────────────────────────────────
+# Reverse DNS (PTR) enumeration
+# ─────────────────────────────────────────────
+
+def reverse_dns_lookup(ip: str) -> list:
+    """
+    Perform a PTR record lookup for ip and return all discovered hostnames.
+
+    Deduplicates per IP via _ptr_looked_up (session-scoped — PTR records are
+    stable across target switches within a run).
+
+    In-scope hostnames (determined by is_in_scope(), which respects
+    SAME_DOMAIN_ONLY) are fed into enrich_domain() so their DNS, SSL,
+    port scan, and technology data is collected.  _subdomain_enriched
+    prevents duplicate enrichment for hosts already discovered via other paths.
+
+    Stores every found PTR → hostname mapping in the ReverseDNS table.
+    Fires an INFO alert when at least one hostname is found.
+    5-second resolver timeout.
+    """
+    if not ip or ip == "Unknown":
+        return []
+    if ip in _ptr_looked_up:
+        return []
+    _ptr_looked_up.add(ip)
+
+    try:
+        parts = ip.split(".")
+        if len(parts) != 4:
+            return []
+        ptr_name = ".".join(reversed(parts)) + ".in-addr.arpa"
+        resolver = dns.resolver.Resolver()
+        resolver.timeout = 5
+        resolver.lifetime = 5
+        answers = resolver.resolve(ptr_name, "PTR")
+        hostnames = [str(rdata).rstrip(".") for rdata in answers]
+    except Exception:
+        return []
+
+    if not hostnames:
+        return []
+
+    _write_reverse_dns_database(ip, hostnames)
+    print(timestamp() + f" [PTR] {ip} → {', '.join(hostnames)}")
+    alert(
+        "REVERSE DNS DISCOVERY", "INFO", ip,
+        f"PTR lookup found {len(hostnames)} hostname(s): {', '.join(hostnames)}"
+    )
+
+    # Scope expansion — enrich each in-scope PTR hostname once
+    for hostname in hostnames:
+        candidate = "https://" + hostname
+        if not is_in_scope(candidate):
+            continue
+        if hostname in _subdomain_enriched:
+            continue
+        _subdomain_enriched.add(hostname)
+        try:
+            enrich_domain(candidate)
+        except Exception:
+            pass
+
+    return hostnames
+
+
+def _write_reverse_dns_database(ip: str, hostnames: list) -> None:
+    conn = sqlite3.connect("ScrapeDB", isolation_level=None)
+    try:
+        create_db(conn, "ReverseDNS")
+        ts = timestamp()
+        for hostname in hostnames:
+            exists = conn.execute(
+                "SELECT ip FROM ReverseDNS WHERE ip=? AND hostname=? LIMIT 1",
+                (ip, hostname)
+            ).fetchone()
+            if not exists:
+                conn.execute(
+                    "INSERT INTO ReverseDNS (ip, hostname, found_at) VALUES (?,?,?)",
+                    (ip, hostname, ts)
+                )
+    except Exception as e:
+        print_error("_write_reverse_dns_database: " + str(e))
+    finally:
+        conn.close()
+
+
+# ─────────────────────────────────────────────
+# ASN prefix enumeration (RIPE NCC stat API)
+# ─────────────────────────────────────────────
+
+def enumerate_asn_prefixes(asn_number: str, org_name: str) -> list:
+    """
+    Query the RIPE NCC stat API for all IP prefixes announced by asn_number.
+    Returns a list of prefix strings (e.g. ["1.2.3.0/24", ...]).
+
+    Deduplicates per ASN via _asn_prefixes_fetched.  Session-scoped — the
+    same ASN is shared across many IPs so we only query it once regardless
+    of which target triggered the lookup.
+
+    Stores results in the ASNPrefixes table.  Fires an INFO alert listing
+    discovered prefixes (first 6 shown; remainder counted).
+    8-second timeout per API call.
+    """
+    if not asn_number or not asn_number.upper().startswith("AS"):
+        return []
+    asn_norm = asn_number.upper()
+    if asn_norm in _asn_prefixes_fetched:
+        return []
+    _asn_prefixes_fetched.add(asn_norm)
+
+    try:
+        resp = _get_session().get(
+            f"https://stat.ripe.net/data/announced-prefixes/data.json"
+            f"?resource={asn_norm}",
+            headers={"Accept": "application/json",
+                     "User-Agent": random.choice(UA_POOL)},
+            timeout=8,
+        )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        prefixes = [
+            entry["prefix"]
+            for entry in data.get("data", {}).get("prefixes", [])
+            if entry.get("prefix")
+        ]
+    except Exception as e:
+        print_error(f"enumerate_asn_prefixes failed for {asn_norm}: {e}")
+        return []
+
+    if not prefixes:
+        return []
+
+    _write_asn_prefixes_database(asn_norm, org_name, prefixes)
+    sample  = ", ".join(prefixes[:6])
+    extra   = f" (+{len(prefixes) - 6} more)" if len(prefixes) > 6 else ""
+    print(timestamp() + f" [ASN] {asn_norm} ({org_name}) — "
+                        f"{len(prefixes)} prefixes: {sample}{extra}")
+    alert(
+        "ASN PREFIX ENUMERATION", "INFO", asn_norm,
+        f"RIPE NCC reports {len(prefixes)} announced prefix(es) for "
+        f"{asn_norm} ({org_name}): {sample}{extra}"
+    )
+    return prefixes
+
+
+def _write_asn_prefixes_database(asn: str, org: str, prefixes: list) -> None:
+    conn = sqlite3.connect("ScrapeDB", isolation_level=None)
+    try:
+        create_db(conn, "ASNPrefixes")
+        ts = timestamp()
+        for prefix in prefixes:
+            exists = conn.execute(
+                "SELECT asn FROM ASNPrefixes WHERE asn=? AND prefix=? LIMIT 1",
+                (asn, prefix)
+            ).fetchone()
+            if not exists:
+                conn.execute(
+                    "INSERT INTO ASNPrefixes (asn, org, prefix, found_at) VALUES (?,?,?,?)",
+                    (asn, org, prefix, ts)
+                )
+    except Exception as e:
+        print_error("_write_asn_prefixes_database: " + str(e))
+    finally:
+        conn.close()
+
 
 # ─────────────────────────────────────────────
 # Exposure checks — .git, .env, CORS, directory listing, backup files, SPF/DMARC
@@ -4288,6 +4461,22 @@ def enrich_domain(domain_name, response_headers=None, html_content=None):
         # ASN lookup — identifies CDNs, hosting providers, and org ownership
         asn_info = asn_lookup(ip)
 
+        # ── Parallel passive recon: reverse DNS + ASN prefix enumeration ──
+        # Both are non-vulnerability checks that extend IP → hostname and
+        # org → prefix visibility.  Run concurrently so neither blocks the other.
+        from concurrent.futures import ThreadPoolExecutor as _PTRE, as_completed as _pac
+        _pfuts = {}
+        with _PTRE(max_workers=2) as _pex:
+            if ip and ip != "Unknown":
+                _pfuts[_pex.submit(reverse_dns_lookup, ip)] = "ptr"
+            if asn_info and asn_info.get("asn"):
+                _pfuts[_pex.submit(
+                    enumerate_asn_prefixes,
+                    asn_info["asn"], asn_info.get("org", "")
+                )] = "asn_prefixes"
+            for _pf in _pac(_pfuts):
+                pass
+
         # Fingerprint technologies from headers + HTML (HTML optional).
         # Always call so header-only signals (X-Powered-By, cookies) are caught
         # even when the crawl loop doesn't provide html_content.
@@ -6011,6 +6200,17 @@ def create_db(conn, table_name):
                                 page_url        TEXT NOT NULL,
                                 ws_url          TEXT NOT NULL,
                                 encrypted       INTEGER DEFAULT 0,
+                                found_at        TEXT NOT NULL
+                             )''',
+        "ReverseDNS":      '''CREATE TABLE IF NOT EXISTS ReverseDNS (
+                                ip              TEXT NOT NULL,
+                                hostname        TEXT NOT NULL,
+                                found_at        TEXT NOT NULL
+                             )''',
+        "ASNPrefixes":     '''CREATE TABLE IF NOT EXISTS ASNPrefixes (
+                                asn             TEXT NOT NULL,
+                                org             TEXT,
+                                prefix          TEXT NOT NULL,
                                 found_at        TEXT NOT NULL
                              )''',
     }

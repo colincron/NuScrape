@@ -150,7 +150,8 @@ NuScrape collects the following for every domain it encounters during crawling:
 - **MX records** — mail server configuration
 - **SSL/TLS certificates** — common name, issuer, validity dates, expiry warnings
 - **WHOIS** — registrar, creation date, expiration date
-- **ASN / IP intelligence** — autonomous system, organisation name, country, CDN detection
+- **ASN / IP intelligence** — autonomous system, organisation name, country, CDN detection; prefix enumeration via RIPE NCC stat API (all announced IP ranges for the discovered ASN, stored in `ASNPrefixes`)
+- **Reverse DNS (PTR)** — for every resolved IP, queries the `.in-addr.arpa` PTR record to discover additional hostnames sharing that IP; in-scope hostnames are automatically enriched (DNS, SSL, port scan); results stored in `ReverseDNS`; 5-second resolver timeout, deduplicated per IP per session
 - **Open ports** — scans common ports (21, 22, 25, 80, 443, 3306, 5432, 6379, 8080, 8443, 27017, etc.)
 - **Technology fingerprinting** — detects 28 technologies from response headers, cookies, and HTML; automatically runs targeted security checks for WordPress, Laravel, Spring Boot, Django, Rails, Drupal, and Joomla once confirmed
 - **Subdomain enumeration** — probes a wordlist of common subdomain names against each root domain, with wildcard DNS detection to suppress false positives
@@ -1170,13 +1171,13 @@ Log output:
 
 **Per-endpoint baseline profiling**
 
-Before running active probes, NuScrape collects a **3-sample baseline** for each `(endpoint, params)` combination using cache-busted GET requests. The multi-sample baseline captures response variability and produces richer metrics than a single reference fetch:
+Before running active probes, NuScrape collects a **2-sample baseline** for each `(endpoint, params)` combination using cache-busted GET requests. Both requests fire concurrently so total collection time is bounded by the slower of the two responses. Stealth delays are deliberately skipped — baseline requests are internal measurement probes, not crawl traffic. The two samples capture response variability and produce richer metrics than a single reference fetch:
 
 | Metric | How collected | Used for |
 |---|---|---|
 | `status_code` | Last sample's HTTP status | Status-change anomaly detection |
-| `response_length_mean` / `_std` | Mean ± population std of 3 body lengths | Length-change anomaly gating |
-| `response_time_mean` / `_std` | Mean ± std of 3 round-trip times (ms) | Timing-anomaly gating (time-based blind) |
+| `response_length_mean` / `_std` | Mean ± population std of 2 body lengths | Length-change anomaly gating |
+| `response_time_mean` / `_std` | Mean ± std of 2 round-trip times (ms), measured per-thread | Timing-anomaly gating (time-based blind) |
 | `content_fingerprint` | SHA-256 (first 16 hex chars) of dynamic-masked body | Structural-change detection |
 | `dynamic_regions` | Character ranges that differ across samples | Excluded from fingerprint comparison |
 | `body` | Last sample's raw body | Backward-compatible diff logic |
@@ -1194,12 +1195,7 @@ ISO timestamps, 10–13-digit Unix epochs, 32+-char hex strings, 40+-char base64
 | Response time > mean + 3 × std (time-based probes) | `response time Xms > threshold Yms` |
 | No baseline available (collection failed) | `no baseline` — **never suppresses** |
 
-**Hard timeouts** — baseline collection is bounded at two levels to prevent slow endpoints from stalling the crawler:
-
-| Limit | Value | Behaviour on breach |
-|---|---|---|
-| Per-request | 8 seconds (`requests.exceptions.Timeout`) | Endpoint skipped immediately; cached as `None`; logs `[Baseline] Skipping <url> — timeout on baseline request` |
-| Total budget | 20 seconds across all 3 requests | Abort before starting the next sample; same skip log and `None` cache |
+**Hard timeout** — 8 seconds per request, enforced at two levels: `requests` timeout parameter and `concurrent.futures.Future.result(timeout=8)`. The `future.result` cap catches DNS stalls and SSL hangs that can bypass the `requests` timeout. On breach, remaining futures are cancelled and the endpoint is skipped (`None` cached); logs `[Baseline] Skipping <url> — timed out`. Because both requests fire concurrently, the effective worst-case collection time is 8 seconds total, not 16.
 
 If baseline collection is skipped due to timeout, all probe functions that depend on a baseline treat it as "no baseline available" — the `no baseline` anomaly gate fires, meaning **findings are never suppressed** due to a missing baseline.
 
@@ -1325,6 +1321,8 @@ All findings are stored in `ScrapeDB` (SQLite) in the same directory as `main.py
 | `SecurityHeaders` | Header audit per domain |
 | `Subdomains` | Enumerated subdomains with IP and status |
 | `ASN` | IP → ASN/org/country/CDN mapping |
+| `ReverseDNS` | PTR record results: IP → discovered hostnames |
+| `ASNPrefixes` | RIPE NCC announced IP prefixes per ASN |
 | `XHREndpoints` | API endpoints extracted from JS bundles |
 | `JSFindings` | Secrets, endpoints, staging URLs, source maps, IDOR candidates, JWT findings |
 | `Robots` | robots.txt content per domain |
