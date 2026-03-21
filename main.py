@@ -18,6 +18,7 @@ import statistics
 import difflib
 import hashlib
 from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor as _BLThreadPoolExecutor
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -6922,6 +6923,9 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
             scan_deserial_passive(url, html, headers)
             # Active probe checks — only run when --active-probes is enabled
             if ACTIVE_PROBES:
+                # Pre-queue baselines in the background so they can complete while
+                # the earlier non-baseline checks (SSRF, redirect, GraphQL, etc.) run.
+                _schedule_baselines_for_page(url, html)
                 # SSRF OOB confirmation — interactsh callback for URL-accepting params
                 check_ssrf_oob(url, html)
                 # Open redirect detection — probes URL params with canary URL
@@ -9254,7 +9258,17 @@ class EndpointBaseline:
     body: str = ""
 
 
-_endpoint_baselines: dict = {}   # (base_url, params_frozen) → EndpointBaseline | None
+_endpoint_baselines: dict = {}        # key → EndpointBaseline | None  (completed)
+_endpoint_baseline_futures: dict = {} # key → Future[EndpointBaseline | None]  (in-flight)
+
+# Background thread pool for non-blocking baseline collection (max 3 concurrent fetches).
+_baseline_pool = _BLThreadPoolExecutor(max_workers=3, thread_name_prefix="nuscrape-bl")
+
+# Static file extensions — never worth baselining.
+_BL_STATIC_EXT_RE = re.compile(
+    r'\.(?:js|css|png|jpe?g|gif|webp|svg|ico|woff2?|ttf|eot|map)$',
+    re.IGNORECASE,
+)
 
 # Masks dynamic content before fingerprinting (timestamps, epochs, hex, base64, UUIDs)
 _BL_DYNAMIC_RE = re.compile(
@@ -9303,80 +9317,62 @@ def _bl_find_dynamic_regions(bodies: list) -> list:
     return [tuple(r) for r in merged]
 
 
-def _get_endpoint_baseline(base: str, params: dict, timeout: int = 8):
+def _collect_baseline_worker(base: str, params: dict):
     """
-    Collect a 3-sample baseline for (base, params).
-
-    Each request uses a unique cache-busting nonce so CDN/proxy caching does
-    not flatten all three samples into the same cached copy.
+    Background worker: collect a 2-sample baseline for (base, params).
 
     Hard timeouts:
-      - Per-request: 8 seconds (requests.exceptions.Timeout).  On timeout the
-        endpoint is skipped entirely and None is returned.
-      - Total budget: 20 seconds across all 3 requests.  If the budget is
-        exhausted before all samples are collected, the function aborts early
-        and skips the endpoint.
+      - Per-request: 5 seconds (requests.exceptions.Timeout)
+      - Total budget: 12 seconds across both requests
 
-    Returns an EndpointBaseline or None on total failure.
-    Cached per (base, frozenset(params.items())).
+    Returns EndpointBaseline or None. Called via _baseline_pool only.
     """
-    if not BASELINE_ENABLED:
-        return None
-
-    key = (base, frozenset(params.items()))
-    if key in _endpoint_baselines:
-        return _endpoint_baselines[key]
+    _PER_REQ_TIMEOUT = 5
+    _TOTAL_BUDGET    = 12.0
 
     query = "&".join(f"{k}={v}" for k, v in params.items())
     samples_body: list = []
-    samples_len: list = []
+    samples_len:  list = []
     samples_time: list = []
     last_status = None
-    last_ct = ""
-
-    _BASELINE_BUDGET = 20.0   # seconds — total across all 3 requests
+    last_ct     = ""
     budget_start = time.monotonic()
 
-    for i in range(3):
-        # Abort if the total baseline budget is exhausted
-        if time.monotonic() - budget_start > _BASELINE_BUDGET:
-            print(timestamp() + f" [Baseline] Skipping {base} — timeout on baseline request")
-            _endpoint_baselines[key] = None
+    for i in range(2):
+        if time.monotonic() - budget_start > _TOTAL_BUDGET:
+            print(timestamp() + f" [Baseline] Skipping {base} — timeout")
             return None
-
         bust = f"_cb={int(time.time() * 1000) + i}"
-        sep = "&" if query else ""
-        url = base + "?" + query + sep + bust
+        sep  = "&" if query else ""
+        url  = base + "?" + query + sep + bust
         try:
-            t0 = time.monotonic()
+            t0   = time.monotonic()
             resp = _get_session().get(
                 url,
                 headers=create_request_header(),
-                timeout=timeout,
+                timeout=_PER_REQ_TIMEOUT,
                 allow_redirects=True,
                 verify=False,
             )
-            elapsed_ms = (time.monotonic() - t0) * 1000
-            body = resp.text or ""
+            elapsed_ms  = (time.monotonic() - t0) * 1000
+            body        = resp.text or ""
             last_status = resp.status_code
-            last_ct = resp.headers.get("Content-Type", "")
+            last_ct     = resp.headers.get("Content-Type", "")
             samples_body.append(body)
             samples_len.append(len(body))
             samples_time.append(elapsed_ms)
         except requests.exceptions.Timeout:
-            print(timestamp() + f" [Baseline] Skipping {base} — timeout on baseline request")
-            _endpoint_baselines[key] = None
+            print(timestamp() + f" [Baseline] Skipping {base} — timeout")
             return None
         except Exception:
             pass
 
     if not samples_body:
-        _endpoint_baselines[key] = None
         return None
 
     dynamic_regions = _bl_find_dynamic_regions(samples_body)
-    masked = _bl_mask_body(samples_body[-1])
-    fingerprint = _bl_fingerprint(masked)
+    masked          = _bl_mask_body(samples_body[-1])
+    fingerprint     = _bl_fingerprint(masked)
 
     bl = EndpointBaseline(
         url=base,
@@ -9390,11 +9386,117 @@ def _get_endpoint_baseline(base: str, params: dict, timeout: int = 8):
         dynamic_regions=dynamic_regions,
         body=samples_body[-1],
     )
-    _endpoint_baselines[key] = bl
     print(timestamp() + f" [Baseline] {base} — status={bl.status_code} "
           f"len={bl.response_length_mean:.0f}±{bl.response_length_std:.0f} "
           f"fp={bl.content_fingerprint}")
     return bl
+
+
+def _schedule_endpoint_baseline(base: str, params: dict) -> None:
+    """
+    Submit baseline collection for (base, params) to the background pool.
+
+    Returns immediately — never blocks.  Call _get_endpoint_baseline() later
+    to retrieve the result.  No-op when:
+      - BASELINE_ENABLED is False
+      - endpoint path matches a static asset extension
+      - endpoint host is a third-party CDN
+      - baseline already completed or is already in-flight
+    """
+    if not BASELINE_ENABLED:
+        return
+    if _BL_STATIC_EXT_RE.search(urlparse(base).path):
+        return
+    if is_third_party_cdn(urlparse(base).netloc):
+        return
+    key = (base, frozenset(params.items()))
+    if key in _endpoint_baselines or key in _endpoint_baseline_futures:
+        return
+    _endpoint_baseline_futures[key] = _baseline_pool.submit(
+        _collect_baseline_worker, base, params
+    )
+
+
+def _get_endpoint_baseline(base: str, params: dict, timeout: int = 8):
+    """
+    Non-blocking retrieval of a completed baseline for (base, params).
+
+    Returns EndpointBaseline if collection has finished, None otherwise.
+    If no collection has been scheduled yet, submits one and returns None
+    (probe proceeds without diffing; baseline will be available for the
+    next probe on the same endpoint).
+
+    The timeout parameter is accepted for call-site compatibility but is no
+    longer used here — timeouts are enforced inside _collect_baseline_worker.
+    """
+    if not BASELINE_ENABLED:
+        return None
+    key = (base, frozenset(params.items()))
+    # Fast path: already completed
+    if key in _endpoint_baselines:
+        return _endpoint_baselines[key]
+    # Check in-flight future
+    fut = _endpoint_baseline_futures.get(key)
+    if fut is not None:
+        if fut.done():
+            result = fut.result()
+            _endpoint_baselines[key] = result
+            return result
+        # Still running — proceed without baseline
+        return None
+    # Nothing scheduled yet — queue it and return None
+    _schedule_endpoint_baseline(base, params)
+    return None
+
+
+def _schedule_baselines_for_page(url: str, html) -> None:
+    """
+    Pre-queue background baseline collection for probe-able endpoints on this page.
+
+    Called from the crawl loop at the very start of the ACTIVE_PROBES block so
+    that baselines have time to complete while the earlier non-baseline checks
+    (SSRF, open redirect, GraphQL, mass-assignment, API versioning) are running.
+    By the time check_path_traversal / check_ssti / check_sqli etc. fire, the
+    baseline future will often already be done.
+
+    Schedules:
+      1. The page URL itself (covers all URL-param-based probes).
+      2. Same-domain POST/PUT/PATCH form action URLs (covers HPP, LDAP, etc.).
+    """
+    if not BASELINE_ENABLED:
+        return
+    domain = urlparse(url).netloc
+
+    # 1 — page URL params
+    parsed = urlparse(url)
+    if parsed.query:
+        from urllib.parse import parse_qs as _pqs
+        qparams = {k: v[0] for k, v in _pqs(parsed.query, keep_blank_values=True).items()}
+        base    = parsed.scheme + "://" + parsed.netloc + parsed.path
+        _schedule_endpoint_baseline(base, qparams)
+
+    # 2 — form action URLs
+    try:
+        text = html if isinstance(html, str) \
+               else (html or b"").decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(text, "lxml")
+        for form in soup.find_all("form"):
+            method = form.get("method", "get").upper()
+            if method not in ("POST", "PUT", "PATCH"):
+                continue
+            action   = form.get("action") or url
+            form_url = urljoin(url, action)
+            if urlparse(form_url).netloc != domain:
+                continue
+            fp       = urlparse(form_url)
+            fbase    = fp.scheme + "://" + fp.netloc + fp.path
+            fparams: dict = {}
+            if fp.query:
+                from urllib.parse import parse_qs as _pqs2
+                fparams = {k: v[0] for k, v in _pqs2(fp.query).items()}
+            _schedule_endpoint_baseline(fbase, fparams)
+    except Exception:
+        pass
 
 
 def _is_probe_anomalous(
@@ -14800,7 +14902,7 @@ def _reset_per_domain_state() -> None:
     global _ldapi_tested, _ldapi_form_tested
     global _deserial_passive_seen, _deserial_active_tested
     global _price_tested, _jwt_tested, _hpp_tested, _wcp_tested, _probe_baseline, _entropy_seen
-    global _timing_profiles, _endpoint_baselines
+    global _timing_profiles, _endpoint_baselines, _endpoint_baseline_futures
     global _ssrf_flagged, _ssrf_candidates, _ssrf_tested
     global _idor_tested, _takeover_checked, _s3_checked, _s3_permutation_checked
     global _subdomain_enriched, _ct_queried, _cookie_seen, _js_analysis_threads
@@ -14853,7 +14955,8 @@ def _reset_per_domain_state() -> None:
     _hpp_tested             = set()
     _wcp_tested             = set()
     _probe_baseline         = {}
-    _endpoint_baselines     = {}
+    _endpoint_baselines         = {}
+    _endpoint_baseline_futures  = {}
     _entropy_seen           = set()
     _timing_profiles        = {}
     _ssrf_flagged           = set()
