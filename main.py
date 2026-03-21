@@ -4503,6 +4503,198 @@ def is_identifier_string(val):
         return True
     return False
 
+
+# ─────────────────────────────────────────────
+# Fingerprint-based false-positive suppression
+# ─────────────────────────────────────────────
+#
+# Each category maps to a list of patterns.  Each pattern is either:
+#   str           — substring that must appear in the response body OR the
+#                   alert detail string (case-insensitive).
+#   tuple[str,..] — ALL substrings must appear in the response body
+#                   (compound match; body-only, not checked in detail).
+#
+# Tracking-param patterns are checked against the target URL and detail
+# string rather than the response body (they appear in query strings).
+
+FINGERPRINT_LIBRARY: dict = {
+
+    "cdn_errors": [
+        "Cloudflare Ray ID",                            # Cloudflare block page
+        ("Reference #", "Error"),                       # Akamai error page
+        "_Incapsula_Resource",                          # Incapsula / Imperva WAF
+        ("Attention Required!", "Cloudflare"),          # Cloudflare JS challenge
+        ("Access Denied", "Request ID"),                # AWS WAF block
+        ("This page can't be found", "IIS"),            # IIS default 404
+        "edgesuite.net",                                # Akamai edge error
+        "x-amzn-requestid",                             # AWS WAF / API Gateway header in body
+    ],
+
+    "cms_defaults": [
+        "If you can read this, WordPress is installed",
+        "Congratulations on your new WordPress site",
+        "Welcome to Laravel",
+        "Whitelabel Error Page",                        # Spring Boot default error
+        ("It worked!", "Apache"),                       # Apache httpd default page
+        "Welcome to nginx!",                            # nginx default page
+        "IIS Windows Server",                           # IIS default page
+        ("Hello world!", "WordPress"),                  # WordPress default post
+        "This is a default index page",
+    ],
+
+    "tracking_params": [
+        # URL parameter names — checked against target URL and detail,
+        # not the response body.
+        "msockid=", "msclkid=",                         # Microsoft
+        "fbclid=",                                      # Facebook / Meta
+        "gclid=", "dclid=",                             # Google
+        "twclid=",                                      # Twitter / X
+        "ttclid=",                                      # TikTok
+        "li_fat_id=",                                   # LinkedIn
+        "mc_eid=",                                      # Mailchimp
+        "utm_source=", "utm_medium=", "utm_campaign=",  # UTM
+        "_ga=", "_gid=",                                # Google Analytics
+    ],
+
+    "asset_hashes": [
+        # Patterns that mark a string as a content-addressable asset hash.
+        # Checked against the alert detail (which typically includes a snippet).
+        ".min.js", ".min.css", ".bundle.js", ".chunk.js",
+        "integrity=\"sha",                              # SRI hash attribute
+        "integrity='sha",
+    ],
+
+    "framework_defaults": [
+        "Laravel Telescope",
+        "Django administration",                        # Django admin login default
+        ("Spring Boot", "Actuator"),                    # Spring Boot actuator UI
+        "Rails Info",                                   # rails/info page
+        "Ruby on Rails: Welcome aboard",
+        "Yii Framework",
+        "Symfony Exception",                            # Symfony debug exception page
+    ],
+
+    "known_benign_strings": [
+        # jwt.io demo token (header segment is always identical)
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+        ".eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ",
+        # Common JWT placeholder secrets
+        "your-256-bit-secret",
+        "your-secret-key",
+        # Lorem ipsum — template / default content
+        "Lorem ipsum dolor sit amet",
+        # Placeholder API key strings in documentation
+        "YOUR_API_KEY",
+        "INSERT_KEY_HERE",
+        "YOUR_SECRET_KEY",
+        "REPLACE_WITH_YOUR_KEY",
+        "API_KEY_HERE",
+        "<YOUR_API_KEY>",
+        "{YOUR_API_KEY}",
+    ],
+}
+
+
+def _fp_log(finding_type: str, target: str, category: str, pattern: str) -> None:
+    """Print a DEBUG-level suppression notice."""
+    print(timestamp() + f" [FP Suppressed] {finding_type} on {target[:60]} "
+          f"matched fingerprint: {category}/{pattern[:50]}")
+
+
+def is_false_positive(
+    finding_type: str,
+    response_text: str,
+    target_url: str,
+    detail: str,
+) -> tuple:
+    """
+    Check a proposed finding against FINGERPRINT_LIBRARY.
+
+    Returns (True, category_name) if the finding should be suppressed,
+    or (False, None) if it should be fired normally.
+
+    Matching rules:
+      - str patterns in 'tracking_params': checked against target_url + detail
+        (tracking params appear in URLs, not response bodies).
+      - str patterns in other categories: checked against response_text AND
+        detail (case-insensitive substring match).
+      - tuple patterns: ALL substrings must appear in response_text
+        (body-only compound match).
+    """
+    body  = (response_text or "").lower()
+    det   = (detail or "").lower()
+    url   = (target_url or "").lower()
+
+    for category, patterns in FINGERPRINT_LIBRARY.items():
+        for pattern in patterns:
+            if isinstance(pattern, tuple):
+                # Compound body-only match
+                if body and all(p.lower() in body for p in pattern):
+                    _fp_log(finding_type, target_url, category,
+                            " + ".join(str(p) for p in pattern))
+                    return True, category
+            else:
+                needle = pattern.lower()
+                if category == "tracking_params":
+                    # URL / detail check only — avoid suppressing body-based findings
+                    if needle in url or needle in det:
+                        _fp_log(finding_type, target_url, category, pattern)
+                        return True, category
+                else:
+                    if needle in body or needle in det:
+                        _fp_log(finding_type, target_url, category, pattern)
+                        return True, category
+
+    return False, None
+
+
+def _load_user_fp_suppressions(path: str = "fp_suppressions.json") -> None:
+    """
+    Extend FINGERPRINT_LIBRARY with user-defined patterns from a JSON file.
+
+    The file must be a JSON object whose keys are category names and whose
+    values are lists of patterns.  Each pattern is either a string (single
+    match) or an array of strings (compound — all must be present in the
+    response body).  Unknown categories are added as new entries.
+
+    Example fp_suppressions.json:
+        {
+            "cdn_errors": ["My CDN error fingerprint"],
+            "my_custom": [["must have this", "and this"]]
+        }
+
+    Called once at module load; silently skips missing or malformed files.
+    """
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return
+        for category, patterns in data.items():
+            if not isinstance(patterns, list):
+                continue
+            converted = []
+            for p in patterns:
+                if isinstance(p, str):
+                    converted.append(p)
+                elif isinstance(p, list) and all(isinstance(s, str) for s in p):
+                    converted.append(tuple(p))   # inner list → compound tuple
+            if category in FINGERPRINT_LIBRARY:
+                FINGERPRINT_LIBRARY[category].extend(converted)
+            else:
+                FINGERPRINT_LIBRARY[category] = converted
+        print(timestamp() + f" [FP] Loaded user suppressions from {path} "
+              f"({sum(len(v) for v in data.values() if isinstance(v, list))} patterns)")
+    except Exception as exc:
+        print(timestamp() + f" [FP] Could not load {path}: {exc}")
+
+
+# Load user suppressions once at module initialisation
+_load_user_fp_suppressions()
+
+
 # ─────────────────────────────────────────────
 # Alert system — exploitable vulnerability detection
 # ─────────────────────────────────────────────
@@ -4779,12 +4971,18 @@ def write_to_alerts_database(alert_type, severity, target, detail, confidence=""
     finally:
         conn.close()
 
-def alert(alert_type, severity, target, detail, redact_detail=False):
+def alert(alert_type, severity, target, detail, redact_detail=False, response_body=None):
     """
     Print a high-visibility alert and persist it to the Alerts table.
     severity: CRITICAL | HIGH | MEDIUM
     redact_detail: if True, show only first 6 chars of detail in console output.
+    response_body: optional raw response text — passed to is_false_positive()
+                   for body-based fingerprint suppression.
     """
+    suppressed, fp_category = is_false_positive(alert_type, response_body or "", target, detail)
+    if suppressed:
+        return
+
     confidence = _infer_confidence(alert_type)
     display    = (detail[:6] + "*" * max(0, len(detail) - 6)) if redact_detail and len(detail) > 6 else detail
     bar        = _c("=" * 64, Fore.RED, Style.BRIGHT if severity in ("CRITICAL", "HIGH") else "")

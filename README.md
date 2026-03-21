@@ -1281,6 +1281,30 @@ Several measures are in place to reduce noise:
 
 **Default credential confirmation** — Login attempts require body or header confirmation signatures before declaring success. A bare 200 response is never sufficient.
 
+**Fingerprint-based false positive suppression library** — A central `FINGERPRINT_LIBRARY` is checked before every `alert()` call. If the response body, target URL, or finding detail matches a known benign fingerprint, the alert is silently dropped and a DEBUG log line is emitted instead. The library ships with six built-in categories:
+
+| Category | What it matches | Effect |
+|---|---|---|
+| `cdn_errors` | Cloudflare Ray ID, Akamai edgesuite.net, Incapsula resource blocks, AWS request IDs, generic CDN "Access Denied / Reference #" pages | Alert dropped |
+| `cms_defaults` | WordPress "If you can read this…" install pages, Laravel welcome pages, nginx/Apache/IIS default index pages, Whitelabel Error Page | Alert dropped |
+| `tracking_params` | `msockid=`, `msclkid=`, `fbclid=`, `gclid=`, `dclid=`, `twclid=`, `ttclid=`, `li_fat_id=`, `utm_*`, `_ga=`, `_gid=` in target URL or finding detail | Alert dropped |
+| `asset_hashes` | `.min.js`, `.min.css`, `.bundle.js`, `.chunk.js`, SRI integrity attributes (`integrity="sha…"`) | Alert dropped |
+| `framework_defaults` | Laravel Telescope, Django admin, Spring Boot Actuator, Rails Info, Ruby on Rails welcome, Yii Framework, Symfony Exception pages | Alert dropped |
+| `known_benign_strings` | jwt.io demo token, placeholder API key strings (`YOUR_API_KEY`, `INSERT_KEY_HERE`, `REPLACE_WITH_YOUR_KEY`, etc.), Lorem ipsum | Alert dropped |
+
+String patterns are matched as substrings. Tuple patterns are **compound**: all elements of the tuple must appear for the pattern to fire.
+
+**User-defined FP suppressions** — Place a `fp_suppressions.json` file in the working directory to extend the library at startup:
+
+```json
+{
+  "cdn_errors": ["My Custom CDN Error"],
+  "known_benign_strings": [["placeholder-token", "example.com"]]
+}
+```
+
+Inner arrays are treated as compound patterns (all elements must match). Any category name from the built-in library is valid; unknown keys create new categories.
+
 ---
 
 ## Responsible Disclosure
