@@ -11549,7 +11549,7 @@ def _race_fire(url: str, method: str, barrier: threading.Barrier,
                results: list, idx: int) -> None:
     """
     Worker thread: wait at the barrier, then fire one request and record
-    (status_code, elapsed_ms) in results[idx].
+    (status_code, elapsed_ms, body) in results[idx].
     """
     try:
         barrier.wait()   # synchronise launch with all other threads
@@ -11563,9 +11563,113 @@ def _race_fire(url: str, method: str, barrier: threading.Barrier,
             verify=False,
         )
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-        results[idx] = (resp.status_code, elapsed_ms)
+        results[idx] = (resp.status_code, elapsed_ms, resp.text or "")
     except Exception:
-        results[idx] = (None, 0)
+        results[idx] = (None, 0, "")
+
+
+def _race_run_burst(url: str, method: str) -> list:
+    """
+    Fire _RACE_THREADS simultaneous barrier-synchronised requests.
+    Returns a list of (status_code, elapsed_ms, body) tuples for threads
+    that returned a response (None entries excluded).
+    """
+    results = [None] * _RACE_THREADS
+    barrier = threading.Barrier(_RACE_THREADS)
+    threads = [
+        threading.Thread(
+            target=_race_fire,
+            args=(url, method, barrier, results, i),
+            daemon=True,
+        )
+        for i in range(_RACE_THREADS)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=_RACE_TIMEOUT + 2)
+    return [(s, ms, b) for s, ms, b in results if s is not None]
+
+
+# ── Response-analysis helpers ─────────────────────────────────────────────────
+
+# Patterns that extract identifiers from successful responses.
+# Group 1 (when present) is the token/id value; otherwise the full match is used.
+_RACE_ID_PATTERNS = [
+    re.compile(r'"(?:id|order_id|transaction_id|record_id)"\s*:\s*(\d+)', re.I),
+    re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', re.I),
+    re.compile(r'"(?:token|code|confirmation_code|session_?id|session_?token)"\s*:\s*"([^"]{6,})"', re.I),
+]
+
+# Timestamp formats stripped before comparing bodies for identity
+_RACE_TIMESTAMP_RE = re.compile(
+    r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?'
+    r'|\b\d{10,13}\b',
+)
+
+
+def _race_distinct_ids(ok_bodies: list) -> bool:
+    """
+    Return True if successful response bodies contain multiple *distinct* IDs,
+    UUIDs, or tokens — confirming that separate operations were created.
+    """
+    if len(ok_bodies) < 2:
+        return False
+    for pat in _RACE_ID_PATTERNS:
+        ids: set = set()
+        for body in ok_bodies:
+            for m in pat.finditer(body):
+                ids.add(m.group(1) if m.lastindex else m.group())
+        if len(ids) >= 2:
+            return True
+    return False
+
+
+def _race_timestamp_only_diff(body1: str, body2: str) -> bool:
+    """Return True if two bodies are identical after stripping timestamp fields."""
+    if body1 == body2:
+        return True
+    return _RACE_TIMESTAMP_RE.sub("__TS__", body1) == _RACE_TIMESTAMP_RE.sub("__TS__", body2)
+
+
+def _race_idempotency_check(url: str, method: str) -> bool:
+    """
+    Send the same request twice sequentially (not concurrently).
+
+    Returns True  — endpoint is non-idempotent (results differ or second fails).
+    Returns False — endpoint handles duplicates identically (idempotent).
+    """
+    statuses: list = []
+    bodies:   list = []
+    for _ in range(2):
+        try:
+            resp = _get_session().request(
+                method, url,
+                headers=create_request_header(),
+                timeout=_RACE_TIMEOUT,
+                allow_redirects=False,
+                verify=False,
+            )
+            statuses.append(resp.status_code)
+            bodies.append(resp.text or "")
+        except Exception:
+            statuses.append(None)
+            bodies.append("")
+
+    if len(statuses) < 2 or statuses[0] is None:
+        return True   # couldn't test — assume non-idempotent
+
+    s1, s2 = statuses[0], statuses[1]
+    b1, b2 = bodies[0],   bodies[1]
+
+    # First succeeds, second fails → endpoint rejects the duplicate → non-idempotent
+    if s1 in (200, 201) and s2 not in (200, 201):
+        return True
+    # Both succeed with different bodies (not just timestamp differences) → non-idempotent
+    if s1 in (200, 201) and s2 in (200, 201) and not _race_timestamp_only_diff(b1, b2):
+        return True
+    # Both succeed with same effective body → idempotent
+    return False
 
 
 def check_race_condition(page_url: str, html_content) -> None:
@@ -11659,96 +11763,154 @@ def check_race_condition(page_url: str, html_content) -> None:
         print(timestamp() + f" Race condition probe: {endpoint} [{method}] ({category})")
         stealth_delay(domain)
 
-        results:  list = [None] * _RACE_THREADS
-        barrier = threading.Barrier(_RACE_THREADS)
-        threads  = [
-            threading.Thread(
-                target=_race_fire,
-                args=(endpoint, method, barrier, results, i),
-                daemon=True,
-            )
-            for i in range(_RACE_THREADS)
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=_RACE_TIMEOUT + 2)
+        # ── 3-attempt confirmation loop ───────────────────────────────────
+        # Attempt 1 is the initial burst; attempts 2 and 3 follow after 5s waits.
+        all_attempts:      list = []   # list of burst result lists
+        attempt_ok_counts: list = []   # ok_count per attempt
 
-        # ── Analyse results ───────────────────────────────────────────────
-        valid      = [(s, ms) for s, ms in results if s is not None]
-        if not valid:
-            continue
+        for attempt_n in range(1, 4):
+            if attempt_n > 1:
+                time.sleep(5)
+                stealth_delay(domain)
 
-        status_codes = [s for s, _ in valid]
-        ok_count     = sum(1 for s in status_codes if s in (200, 201))
-        times_ms     = [ms for _, ms in valid if ms > 0]
+            burst = _race_run_burst(endpoint, method)
+            if not burst:
+                attempt_ok_counts.append(0)
+                all_attempts.append([])
+                print(timestamp() + f" [Race] Attempt {attempt_n}/3: 0/0 requests succeeded")
+                continue
 
-        # Coefficient of variation for response times
+            ok_count_n = sum(1 for s, ms, b in burst if s in (200, 201))
+            attempt_ok_counts.append(ok_count_n)
+            all_attempts.append(burst)
+            print(timestamp() + f" [Race] Attempt {attempt_n}/3: "
+                  f"{ok_count_n}/{len(burst)} requests succeeded")
+
+            # Short-circuit: if attempt 1 shows no signal at all, skip remaining bursts
+            if attempt_n == 1:
+                status_codes_1 = [s for s, ms, b in burst]
+                times_ms_1     = [ms for s, ms, b in burst if ms > 0]
+                cv_1 = 0.0
+                if len(times_ms_1) > 1:
+                    _mean = sum(times_ms_1) / len(times_ms_1)
+                    if _mean > 0:
+                        _var = sum((t - _mean) ** 2 for t in times_ms_1) / len(times_ms_1)
+                        cv_1 = (_var ** 0.5) / _mean
+
+                is_candidate = (
+                    ok_count_n >= _RACE_MIN_OK
+                    or (cv_1 > 0.5 and ok_count_n >= 1)
+                    or (len(set(status_codes_1)) > 1 and ok_count_n >= 1)
+                    or (ok_count_n == len(burst) and category == "rate-limited endpoint")
+                )
+                if not is_candidate:
+                    break   # no signal — skip confirmation attempts
+
+        # Use attempt-1 burst for timing summary (already computed above)
+        burst1       = all_attempts[0] if all_attempts else []
+        valid1       = burst1
+        status_codes = [s for s, ms, b in valid1]
+        times_ms     = [ms for s, ms, b in valid1 if ms > 0]
+        ok_count     = attempt_ok_counts[0] if attempt_ok_counts else 0
+
         cv = 0.0
         if len(times_ms) > 1:
-            mean = sum(times_ms) / len(times_ms)
-            if mean > 0:
-                variance = sum((t - mean) ** 2 for t in times_ms) / len(times_ms)
-                cv = (variance ** 0.5) / mean
+            _mean = sum(times_ms) / len(times_ms)
+            if _mean > 0:
+                _var = sum((t - _mean) ** 2 for t in times_ms) / len(times_ms)
+                cv   = (_var ** 0.5) / _mean
 
-        status_summary = ", ".join(str(s) for s in sorted(set(status_codes)))
-        time_summary   = (f"min={min(times_ms)}ms max={max(times_ms)}ms "
-                          f"cv={cv:.0%}" if times_ms else "n/a")
+        status_summary = ", ".join(str(s) for s in sorted(set(status_codes))) if status_codes else "—"
+        time_summary   = (f"min={min(times_ms)}ms max={max(times_ms)}ms cv={cv:.0%}"
+                          if times_ms else "n/a")
 
         detail_base = (
             f"Race condition probe on {category} endpoint {endpoint} — "
             f"sent {_RACE_THREADS} simultaneous {method} requests. "
-            f"Status codes: {status_summary} ({ok_count}/{len(valid)} succeeded). "
+            f"Status codes: {status_summary} ({ok_count}/{len(valid1)} succeeded). "
             f"Response times: {time_summary}.{waf_note}"
         )
 
-        if ok_count >= _RACE_MIN_OK:
-            alert(
-                "RACE CONDITION: MULTIPLE SUCCESSES",
-                "HIGH",
-                endpoint,
-                detail_base + (
-                    f" Multiple requests returned success status — "
-                    f"endpoint may lack atomic state guards."
-                ),
-            )
-            print(timestamp() + f" [!!] Race condition ({ok_count} successes) at {endpoint}")
+        # Count attempts that reproduced a race signal (ok_count >= _RACE_MIN_OK)
+        confirmed_attempts = sum(1 for c in attempt_ok_counts if c >= _RACE_MIN_OK)
+        if confirmed_attempts < 2 and ok_count >= _RACE_MIN_OK:
+            print(timestamp() + f" [Race] Not confirmed "
+                  f"({confirmed_attempts}/3 attempts reproduced) — skipping")
+            continue
 
-        elif cv > 0.5 and ok_count >= 1:
-            alert(
-                "RACE CONDITION: HIGH TIMING VARIANCE",
-                "HIGH",
-                endpoint,
-                detail_base + (
-                    f" High response-time coefficient of variation ({cv:.0%}) "
-                    f"with {ok_count} success(es) suggests a TOCTOU window."
-                ),
+        # Collect all successful response bodies across all confirmed attempts
+        all_ok_bodies = [
+            b for attempt in all_attempts
+            for s, ms, b in attempt if s in (200, 201)
+        ]
+
+        # ── Response analysis ─────────────────────────────────────────────
+        has_distinct_ids  = _race_distinct_ids(all_ok_bodies)
+        all_identical     = len(set(all_ok_bodies)) <= 1 if all_ok_bodies else True
+        ts_only_diff      = (
+            len(all_ok_bodies) >= 2
+            and _race_timestamp_only_diff(all_ok_bodies[0], all_ok_bodies[-1])
+        )
+
+        # All responses identical or differ only in timestamps → not a real race
+        if (all_identical or ts_only_diff) and ok_count >= _RACE_MIN_OK:
+            # Check if most requests were blocked (rate limiting working)
+            non_ok = sum(1 for s, ms, b in valid1 if s not in (200, 201))
+            if non_ok >= len(valid1) * 0.7:
+                continue   # rate limiting is working correctly
+            sev          = "MEDIUM"
+            alert_title  = "RACE CONDITION: IDENTICAL RESPONSES"
+            detail_extra = (" Responses are identical across concurrent requests — "
+                            "possible race condition, manual verification required.")
+
+        elif ok_count >= _RACE_MIN_OK or (cv > 0.5 and ok_count >= 1):
+            sev          = "HIGH" if has_distinct_ids else "MEDIUM"
+            alert_title  = ("RACE CONDITION: DISTINCT IDS RETURNED"
+                            if has_distinct_ids else "RACE CONDITION: MULTIPLE SUCCESSES")
+            detail_extra = (
+                " Multiple distinct IDs/tokens returned across concurrent requests — "
+                "confirms separate operations were created."
+                if has_distinct_ids else
+                " Multiple requests returned success status — "
+                "endpoint may lack atomic state guards."
             )
-            print(timestamp() + f" [!!] Race condition (timing variance {cv:.0%}) at {endpoint}")
 
         elif len(set(status_codes)) > 1 and ok_count >= 1:
-            alert(
-                "RACE CONDITION: INCONSISTENT RESPONSES",
-                "MEDIUM",
-                endpoint,
-                detail_base + (
-                    f" Mixed status codes across simultaneous requests suggest "
-                    f"non-atomic state handling."
-                ),
-            )
-            print(timestamp() + f" [!] Race condition (inconsistent statuses) at {endpoint}")
+            sev          = "MEDIUM"
+            alert_title  = "RACE CONDITION: INCONSISTENT RESPONSES"
+            detail_extra = (" Mixed status codes across simultaneous requests suggest "
+                            "non-atomic state handling.")
 
-        elif ok_count == len(valid) and category == "rate-limited endpoint":
-            alert(
-                "RACE CONDITION: RATE LIMIT BYPASS",
-                "MEDIUM",
-                endpoint,
-                detail_base + (
-                    f" All {_RACE_THREADS} simultaneous requests succeeded on a "
-                    f"rate-limited endpoint — rate limiting may not be enforced atomically."
-                ),
-            )
-            print(timestamp() + f" [!] Race condition (rate limit bypass) at {endpoint}")
+        elif ok_count == len(valid1) and category == "rate-limited endpoint":
+            sev          = "MEDIUM"
+            alert_title  = "RACE CONDITION: RATE LIMIT BYPASS"
+            detail_extra = (f" All {_RACE_THREADS} simultaneous requests succeeded on a "
+                            "rate-limited endpoint — rate limiting may not be enforced atomically.")
+
+        else:
+            continue   # no alertable condition
+
+        # ── Idempotency check ─────────────────────────────────────────────
+        print(timestamp() + f" [Race] Running idempotency check on {endpoint}")
+        non_idempotent = _race_idempotency_check(endpoint, method)
+        if not non_idempotent:
+            print(timestamp() + " [Race] Endpoint is idempotent — downgrading to LOW")
+            sev          = "LOW"
+            alert_title  = "RACE CONDITION: IDEMPOTENT ENDPOINT"
+            detail_extra += (" Sequential duplicate requests returned the same result — "
+                             "endpoint may handle duplicates correctly, but concurrent "
+                             "timing window may still exist.")
+        elif has_distinct_ids:
+            print(timestamp() + " [Race] Confirmed — multiple success responses with distinct IDs")
+        else:
+            print(timestamp() + f" [Race] Confirmed — non-idempotent endpoint "
+                  f"({confirmed_attempts}/3 attempts reproduced)")
+
+        alert(alert_title, sev, endpoint, detail_base + detail_extra)
+        if sev in ("HIGH", "CRITICAL"):
+            print(timestamp() + f" [!!] Race condition ({alert_title}) at {endpoint}")
+        else:
+            print(timestamp() + f" [!] Race condition ({alert_title}) at {endpoint}")
 
 
 # ─────────────────────────────────────────────

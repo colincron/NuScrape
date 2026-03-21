@@ -847,15 +847,48 @@ Tests state-changing endpoints for race condition vulnerabilities by firing 10 s
 | Account/resource creation | `/register`, `/signup`, `/create` | Duplicate account creation |
 | Gift card/credit | `/gift-card`, `/credit`, `/redeem` | Multiple redemptions of single-use credit |
 
+**Confirmation process (3 stages before alerting):**
+
+**1. Reproducibility check** — the initial burst counts as attempt 1. If a signal is detected, NuScrape waits 5 seconds and fires two more bursts (attempts 2 and 3). A finding is only carried forward if ≥2 of 3 attempts reproduce the signal. Transient server errors that cause a one-time false positive are discarded.
+
+Log format:
+```
+[Race] Attempt 1/3: 3/10 requests succeeded
+[Race] Attempt 2/3: 2/10 requests succeeded
+[Race] Attempt 3/3: 4/10 requests succeeded
+```
+
+**2. Response analysis** — successful response bodies are compared across all confirmed attempts:
+
+| Signal | Interpretation |
+|---|---|
+| Distinct IDs, UUIDs, or tokens across responses | True race — separate operations were created |
+| Sequential numeric IDs in responses | True race — multiple records created |
+| All responses identical | Possible race but server may be idempotent — MEDIUM |
+| Responses differ only in timestamp fields | False positive — timestamp-only diff ignored |
+| ≥70% of concurrent requests returned non-200 | Rate limiting is working — skipped |
+
+**3. Idempotency check** — before alerting, sends the same request twice sequentially (not concurrently). If both succeed with the same effective body the endpoint is designed to handle duplicates and the severity is downgraded to LOW.
+
+| Sequential result | Idempotency verdict |
+|---|---|
+| Second request fails (4xx/5xx) where first succeeded | Non-idempotent — proceed |
+| Both succeed with different response bodies | Non-idempotent — proceed |
+| Both succeed with same effective body (modulo timestamps) | Idempotent — downgrade to LOW |
+
 **Detection logic:**
 
 | Finding | Severity | Signal |
 |---|---|---|
-| Race condition — inconsistent responses | HIGH | ≥2 distinct status codes across 10 simultaneous requests (e.g. mix of 200 and 409) |
-| Race condition — high timing variance | MEDIUM | Coefficient of variation of response times > 0.5 with ≥2 successful responses |
+| Race condition — distinct IDs returned | HIGH | ≥2/3 bursts confirm; responses contain different IDs/tokens |
+| Race condition — multiple successes | HIGH | ≥2/3 bursts confirm; concurrent requests both succeed; non-idempotent |
+| Race condition — identical responses | MEDIUM | Reproducible concurrent successes but all responses identical |
+| Race condition — inconsistent responses | MEDIUM | Mixed status codes across simultaneous requests |
+| Race condition — rate limit bypass | MEDIUM | All requests succeed on a rate-limited endpoint |
+| Race condition — idempotent endpoint | LOW | Reproducible concurrent successes but sequential check confirms idempotency |
 
 - Destructive endpoints (`/delete`, `/drop`, `/purge`, etc.) are blocklisted and never tested
-- 10-second timeout per request
+- 10-second timeout per request; `delay + 5s` between confirmation attempts
 - Deduplicates per endpoint URL
 
 ---
@@ -1107,8 +1140,11 @@ Every finding stored in the `Alerts` table (and displayed in the UI) carries a *
 | LDAP injection (error string reflected) | CONFIRMED |
 | JWT algorithm confusion (alg:none / RS256→HS256 / weak secret) | CONFIRMED |
 | Price manipulation (server accepted probe) | CONFIRMED |
-| Race condition — inconsistent responses | CONFIRMED |
-| Race condition — timing variance only | LIKELY |
+| Race condition — distinct IDs returned (2/3 bursts confirmed) | CONFIRMED |
+| Race condition — multiple successes (2/3 bursts confirmed) | CONFIRMED |
+| Race condition — identical responses | NEEDS VERIFICATION |
+| Race condition — inconsistent responses | NEEDS VERIFICATION |
+| Race condition — idempotent endpoint (downgraded) | NEEDS VERIFICATION |
 | Insecure deserialization (active probe exception reflected) | CONFIRMED |
 | Insecure deserialization (passive format signal) | NEEDS VERIFICATION |
 | HTTP parameter pollution — auth/privilege change | CONFIRMED |
