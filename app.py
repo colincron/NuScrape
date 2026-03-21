@@ -550,7 +550,7 @@ HTML = r"""
 :root{
   --bg:#060a0e;--surf:#0b1118;--surf2:#0f1820;--border:#182030;
   --accent:#00e5ff;--red:#ff3e5e;--green:#00ff88;--yellow:#ffc542;--purple:#b06aff;
-  --text:#ccdaeb;--muted:#3d5470;
+  --text:#ccdaeb;--muted:#3d5470;--white:#eaf2fa;--bg2:#0f1318;
   --mono:'Share Tech Mono',monospace;--sans:'Exo 2',sans-serif;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -602,7 +602,9 @@ header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;ba
 .tut-details{margin-top:.45rem;border:1px solid rgba(0,229,255,.18);border-radius:3px;background:rgba(0,229,255,.03)}
 .tut-summary{font-family:var(--mono);font-size:.68rem;color:var(--accent);padding:.3rem .55rem;cursor:pointer;user-select:none;list-style:none}
 .tut-summary::-webkit-details-marker{display:none}
-.tut-body{font-family:var(--mono);font-size:.68rem;color:var(--muted);padding:.4rem .7rem .5rem;white-space:pre-wrap;line-height:1.55;border-top:1px solid rgba(0,229,255,.1)}
+.tut-body{font-family:var(--mono);font-size:.68rem;color:var(--text);padding:.4rem .7rem .5rem;line-height:1.55;border-top:1px solid rgba(0,229,255,.1)}
+.tut-auth{display:block;color:var(--white);margin-bottom:.55rem}
+.tut-cmd{display:block;color:var(--green);background:var(--bg2);padding:.12rem .7rem;border-radius:2px;margin:.15rem -.7rem}
 .btn-start{background:rgba(0,229,255,.1);color:var(--accent);border:1px solid rgba(0,229,255,.25)}
 .btn-start:hover{background:rgba(0,229,255,.2);box-shadow:0 0 14px rgba(0,229,255,.15)}
 .btn-start:disabled{opacity:.35;cursor:not-allowed}
@@ -1432,7 +1434,23 @@ function renderDetail(detail){
   if(idx===-1)return escHtml(detail);
   const main=detail.substring(0,idx);
   const verify=detail.substring(idx+SEP.length).trim();
-  return escHtml(main)+`<details class="tut-details"><summary class="tut-summary">▶ How to verify</summary><div class="tut-body">${escHtml(verify)}</div></details>`;
+
+  // First paragraph before the blank line is the auth/warning note — render bright
+  const nlnl=verify.indexOf('\n\n');
+  const authNote=nlnl===-1?verify:verify.substring(0,nlnl);
+  const body=nlnl===-1?'':verify.substring(nlnl+2);
+
+  // Render body line-by-line: command lines get green-on-dark styling,
+  // empty lines become spacers, everything else is plain --text
+  const CMD_RE=/^\s*(curl|python3?|dig)\b/i;
+  const bodyHtml=body.split('\n').map(line=>{
+    if(!line)return '<br>';
+    if(CMD_RE.test(line))return `<span class="tut-cmd">${escHtml(line)}</span>`;
+    return escHtml(line)+'<br>';
+  }).join('');
+
+  const verifyHtml=`<span class="tut-auth">${escHtml(authNote)}</span>${bodyHtml}`;
+  return escHtml(main)+`<details class="tut-details"><summary class="tut-summary">▶ How to verify</summary><div class="tut-body">${verifyHtml}</div></details>`;
 }
 
 // ── Stats polling ──────────────────────────────────────
