@@ -6492,17 +6492,29 @@ _ENT_IMG_HASH_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Ad/session tracking URL parameter names — their values are high-entropy hex
-# strings by design and are never secrets.
+# Ad/session tracking URL parameter names — their values are high-entropy strings
+# by design and are never secrets.
 _ENT_TRACKING_PARAMS = frozenset({
     "msockid", "msclkid", "fbclid", "gclid", "dclid",
     "twclid", "ttclid", "li_fat_id",
+    "_aem_", "_fbc", "_fbp", "igshid",          # Facebook / Instagram tracking
 })
 
 # Pre-compiled regex to detect a tracking param assignment immediately before a match.
-# Matches patterns like  msclkid=  or  gclid=  within the look-behind window.
+# Matches patterns like  msclkid=  or  gclid=  at the END of the look-behind window,
+# i.e. the candidate is the direct value of the parameter.
 _ENT_TRACKING_PARAM_RE = re.compile(
     r'(?:^|[?&])(' + '|'.join(re.escape(p) for p in sorted(_ENT_TRACKING_PARAMS)) + r')=\s*$',
+    re.IGNORECASE,
+)
+
+# Wider-window regex for Facebook/Instagram tracking params whose values include a
+# structured preamble before the high-entropy token (e.g. _fbc=fb.1.TIMESTAMP.TOKEN,
+# _fbp=fb.1.TIMESTAMP.RANDOM).  Checked against a 150-char look-behind so the param
+# name is found even when several fixed-format segments precede the matched fragment.
+# Also catches _aem_ appearing anywhere in the window as a context signal.
+_ENT_FB_AEM_PARAM_RE = re.compile(
+    r'[?&](?:_aem_|_fbc|_fbp|igshid)=',
     re.IGNORECASE,
 )
 
@@ -6835,9 +6847,30 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         return any(h in window for h in _ENT_SKIP_CDN_HOSTS)
 
     def _in_tracking_param(m_start: int) -> bool:
-        """Return True if the hex match is the value of a known ad/tracking URL param."""
-        pre = scan_body[max(0, m_start - 60): m_start]
-        return bool(_ENT_TRACKING_PARAM_RE.search(pre))
+        """
+        Return True if the match is the value of a known ad/tracking URL param.
+
+        Three suppression paths:
+          1. Direct value: the 60-char look-behind ends with  ?param=  or  &param=
+             for any name in _ENT_TRACKING_PARAMS (handles fbclid, msclkid, igshid,
+             _aem_ when used as a plain ?_aem_=TOKEN query parameter, etc.).
+          2. Preamble value: the 150-char look-behind contains ?_aem_=, ?_fbc=,
+             ?_fbp=, or ?igshid= anywhere — catches formats like
+             _fbc=fb.1.TIMESTAMP.TOKEN where the high-entropy fragment is several
+             fixed segments after the = sign.
+          3. _aem_ adjacent prefix: the look-behind ends with the literal string
+             _aem_, indicating the candidate is the token portion of an _aem_TOKEN
+             value that was separated from the underscore-prefixed name.
+        """
+        pre60  = scan_body[max(0, m_start - 60):  m_start]
+        if _ENT_TRACKING_PARAM_RE.search(pre60):
+            return True
+        pre150 = scan_body[max(0, m_start - 150): m_start]
+        if _ENT_FB_AEM_PARAM_RE.search(pre150):
+            return True
+        if pre60.endswith("_aem_"):
+            return True
+        return False
 
     def _in_meta_verification_content(m_start: int) -> bool:
         """
@@ -7108,6 +7141,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         if _in_url_path_context(m.start(), m.end()):
             continue
         if _in_fb_cdn_token(m.start(), m.end()):
+            continue
+        if _in_tracking_param(m.start()):
             continue
         if _in_b64url_query_param(m.start(), m.end()):
             continue
