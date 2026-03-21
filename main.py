@@ -4447,6 +4447,7 @@ JS_STAGING_PATTERNS = [
 SECRET_FP_PATTERNS = [
     "example", "placeholder", "your_", "YOUR_", "xxx", "test", "dummy",
     "xxxxxxxx", "00000000", "11111111", "abcdefgh", "REPLACE", "changeme",
+    "insert", "INSERT", "fake", "mock",
     # UI string keys — kebab/snake-case identifiers from i18n and component systems
     "invalid-", "input-", "error-", "label-", "button-", "create-",
     "edit-", "update-", "delete-", "set-new-", "confirm-", "reset-",
@@ -6002,24 +6003,26 @@ def _shannon_entropy(data: str) -> float:
 
 _ENT_B64_RE   = re.compile(r'[A-Za-z0-9+/]{20,}={0,2}')
 _ENT_HEX_RE   = re.compile(r'[0-9a-fA-F]{32,}')
-_ENT_ALNUM_RE = re.compile(r'[A-Za-z0-9]{20,}')
+_ENT_ALNUM_RE = re.compile(r'[A-Za-z0-9]{24,}')
 
 # Thresholds per string class.
-# hex raised to 4.0: MD5 hashes typically score 3.5–3.8 and are rarely secrets;
-# real API keys and tokens score higher.
+# base64 raised to 4.8: the previous 4.5 was generating noise from encoded
+#   config blobs and CSS data URIs; real tokens score 4.9+.
+# hex stays at 4.0: MD5 hashes typically score 3.5–3.8.
+# alnum raised to 4.2: short alnum IDs and UUIDs cluster around 3.8–4.1.
 _ENT_THRESHOLDS = {
-    "base64": 4.5,
+    "base64": 4.8,
     "hex":    4.0,
-    "alnum":  3.8,
+    "alnum":  4.2,
 }
 
 # ── Known secret pattern matching ───────────────────────────────────────────
 
 _ENT_SECRET_PATTERNS: list[tuple[re.Pattern, str, str]] = [
     # (compiled_regex, label, severity)
-    (re.compile(r'AKIA[0-9A-Z]{16}'),                                                 "AWS Access Key ID",       "CRITICAL"),
+    (re.compile(r'(?:AKIA|ABIA|ACCA|AROA)[0-9A-Z]{16}'),                             "AWS Access Key ID",       "CRITICAL"),
     (re.compile(r'[0-9a-zA-Z/+]{40}'),                                                "AWS Secret Access Key",   "CRITICAL"),
-    (re.compile(r'ghp_[0-9a-zA-Z]{36}'),                                              "GitHub Personal Token",   "CRITICAL"),
+    (re.compile(r'(?:ghp|gho|ghu|ghs|ghr)_[0-9a-zA-Z]{36}'),                        "GitHub Personal Token",   "CRITICAL"),
     (re.compile(r'sk_live_[0-9a-zA-Z]{24,}'),                                         "Stripe Live Secret Key",  "CRITICAL"),
     (re.compile(r'xox[baprs]-[0-9a-zA-Z\-]{10,}'),                                   "Slack Token",             "HIGH"),
     (re.compile(r'SK[0-9a-fA-F]{32}'),                                                "Twilio Auth Token",       "HIGH"),
@@ -6114,12 +6117,23 @@ _ENT_FB_DOMAINS = ("facebook.com", "fbcdn.net", "fbsbx.com", "cdninstagram.com")
 # Strings that are almost certainly HTML entities or encoded text
 _ENT_HTML_ENTITY_RE = re.compile(r'&[a-zA-Z]{2,8};|&#\d{2,5};|&#x[0-9a-fA-F]{2,5};')
 
-# URL attribute/property context — the candidate is a URL value being reflected,
-# not a secret.  Matches when the look-behind shows the start of a URL attribute
-# assignment or a CSS url() call.
+# HTML attribute context — the string is a URL or binding value, not a secret.
+# Covers: standard URL attributes, any data- attribute, any ng- directive,
+# and CSS url() calls.  The look-behind must end with  attr="<partial-value>.
 _ENT_URL_ATTR_CTX_RE = re.compile(
-    r'(?:href|src|action|data-src|data-href|content)\s*=\s*["\'][^"\']*$'
+    r'(?:href|src|action|data-[a-z][a-z0-9\-]*|ng-[a-z][a-z0-9\-]*|content)'
+    r'\s*=\s*["\'][^"\']*$'
     r'|url\s*\(\s*["\']?[^)"\']*$',
+    re.IGNORECASE,
+)
+
+# CSS property value context — string appears after a CSS property name inside
+# a style block or style= attribute; these are font names, colour values, URLs,
+# etc., never API keys.
+_ENT_CSS_VALUE_RE = re.compile(
+    r'(?:background(?:-image|-color)?|content|font(?:-family|-src)?'
+    r'|src|border|color|url|transform|animation)\s*:\s*[^;{}<>"\']*$'
+    r'|\bstyle\s*=\s*["\'][^"\']*$',
     re.IGNORECASE,
 )
 
@@ -6328,6 +6342,16 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         if entropy <= threshold:
             return
 
+        # Character distribution check: real secrets have roughly uniform
+        # character distribution.  Skip if fewer than 8 distinct characters
+        # or any single character accounts for more than 20% of the string.
+        unique_chars = len(set(candidate))
+        if unique_chars < 8:
+            return
+        max_freq = max(candidate.count(c) for c in set(candidate))
+        if max_freq / len(candidate) > 0.20:
+            return
+
         # Context snippet (20 chars either side) — computed before dedup so that
         # URL-context suppressions don't poison the dedup set.
         pos = scan_body.find(candidate) if source == "body" else -1
@@ -6335,10 +6359,12 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
             ctx_start = max(0, pos - 20)
             ctx_end   = pos + len(candidate) + 20
             context   = scan_body[ctx_start:ctx_end].strip()
-            # URL attribute context check: 80-char look-behind contains href=",
-            # src=", url(, etc. — the candidate is a URL value, not a secret.
-            pre_ctx = scan_body[max(0, pos - 80): pos]
+            pre_ctx   = scan_body[max(0, pos - 80): pos]
+            # URL attribute context: href=", src=", data-*, ng-*, url(
             if _ENT_URL_ATTR_CTX_RE.search(pre_ctx):
+                return
+            # CSS property value context: background:, font:, style="…
+            if _ENT_CSS_VALUE_RE.search(pre_ctx):
                 return
         else:
             context = candidate[:60]
@@ -6359,12 +6385,16 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         secret_type = "high entropy string"
         for pat, label, pat_sev in _ENT_SECRET_PATTERNS:
             if pat.search(candidate):
+                if label == "AWS Secret Access Key":
+                    # Must be exactly 40 characters — a longer candidate only
+                    # contains a 40-char window that matches, not the full value.
+                    if len(candidate) != 40:
+                        continue
+                    # Decode and verify the content looks like random bytes.
+                    if _aws_b64_decoded_fp(candidate):
+                        return
                 secret_type = label
                 final_sev   = pat_sev
-                # AWS Secret Access Key: decode and verify the content looks random.
-                # JSON, hex-only, or readable text → FP, skip.
-                if label == "AWS Secret Access Key" and _aws_b64_decoded_fp(candidate):
-                    return
                 break
 
         # Generic very-high-entropy with no pattern match → still HIGH in JSON
@@ -6563,6 +6593,28 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
             right += 1
         return (right - left - 1) > 60
 
+    def _in_jwt_component(m_start: int, m_end: int, candidate: str) -> bool:
+        """
+        Return True if the match is a JWT segment.
+
+        JWTs have the form <header>.<payload>.<signature> where each part is
+        base64url-encoded.  Three indicators:
+          1. Immediately preceded by '.' — payload or signature segment.
+          2. Immediately followed by '.' — header or payload segment.
+          3. Candidate starts with 'eyJ' — base64url encoding of '{"', present
+             at the start of every JWT header and payload.
+
+        The jwt.io demonstration token header (eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9)
+        is caught by condition 3 regardless of surrounding separators.
+        """
+        pre_char  = scan_body[m_start - 1: m_start] if m_start > 0 else ""
+        post_char = scan_body[m_end: m_end + 1]
+        if pre_char == "." or post_char == ".":
+            return True
+        if candidate.startswith("eyJ"):
+            return True
+        return False
+
     # ── Scan response body ────────────────────────────────────────────────────
     for m in _ENT_B64_RE.finditer(scan_body):
         if _in_cdn_skip_url(m.start()):
@@ -6574,6 +6626,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         if _in_meta_verification_content(m.start()):
             continue
         if _in_html_input_value(m.start()):
+            continue
+        if _in_jwt_component(m.start(), m.end(), m.group()):
             continue
         _try_flag(m.group(), "base64", "body")
     for m in _ENT_HEX_RE.finditer(scan_body):
@@ -6594,6 +6648,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         if _in_fb_cdn_token(m.start(), m.end()):
             continue
         if _in_b64url_query_param(m.start(), m.end()):
+            continue
+        if _in_jwt_component(m.start(), m.end(), m.group()):
             continue
         # Only flag alnum if it wasn't already caught by B64/hex
         val = m.group()

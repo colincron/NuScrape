@@ -653,24 +653,28 @@ Inline `<script>` blocks are stripped from HTML before scanning to avoid minifie
 
 **Three string classes are extracted and thresholded independently:**
 
-| Class | Regex | Entropy threshold | Rationale |
+| Class | Minimum length | Entropy threshold | Rationale |
 |---|---|---|---|
-| Base64 | `[A-Za-z0-9+/]{20,}={0,2}` | > 4.5 | High bar to skip typical Base64-encoded binary blobs |
-| Hex | `[0-9a-fA-F]{32,}` | > 4.0 | MD5 hashes score ~3.5–3.8 and are excluded; real API keys score higher |
-| Alphanumeric | `[A-Za-z0-9]{20,}` | > 3.8 | Generic fallback for tokens not matching the above |
+| Base64 | 20 chars | > 4.8 | Raised from 4.5 — encodes config blobs score 4.5–4.7; real tokens score 4.9+ |
+| Hex | 32 chars | > 4.0 | MD5 hashes score ~3.5–3.8 and are excluded; real API keys score higher |
+| Alphanumeric | 24 chars | > 4.2 | Raised minimum length and threshold to cut short identifiers and UUID noise |
 
-**Known secret pattern matching** — strings that exceed the entropy threshold are also tested against named patterns. Matches override the base severity:
+**Length-based threshold** — for any candidate longer than 80 characters the entropy threshold is raised to **5.2** (from the per-class default). Long base64url payloads (PKCE verifiers, JWT signatures, multi-part tokens) regularly exceed the standard threshold but are almost never application secrets.
 
-| Pattern | Label | Severity |
-|---|---|---|
-| `AKIA[0-9A-Z]{16}` | AWS Access Key ID | CRITICAL |
-| 40-char base64 string | AWS Secret Access Key | CRITICAL |
-| `ghp_[A-Za-z0-9]{36}` | GitHub Personal Token | CRITICAL |
-| `sk_live_[A-Za-z0-9]{24,}` | Stripe Live Secret Key | CRITICAL |
-| `-----BEGIN … PRIVATE KEY-----` | Private Key | CRITICAL |
-| `xox[baprs]-…` | Slack Token | HIGH |
-| `SK[0-9a-fA-F]{32}` | Twilio Auth Token | HIGH |
-| `SG.[A-Za-z0-9_-]{22}.[A-Za-z0-9_-]{43}` | SendGrid API Key | HIGH |
+**Character distribution gate** — after the entropy check, a candidate is suppressed if it has fewer than 8 distinct characters or any single character accounts for more than 20% of the string. Real secrets have roughly uniform character distribution; encoded content and repeated-pattern strings do not.
+
+**Known secret pattern matching** — strings that pass all gates are tested against named patterns. Matches override the base severity:
+
+| Pattern | Label | Severity | Notes |
+|---|---|---|---|
+| `(?:AKIA\|ABIA\|ACCA\|AROA)[0-9A-Z]{16}` | AWS Access Key ID | CRITICAL | All four IAM key prefixes |
+| exactly 40-char base64 string | AWS Secret Access Key | CRITICAL | Length enforced; also requires binary decode (not JSON/text) |
+| `(?:ghp\|gho\|ghu\|ghs\|ghr)_[A-Za-z0-9]{36}` | GitHub Personal Token | CRITICAL | All five GitHub token types |
+| `sk_live_[A-Za-z0-9]{24,}` | Stripe Live Secret Key | CRITICAL | |
+| `-----BEGIN … PRIVATE KEY-----` | Private Key | CRITICAL | |
+| `xox[baprs]-…` | Slack Token | HIGH | |
+| `SK[0-9a-fA-F]{32}` | Twilio Auth Token | HIGH | |
+| `SG.[A-Za-z0-9_-]{22}.[A-Za-z0-9_-]{43}` | SendGrid API Key | HIGH | |
 
 **Severity for unmatched high-entropy strings:**
 
@@ -693,20 +697,20 @@ Inline `<script>` blocks are stripped from HTML before scanning to avoid minifie
 | CDN/image CDN URL context | 200-char window contains a known CDN hostname (Google Fonts/CDN, Cloudinary, imgix, Contentful, Shopify CDN, Unsplash, Akamai, Squarespace, WordPress, Gravatar, Giphy, Twitter CDN, Facebook CDN (`fbcdn.net`, `fbsbx.com`), Instagram CDN (`cdninstagram.com`), GCS) |
 | HTML entity | Matches `&amp;`, `&#123;`, `&#x1F;`, etc. |
 | String longer than 500 chars | Likely serialised binary or minified content |
-| Known false-positive string | Matched by `is_secret_fp()` (placeholder/example values) |
+| Known false-positive string | Matched by `is_secret_fp()`: `example`, `placeholder`, `your_`, `YOUR_`, `xxx`, `test`, `dummy`, `REPLACE`, `changeme`, `insert`, `INSERT`, `fake`, `mock`, and others |
 | Public key prefix | Matched by `is_public_key()` (Stripe `pk_`, Google `AIza`, etc.) |
 | AWS SAK decoded content | 40-char base64 that matches the AWS Secret Access Key pattern is decoded; suppressed if the result is valid JSON, hex-only text, or >85% printable ASCII — real AWS SAKs decode to random binary, not structured data |
 | HTML `<input>` value attribute | Base64 string appearing as the `value=` of an `<input>` element is skipped — form state tokens, CSRF tokens, and session state are routinely base64-encoded in hidden inputs and are never AWS secrets |
 | Meta domain-verification tag | Base64 appearing as the `content=` of a `<meta name="*-verification">` tag (Google, Bing, Yandex, Baidu, Facebook, Norton, Pinterest) is skipped — ownership tokens are never AWS secrets |
 | URL path segment | Candidate immediately preceded by `/` or immediately followed by `/` — the string is a URL resource identifier, not embedded key material |
 | URL attribute value (terminal) | Candidate immediately followed by a closing quote (`"` / `'`) and the 80-char look-behind contains `href="`, `src="`, `action="`, or `url(` — the string is the final path segment of a URL attribute value |
-| URL attribute look-behind | The 80-char context window before the candidate contains a URL attribute assignment (`href="`, `src="`, `url(`, etc.) — candidate is a URL value regardless of surrounding characters |
+| URL / data- / ng- attribute look-behind | The 80-char context window before the candidate contains any URL attribute (`href=`, `src=`, `action=`), any `data-*` attribute, any `ng-*` Angular directive, or `url(` — candidate is a URL or binding value, not a secret |
+| CSS property value | The 80-char look-behind contains a CSS property assignment (`background:`, `font:`, `content:`, etc.) or a `style="` attribute opening — candidate is a CSS value, not a secret |
 | Candidate contains URL characters | The string itself contains `://` (protocol separator) or a percent-encoded sequence (`%XX`) — indicates URL data, not key material |
 | Facebook CDN signature param proximity | The 300-char window around the candidate contains a Facebook CDN signature parameter (`&oh=`, `&oe=`, `&_nc_cat=`, `&_nc_sid=`, `&_nc_ohc=`, `&_nc_ht=`, `&ccb=`) — these appear exclusively in Facebook CDN URLs; adjacent high-entropy strings are CDN cache/auth tokens, never secrets |
 | Facebook/Instagram CDN domain (wide window) | The 300-char window contains `facebook.com`, `fbcdn.net`, `fbsbx.com`, or `cdninstagram.com` — catches base64url token fragments (alphanumeric parts of `oh=`-style values) whose CDN hostname falls beyond the 200-char range of the standard CDN host check |
 | Base64url fragment in query param (>60 chars) | Alphanumeric match is adjacent to a `-` or `_` (base64url separator), a `?name=` or `&name=` assignment appears in the 150-char look-behind, and reconstructing the full base64url token (expanding through `[A-Za-z0-9_-=]` chars) gives a length >60 — OAuth tokens, authorization codes, PKCE verifiers, and cryptographic signatures, never API keys |
-
-**Length-based threshold** — for any candidate string longer than 80 characters the entropy threshold is raised to **5.2** (from the per-class default of 4.5/4.0/3.8). Long base64url-encoded payloads (PKCE verifiers, JWT signatures, multi-part tokens) regularly exceed the standard threshold but are almost never application secrets.
+| JWT component | Match is immediately preceded or followed by `.` (JWT segment separator), or candidate starts with `eyJ` (base64url of `{"`) — catches all three JWT segments including the jwt.io demonstration token |
 
 Deduplicates by the first 8 characters of each flagged string to avoid repeated alerts for the same token across pages.
 
