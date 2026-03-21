@@ -5763,6 +5763,249 @@ def write_to_subdomains_database(root_domain, subdomain, ip, status_code):
         conn.close()
 
 # ─────────────────────────────────────────────
+# Entropy-based secret detection
+# ─────────────────────────────────────────────
+
+import math as _math
+
+# ── Shannon entropy ──────────────────────────────────────────────────────────
+
+def _shannon_entropy(data: str) -> float:
+    if not data:
+        return 0.0
+    entropy = 0.0
+    length  = len(data)
+    for ch in set(data):
+        p = data.count(ch) / length
+        entropy -= p * _math.log2(p)
+    return entropy
+
+
+# ── Candidate extraction regexes ────────────────────────────────────────────
+
+_ENT_B64_RE   = re.compile(r'[A-Za-z0-9+/]{20,}={0,2}')
+_ENT_HEX_RE   = re.compile(r'[0-9a-fA-F]{32,}')
+_ENT_ALNUM_RE = re.compile(r'[A-Za-z0-9]{20,}')
+
+# Thresholds per string class
+_ENT_THRESHOLDS = {
+    "base64": 4.5,
+    "hex":    3.5,
+    "alnum":  3.8,
+}
+
+# ── Known secret pattern matching ───────────────────────────────────────────
+
+_ENT_SECRET_PATTERNS: list[tuple[re.Pattern, str, str]] = [
+    # (compiled_regex, label, severity)
+    (re.compile(r'AKIA[0-9A-Z]{16}'),                                                 "AWS Access Key ID",       "CRITICAL"),
+    (re.compile(r'[0-9a-zA-Z/+]{40}'),                                                "AWS Secret Access Key",   "CRITICAL"),
+    (re.compile(r'ghp_[0-9a-zA-Z]{36}'),                                              "GitHub Personal Token",   "CRITICAL"),
+    (re.compile(r'sk_live_[0-9a-zA-Z]{24,}'),                                         "Stripe Live Secret Key",  "CRITICAL"),
+    (re.compile(r'xox[baprs]-[0-9a-zA-Z\-]{10,}'),                                   "Slack Token",             "HIGH"),
+    (re.compile(r'SK[0-9a-fA-F]{32}'),                                                "Twilio Auth Token",       "HIGH"),
+    (re.compile(r'SG\.[0-9a-zA-Z_\-]{22}\.[0-9a-zA-Z_\-]{43}'),                     "SendGrid API Key",        "HIGH"),
+    (re.compile(r'-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'),           "Private Key",             "CRITICAL"),
+]
+
+# ── False-positive skip patterns ─────────────────────────────────────────────
+
+# Image data URIs — base64 JPEG/PNG headers
+_ENT_IMAGE_PREFIXES = ("iVBOR", "/9j/", "R0lGO", "PHN2Z", "AAAB")
+
+# CDN content-addressable filename hashes in script/link src attributes
+_ENT_CDN_HASH_RE = re.compile(
+    r'[0-9a-f]{8,32}\.(?:min\.js|min\.css|bundle\.js|chunk\.js|\.js|\.css)$',
+    re.IGNORECASE,
+)
+
+# Strings that are almost certainly HTML entities or encoded text
+_ENT_HTML_ENTITY_RE = re.compile(r'&[a-zA-Z]{2,8};|&#\d{2,5};|&#x[0-9a-fA-F]{2,5};')
+
+# ── Content-type helpers ──────────────────────────────────────────────────────
+
+def _ent_content_type(headers: dict) -> str:
+    """Return normalised content-type string from response headers dict."""
+    ct = ""
+    for k, v in (headers or {}).items():
+        if k.lower() == "content-type":
+            ct = v.lower()
+            break
+    return ct
+
+
+def _ent_scannable(url: str, content_type: str) -> bool:
+    """
+    Return True if the response is worth entropy-scanning.
+    Only scan JSON, HTML, and plain-text responses; skip CSS, images,
+    binary content, and known third-party CDN domains.
+    """
+    if is_third_party_cdn(urlparse(url).netloc):
+        return False
+    # Skip CSS files and obvious binary/media types
+    if any(t in content_type for t in ("css", "image/", "video/", "audio/",
+                                        "font/", "application/pdf",
+                                        "application/zip", "application/octet")):
+        return False
+    if url.endswith(".css"):
+        return False
+    return True  # JSON, HTML, text/plain, text/xml all pass
+
+
+# ── Dedup set ────────────────────────────────────────────────────────────────
+
+_entropy_seen: set = set()   # first-8-chars prefix of each flagged string
+
+
+# ── Main check ───────────────────────────────────────────────────────────────
+
+def check_response_entropy(page_url: str, body: str, response_headers: dict) -> None:
+    """
+    Shannon entropy analysis on HTTP response bodies and headers.
+
+    Extracts Base64, hex, and alphanumeric candidate strings from JSON, HTML
+    (excluding inline <script> blocks), and plain-text responses.  Calculates
+    Shannon entropy for each candidate and, above per-class thresholds, checks
+    for known secret patterns (AWS, GitHub, Stripe, Slack, Twilio, SendGrid,
+    private keys) and reports the finding.
+
+    False-positive filters applied before alerting:
+      - Strings inside minified inline <script> blocks skipped
+      - CDN content-addressable filename hashes skipped
+      - HTML entity-encoded content skipped
+      - Image data-URI prefixes (JPEG /9j/, PNG iVBOR, etc.) skipped
+      - Strings longer than 500 characters skipped
+      - Third-party CDN domains skipped entirely
+      - Known public key prefixes (Google AIza, Stripe pk_) skipped
+      - is_secret_fp() placeholder filter applied
+
+    Severity:
+      CRITICAL — matches a known critical-tier secret pattern (AWS, GitHub,
+                 Stripe live, private key)
+      HIGH     — high entropy string in JSON body, no pattern match
+      MEDIUM   — high entropy string in HTML body, no pattern match
+      LOW      — high entropy string in response header value
+
+    Deduplicates by the first 8 characters of each flagged string.
+    Does not require --active-probes (passive, read-only analysis).
+    """
+    if not body or not is_in_scope(page_url):
+        return
+
+    domain = urlparse(page_url).netloc
+    ct = _ent_content_type(response_headers)
+
+    if not _ent_scannable(page_url, ct):
+        return
+
+    is_json = "json" in ct
+    is_html = "html" in ct or not ct  # treat unknown as HTML
+
+    # ── Strip inline <script> blocks from HTML to avoid minified-JS noise ────
+    if is_html:
+        scan_body = re.sub(r'<script\b[^>]*>.*?</script>', ' ', body,
+                           flags=re.DOTALL | re.IGNORECASE)
+    else:
+        scan_body = body
+
+    # Determine base severity for body findings (before pattern override)
+    body_base_sev = "HIGH" if is_json else "MEDIUM"
+
+    # ── Helper: try to flag a candidate ──────────────────────────────────────
+    def _try_flag(candidate: str, string_class: str, source: str, sev_override: str = "") -> None:
+        # Length guard
+        if len(candidate) > 500:
+            return
+        # Image data URI prefixes
+        if any(candidate.startswith(pfx) for pfx in _ENT_IMAGE_PREFIXES):
+            return
+        # CDN content-hash filename
+        if _ENT_CDN_HASH_RE.search(candidate):
+            return
+        # HTML entities
+        if _ENT_HTML_ENTITY_RE.search(candidate):
+            return
+        # Known false-positive placeholder strings
+        if is_secret_fp(candidate):
+            return
+        # Known public key prefixes
+        if is_public_key(candidate):
+            return
+        # Entropy threshold gate
+        threshold = _ENT_THRESHOLDS.get(string_class, 3.8)
+        entropy   = _shannon_entropy(candidate)
+        if entropy <= threshold:
+            return
+        # Dedup by 8-char prefix
+        dedup_key = candidate[:8]
+        if dedup_key in _entropy_seen:
+            return
+        _entropy_seen.add(dedup_key)
+
+        # Context snippet (20 chars either side)
+        pos   = scan_body.find(candidate) if source == "body" else -1
+        if pos >= 0:
+            ctx_start = max(0, pos - 20)
+            ctx_end   = pos + len(candidate) + 20
+            context   = scan_body[ctx_start:ctx_end].strip()
+        else:
+            context = candidate[:60]
+
+        # Pattern matching — override severity for known secret types
+        final_sev   = sev_override or body_base_sev
+        secret_type = "high entropy string"
+        for pat, label, pat_sev in _ENT_SECRET_PATTERNS:
+            if pat.search(candidate):
+                secret_type = label
+                final_sev   = pat_sev
+                break
+
+        # Generic very-high-entropy with no pattern match → still HIGH in JSON
+        if secret_type == "high entropy string" and entropy > 4.8:
+            final_sev = "HIGH" if is_json else final_sev
+
+        detail = (
+            f"High-entropy {string_class} string ({secret_type}) detected in "
+            f"{source} of {page_url} | Entropy: {entropy:.2f} | "
+            f"Class: {string_class} | Context: {context!r}"
+        )
+        alert(
+            f"HIGH ENTROPY STRING: {secret_type.upper()}",
+            final_sev,
+            page_url,
+            detail,
+        )
+        print(timestamp() + f" [!] Entropy: {secret_type} (entropy={entropy:.2f}) at {page_url}")
+
+    # ── Scan response body ────────────────────────────────────────────────────
+    for m in _ENT_B64_RE.finditer(scan_body):
+        _try_flag(m.group(), "base64", "body")
+    for m in _ENT_HEX_RE.finditer(scan_body):
+        _try_flag(m.group(), "hex", "body")
+    for m in _ENT_ALNUM_RE.finditer(scan_body):
+        # Only flag alnum if it wasn't already caught by B64/hex
+        val = m.group()
+        if not _ENT_B64_RE.fullmatch(val) and not _ENT_HEX_RE.fullmatch(val):
+            _try_flag(val, "alnum", "body")
+
+    # ── Scan response headers ─────────────────────────────────────────────────
+    skip_headers = frozenset({
+        "content-type", "content-length", "content-encoding", "transfer-encoding",
+        "cache-control", "vary", "date", "last-modified", "etag", "expires",
+        "access-control-allow-origin", "strict-transport-security",
+        "x-content-type-options", "x-frame-options", "referrer-policy",
+        "permissions-policy", "server", "via", "age", "connection",
+    })
+    for hdr_name, hdr_val in (response_headers or {}).items():
+        if hdr_name.lower() in skip_headers:
+            continue
+        for m in _ENT_B64_RE.finditer(hdr_val):
+            _try_flag(m.group(), "base64", f"header '{hdr_name}'", sev_override="LOW")
+        for m in _ENT_HEX_RE.finditer(hdr_val):
+            _try_flag(m.group(), "hex", f"header '{hdr_name}'", sev_override="LOW")
+
+
+# ─────────────────────────────────────────────
 # Main crawler
 # ─────────────────────────────────────────────
 
@@ -5937,6 +6180,11 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
             flag_ssrf_candidates(url, html)
             # WebSocket endpoint discovery — runs unconditionally, no active probing
             discover_websockets(url, html, headers)
+            # Entropy-based secret detection — passive, no active probes needed
+            check_response_entropy(url,
+                                   html if isinstance(html, str)
+                                   else (html or b"").decode("utf-8", errors="ignore"),
+                                   headers)
             # Passive deserialization format detection — runs unconditionally
             scan_deserial_passive(url, html, headers)
             # Active probe checks — only run when --active-probes is enabled
@@ -12349,7 +12597,7 @@ def _reset_per_domain_state() -> None:
     global _sqli_tested, _sqli_domains, _cmdi_tested, _cmdi_domains
     global _ldapi_tested, _ldapi_form_tested
     global _deserial_passive_seen, _deserial_active_tested
-    global _price_tested, _jwt_tested, _hpp_tested, _wcp_tested, _probe_baseline
+    global _price_tested, _jwt_tested, _hpp_tested, _wcp_tested, _probe_baseline, _entropy_seen
     global _idor_tested, _takeover_checked, _s3_checked, _s3_permutation_checked
     global _subdomain_enriched, _ct_queried, _cookie_seen, _js_analysis_threads
     _zone_transfer_checked  = set()
@@ -12401,6 +12649,7 @@ def _reset_per_domain_state() -> None:
     _hpp_tested             = set()
     _wcp_tested             = set()
     _probe_baseline         = {}
+    _entropy_seen           = set()
     _idor_tested            = set()
     _takeover_checked       = set()
     _s3_checked             = set()
