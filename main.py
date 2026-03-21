@@ -5825,12 +5825,43 @@ _ENT_CDN_HASH_RE = re.compile(
 # e.g. main-a3f2b1c9.js, styles_8e4d2a1f.css, vendor-chunk-1b3e5a7c9d2f.min.js
 _ENT_CACHE_HASH_RE = re.compile(r'[-_][0-9a-fA-F]{8,32}[-.]')
 
-# Google Fonts / Google CDN hostnames — strings from these URLs carry no secrets
-_ENT_GOOGLE_CDN_HOSTS = frozenset({
+# CDN hostnames whose URLs never contain secrets — checked via 200-char context window.
+# Includes Google Fonts/CDN and common image CDN services.
+_ENT_SKIP_CDN_HOSTS = frozenset({
+    # Google
     "fonts.googleapis.com",
     "fonts.gstatic.com",
     "ajax.googleapis.com",
+    # Image CDNs
+    "cloudinary.com",
+    "imgix.net",
+    "images.ctfassets.net",
+    "cdn.shopify.com",
+    "images.unsplash.com",
+    "akamaized.net",
+    "squarespace-cdn.com",
+    "wp.com",
+    "gravatar.com",
+    "media.giphy.com",
+    "twimg.com",
+    "fbcdn.net",
+    "storage.googleapis.com",
 })
+
+# Image file extensions — hex adjacent to these is a filename hash, not a secret
+_ENT_IMAGE_EXT_RE = re.compile(
+    r'\.(?:jpe?g|png|gif|webp|svg|ico|bmp|avif)(?:["\'\s?#>@,)]|$)',
+    re.IGNORECASE,
+)
+
+# CMS cache-busting image hash filenames:
+#   <text>[-_]<hex8+>[-_]<text>.<img_ext>   e.g. hero-a1b2…d4-large.jpg
+#   <text>[-_]<hex8+>.<img_ext>             e.g. photo-a1b2…d4.jpg
+_ENT_IMG_HASH_RE = re.compile(
+    r'[-_][0-9a-fA-F]{8,}(?:[-_][^.\s"\'<>]{0,40})?'
+    r'\.(?:jpe?g|png|gif|webp|svg|ico|bmp|avif)',
+    re.IGNORECASE,
+)
 
 # Strings that are almost certainly HTML entities or encoded text
 _ENT_HTML_ENTITY_RE = re.compile(r'&[a-zA-Z]{2,8};|&#\d{2,5};|&#x[0-9a-fA-F]{2,5};')
@@ -5993,22 +6024,46 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         )
         print(timestamp() + f" [!] Entropy: {secret_type} (entropy={entropy:.2f}) at {page_url}")
 
-    def _in_google_cdn_url(m_start: int) -> bool:
-        """Return True if the 200-char window around the match contains a Google CDN host."""
+    def _in_cdn_skip_url(m_start: int) -> bool:
+        """Return True if the 200-char window around the match contains a CDN hostname."""
         window = scan_body[max(0, m_start - 200): m_start + 200]
-        return any(h in window for h in _ENT_GOOGLE_CDN_HOSTS)
+        return any(h in window for h in _ENT_SKIP_CDN_HOSTS)
+
+    def _in_image_filename_context(m_start: int, m_end: int) -> bool:
+        """
+        Return True if the hex match sits inside an image filename — i.e. it is
+        either immediately followed by an image extension (item 1) or is part of
+        a CMS cache-busting filename pattern (item 2).
+
+        Item 1: checks the 15 chars immediately after the match end for a
+                trailing image extension (.jpg, .png, .webp, etc.).
+
+        Item 2: checks a window of 5 chars before + 80 chars after the match for
+                the full CMS pattern  [-_]<hex>[-_<text>].<img_ext>.
+        """
+        # Item 1 — trailing image extension
+        after = scan_body[m_end: m_end + 15]
+        if _ENT_IMAGE_EXT_RE.search(after):
+            return True
+        # Item 2 — CMS cache-busting filename (includes the separator before hex)
+        window = scan_body[max(0, m_start - 5): m_end + 80]
+        if _ENT_IMG_HASH_RE.search(window):
+            return True
+        return False
 
     # ── Scan response body ────────────────────────────────────────────────────
     for m in _ENT_B64_RE.finditer(scan_body):
-        if _in_google_cdn_url(m.start()):
+        if _in_cdn_skip_url(m.start()):
             continue
         _try_flag(m.group(), "base64", "body")
     for m in _ENT_HEX_RE.finditer(scan_body):
-        if _in_google_cdn_url(m.start()):
+        if _in_cdn_skip_url(m.start()):
+            continue
+        if _in_image_filename_context(m.start(), m.end()):
             continue
         _try_flag(m.group(), "hex", "body")
     for m in _ENT_ALNUM_RE.finditer(scan_body):
-        if _in_google_cdn_url(m.start()):
+        if _in_cdn_skip_url(m.start()):
             continue
         # Only flag alnum if it wasn't already caught by B64/hex
         val = m.group()

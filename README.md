@@ -641,6 +641,60 @@ For every JS bundle fetched during crawling:
 
 ---
 
+#### Response Entropy Analysis
+
+Passively scans every JSON, HTML, and plain-text response body (and selected response headers) for high-entropy strings that may be exposed secrets or tokens. Does not require `--active-probes`.
+
+Inline `<script>` blocks are stripped from HTML before scanning to avoid minified-JS noise. Only scans responses whose content-type is JSON, HTML, or plain text — CSS, images, fonts, binary, and PDF responses are skipped entirely.
+
+**Three string classes are extracted and thresholded independently:**
+
+| Class | Regex | Entropy threshold | Rationale |
+|---|---|---|---|
+| Base64 | `[A-Za-z0-9+/]{20,}={0,2}` | > 4.5 | High bar to skip typical Base64-encoded binary blobs |
+| Hex | `[0-9a-fA-F]{32,}` | > 4.0 | MD5 hashes score ~3.5–3.8 and are excluded; real API keys score higher |
+| Alphanumeric | `[A-Za-z0-9]{20,}` | > 3.8 | Generic fallback for tokens not matching the above |
+
+**Known secret pattern matching** — strings that exceed the entropy threshold are also tested against named patterns. Matches override the base severity:
+
+| Pattern | Label | Severity |
+|---|---|---|
+| `AKIA[0-9A-Z]{16}` | AWS Access Key ID | CRITICAL |
+| 40-char base64 string | AWS Secret Access Key | CRITICAL |
+| `ghp_[A-Za-z0-9]{36}` | GitHub Personal Token | CRITICAL |
+| `sk_live_[A-Za-z0-9]{24,}` | Stripe Live Secret Key | CRITICAL |
+| `-----BEGIN … PRIVATE KEY-----` | Private Key | CRITICAL |
+| `xox[baprs]-…` | Slack Token | HIGH |
+| `SK[0-9a-fA-F]{32}` | Twilio Auth Token | HIGH |
+| `SG.[A-Za-z0-9_-]{22}.[A-Za-z0-9_-]{43}` | SendGrid API Key | HIGH |
+
+**Severity for unmatched high-entropy strings:**
+
+| Source | Severity |
+|---|---|
+| JSON response body | HIGH |
+| HTML response body | MEDIUM |
+| Response header value | LOW |
+
+**False-positive suppressions** — a candidate is silently skipped if any of the following apply:
+
+| Suppression | Description |
+|---|---|
+| Image data URI prefix | Starts with `iVBOR` (PNG), `/9j/` (JPEG), `R0lGO` (GIF), etc. |
+| CDN content-hash filename | Matches `<hex>.min.js`, `.bundle.js`, `.chunk.js`, `.min.css` |
+| Cache-busting filename hash | Hex preceded by `-` or `_` and followed by `-` or `.` (e.g. `main-a3f2b1c9.js`) |
+| Image filename extension | Hex immediately followed by `.jpg`, `.png`, `.webp`, `.gif`, `.svg`, `.ico`, `.bmp`, `.avif` |
+| CMS image hash filename | Matches `[-_]<hex8+>[-_<text>].<img_ext>` — CMS-generated cache-busting filenames |
+| CDN/image CDN URL context | 200-char window contains a known CDN hostname (Google Fonts/CDN, Cloudinary, imgix, Contentful, Shopify CDN, Unsplash, Akamai, Squarespace, WordPress, Gravatar, Giphy, Twitter CDN, Facebook CDN, GCS) |
+| HTML entity | Matches `&amp;`, `&#123;`, `&#x1F;`, etc. |
+| String longer than 500 chars | Likely serialised binary or minified content |
+| Known false-positive string | Matched by `is_secret_fp()` (placeholder/example values) |
+| Public key prefix | Matched by `is_public_key()` (Stripe `pk_`, Google `AIza`, etc.) |
+
+Deduplicates by the first 8 characters of each flagged string to avoid repeated alerts for the same token across pages.
+
+---
+
 #### JavaScript Source Map Exposure
 For every JS bundle fetched during crawling, checks for:
 - `SourceMap` / `X-SourceMap` response headers (explicit bundler reference)
@@ -1157,6 +1211,8 @@ Every finding stored in the `Alerts` table (and displayed in the UI) carries a *
 | SSRF likely (OOB interaction, unexpected source IP) | LIKELY |
 | SSRF: cloud metadata accessible | CONFIRMED |
 | SSRF candidate (no OOB interaction / OOB unavailable) | NEEDS VERIFICATION |
+| High-entropy string — known secret pattern (AWS, GitHub, Stripe, etc.) | CONFIRMED |
+| High-entropy string — no pattern match | NEEDS VERIFICATION |
 | IDOR candidates | NEEDS VERIFICATION |
 | Admin panel 200 (generic, no body verification) | NEEDS VERIFICATION |
 | Prototype pollution crash (500 on injection) | NEEDS VERIFICATION |
