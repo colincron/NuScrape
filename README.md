@@ -364,17 +364,21 @@ During JS bundle analysis, scans first-party JS for known prototype pollution si
 
 #### SSRF Detection
 
-**Passive candidate flagging** (always runs): scans page links and form inputs for URL-accepting parameter names (`url`, `endpoint`, `webhook`, `callback`, `fetch`, `proxy`, `dest`, etc.). Flags them for manual follow-up. Downgraded to LOW when a WAF fingerprint is detected on the page. **MEDIUM** (no WAF) / **LOW** (WAF detected).
+**Two-phase flow:** `flag_ssrf_candidates` (always runs, no requests) collects URL-accepting parameter names and stores them internally. `check_ssrf_oob` (requires `--active-probes`) reads those stored candidates and runs OOB confirmation before firing any alert. No alert is ever fired before confirmation is attempted — this eliminates the premature MEDIUM alert that previously fired immediately on detection.
 
-**OOB confirmation** (requires `--active-probes` and `pip install interactsh-client`): for each URL-accepting parameter, injects interactsh subdomain payloads (`http://<id>.interact.sh`, `https://<id>.interact.sh`, `http://<id>.interact.sh/nuscrape-ssrf-test`) and polls for DNS/HTTP callbacks for 10 seconds.
+**Phase 1 — candidate collection** (always runs): scans page links, form inputs, and the current page URL for parameter names from the SSRF list (`url`, `endpoint`, `webhook`, `callback`, `fetch`, `proxy`, `dest`, etc.). Stores candidates with their WAF status. No alerts fired.
+
+**Phase 2 — OOB confirmation** (requires `--active-probes` and `pip install interactsh-client`): for each stored candidate, injects interactsh subdomain payloads (`http://<id>.interact.sh`, `https://<id>.interact.sh`, `http://<id>.interact.sh/nuscrape-ssrf-test`) and polls for DNS/HTTP callbacks for 10 seconds. WAF detection from Phase 1 is carried through and noted in the finding detail.
 
 | Finding | Severity | Signal |
 |---|---|---|
 | SSRF confirmed — OOB interaction from target IP | HIGH | DNS or HTTP callback received from the target server's own IP |
 | SSRF likely — OOB interaction, unexpected IP | MEDIUM | Callback received from CDN or public DNS resolver, not target IP |
-| SSRF candidate — no OOB interaction | LOW | Parameter accepts URLs but no callback received within 10s |
-| SSRF candidate — OOB unavailable | LOW | `interactsh-client` not installed; blind fallback |
+| SSRF candidate — no OOB interaction | MEDIUM | Parameter accepts URLs; OOB available but no callback received within 10s |
+| SSRF candidate — OOB unavailable | MEDIUM | `interactsh-client` not installed; manual verification required |
 | SSRF: cloud metadata accessible | CRITICAL | Confirmed SSRF endpoint returned AWS/GCP/Azure metadata indicators |
+
+WAF detected during Phase 1 or Phase 2 is noted in the finding detail with a warning that the OOB interaction may have been blocked.
 
 **Cloud metadata probing** (only on confirmed SSRF endpoints): injects safe non-sensitive metadata paths into the confirmed parameter and checks the response body for metadata indicators.
 
@@ -1211,7 +1215,7 @@ Every finding stored in the `Alerts` table (and displayed in the UI) carries a *
 | SSRF confirmed (OOB interaction from target IP) | CONFIRMED |
 | SSRF likely (OOB interaction, unexpected source IP) | LIKELY |
 | SSRF: cloud metadata accessible | CONFIRMED |
-| SSRF candidate (no OOB interaction / OOB unavailable) | NEEDS VERIFICATION |
+| SSRF candidate (no OOB interaction or OOB unavailable) | NEEDS VERIFICATION |
 | High-entropy string — known secret pattern (AWS, GitHub, Stripe, etc.) | CONFIRMED |
 | High-entropy string — no pattern match | NEEDS VERIFICATION |
 | IDOR candidates | NEEDS VERIFICATION |

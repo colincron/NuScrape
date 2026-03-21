@@ -7498,13 +7498,21 @@ SSRF_PARAM_NAMES = {
     "path", "file", "open", "domain", "port", "to", "from",
 }
 
-_ssrf_flagged = set()   # domains already flagged (one alert per domain)
+_ssrf_flagged = set()    # domains already collected (prevents re-scanning the same domain)
+
+# Stores candidates found by flag_ssrf_candidates for consumption by check_ssrf_oob.
+# Maps page_url → (frozenset of param names, waf_vendor_or_None)
+_ssrf_candidates: dict = {}
+
 
 def flag_ssrf_candidates(page_url, html_content):
     """
-    Scan page links and form inputs for URL-accepting parameter names.
-    These are common SSRF entry points — flags them as MEDIUM candidates
-    for manual follow-up testing. Does not make any requests.
+    Scan page links and form inputs for URL-accepting parameter names and
+    store them in _ssrf_candidates for OOB confirmation by check_ssrf_oob.
+
+    Does NOT fire any alerts — alerting is deferred to check_ssrf_oob so
+    that every finding is backed by an OOB confirmation attempt.
+    Does not make any HTTP requests.
     """
     domain = urlparse(page_url).netloc
     if domain in _ssrf_flagged:
@@ -7554,25 +7562,11 @@ def flag_ssrf_candidates(page_url, html_content):
 
     if found:
         _ssrf_flagged.add(domain)
-        param_list = ", ".join(sorted(found))
-        # If the page itself is a WAF intercept, downgrade — the params are
-        # not reachable application inputs, they are WAF-generated artifacts
         waf = _response_waf_provider_from_text(text)
-        if waf:
-            alert(
-                "SSRF CANDIDATE PARAMETERS DETECTED (UNCONFIRMED — WAF)",
-                "LOW",
-                page_url,
-                f"URL-accepting parameters found but {waf} WAF fingerprint detected on page — may not reach real application: {param_list}"
-            )
-        else:
-            alert(
-                "SSRF CANDIDATE PARAMETERS DETECTED",
-                "MEDIUM",
-                page_url,
-                f"URL-accepting parameters found — manually test for SSRF: {param_list}"
-            )
-        print(timestamp() + f" SSRF candidates on {domain}: {param_list}")
+        _ssrf_candidates[page_url] = (frozenset(found), waf)
+        print(timestamp() + f" SSRF candidates queued on {domain}: "
+              f"{', '.join(sorted(found))}"
+              + (f" [WAF: {waf}]" if waf else ""))
 
 
 # ─────────────────────────────────────────────
@@ -7747,21 +7741,24 @@ def check_ssrf_oob(page_url: str, html_content) -> None:
     """
     OOB-confirmed SSRF detection using interactsh.
 
-    For each URL-accepting parameter (SSRF_PARAM_NAMES) found on the page,
-    injects interactsh subdomain URLs and polls for DNS/HTTP callbacks.
+    Reads candidates stored by flag_ssrf_candidates (which runs unconditionally
+    earlier in the crawl loop) and runs OOB confirmation for each one.  This
+    unified flow means every SSRF alert is backed by an actual probe result —
+    no premature MEDIUM alerts are fired before confirmation is attempted.
 
-      CONFIRMED HIGH  — OOB interaction received from the target server's IP.
-      LIKELY MEDIUM   — OOB interaction received from unexpected IP
-                        (CDN, public DNS resolver).
-      LOW             — No OOB interaction within 10s; or interactsh-client
-                        not installed (blind fallback).
+    Severity after OOB:
+      HIGH   — OOB interaction received from the target server's own IP.
+      MEDIUM — OOB interaction received from unexpected IP (CDN/resolver),
+               OR no OOB interaction but OOB client is available (candidate
+               needs manual verification).
+      MEDIUM — WAF detected: OOB interaction may have been blocked; noted
+               in detail.
+      MEDIUM — interactsh-client not installed (blind fallback — manual
+               verification required).
 
-    If OOB SSRF is confirmed (HIGH or MEDIUM), additionally probes for cloud
-    metadata access (AWS/GCP/Azure IMDS) via the same parameter and flags
-    CRITICAL if metadata indicators appear in the response body.
-
-    Blind fallback: if interactsh-client is not installed, emits a LOW
-    NEEDS VERIFICATION alert and notes that OOB detection was unavailable.
+    OOB-confirmed endpoints are additionally probed for cloud metadata
+    (AWS/GCP/Azure IMDS).  CRITICAL if metadata indicators appear in the
+    response body.
 
     Only called when --active-probes is enabled.
     Deduplicates per (base_url, param) pair.
@@ -7773,44 +7770,40 @@ def check_ssrf_oob(page_url: str, html_content) -> None:
     if is_third_party_cdn(domain):
         return
 
-    try:
-        text = html_content if isinstance(html_content, str) \
-               else html_content.decode("utf-8", errors="ignore")
-        soup = BeautifulSoup(text, "lxml")
-    except Exception:
-        return
+    # ── Read candidates queued by flag_ssrf_candidates ────────────────────────
+    # flag_ssrf_candidates stores by page_url; collect any entries for this page.
+    candidate_params, page_waf = _ssrf_candidates.get(page_url, (frozenset(), None))
 
-    # ── Collect candidate (base, param, params_dict) tuples ──────────────────
+    # Also pick up candidates stored under the base URL (no query string)
+    parsed_page = urlparse(page_url)
+    base_page   = parsed_page.scheme + "://" + parsed_page.netloc + parsed_page.path
+    if base_page != page_url and base_page in _ssrf_candidates:
+        bp_params, bp_waf = _ssrf_candidates[base_page]
+        candidate_params = candidate_params | bp_params
+        page_waf = page_waf or bp_waf
+
+    # Build (base, param, params_dict) probing tuples from the page URL's query
     candidates: list[tuple[str, str, dict]] = []
-
-    def _collect(raw_url: str) -> None:
-        try:
-            resolved = urljoin(page_url, raw_url)
-            parsed   = urlparse(resolved)
-            if is_third_party_cdn(parsed.netloc):
-                return
-            if not parsed.query:
-                return
-            base   = parsed.scheme + "://" + parsed.netloc + parsed.path
-            params: dict = {}
-            for pair in parsed.query.split("&"):
-                if "=" in pair:
-                    k, v = pair.split("=", 1)
-                    params[k] = v
-            for k in params:
-                if k.lower() in SSRF_PARAM_NAMES:
-                    key = (base, k)
-                    if key not in _ssrf_tested:
-                        candidates.append((base, k, params))
-        except Exception:
-            pass
-
-    _collect(page_url)
-    if soup:
-        for tag in soup.find_all(["a", "form", "link"]):
-            href = tag.get("href") or tag.get("action") or ""
-            if href:
-                _collect(href)
+    if candidate_params and parsed_page.query:
+        params_map: dict = {}
+        for pair in parsed_page.query.split("&"):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                params_map[k] = v
+        base = base_page
+        for k in params_map:
+            if k.lower() in candidate_params:
+                key = (base, k)
+                if key not in _ssrf_tested:
+                    candidates.append((base, k, params_map))
+    elif candidate_params:
+        # Params were found on linked URLs / form inputs — use page_url as base
+        # with an empty params dict so we can still run OOB probes.
+        base = base_page
+        for param in candidate_params:
+            key = (base, param)
+            if key not in _ssrf_tested:
+                candidates.append((base, param, {param: ""}))
 
     if not candidates:
         return
@@ -7819,11 +7812,12 @@ def check_ssrf_oob(page_url: str, html_content) -> None:
     oob_client, oob_url = _ssrf_setup_oob()
     oob_available = oob_client is not None and bool(oob_url)
 
-    target_ip  = _ssrf_resolve_target_ip(page_url)
-    waf_note   = ""
-    waf_vendor = _waf_results.get(domain)
-    if waf_vendor:
-        waf_note = f" [WAF: {waf_vendor} detected]"
+    target_ip = _ssrf_resolve_target_ip(page_url)
+
+    # WAF note: prefer live WAF detection result, fall back to what flag_ssrf_candidates saw
+    waf_vendor = _waf_results.get(domain) or page_waf
+    waf_note   = f" [WAF: {waf_vendor} detected — OOB interaction may have been blocked]" \
+                 if waf_vendor else ""
 
     for base, param, params in candidates:
         key = (base, param)
@@ -7834,10 +7828,10 @@ def check_ssrf_oob(page_url: str, html_content) -> None:
         print(timestamp() + f" SSRF OOB probe: {base} param={param}")
 
         if not oob_available:
-            # ── Blind fallback ────────────────────────────────────────────────
+            # ── Blind fallback — fire MEDIUM so the finding isn't silently dropped ──
             alert(
                 "SSRF CANDIDATE (OOB UNAVAILABLE)",
-                "LOW",
+                "MEDIUM",
                 base,
                 f"Parameter '{param}' on {base} accepts URLs. "
                 f"OOB detection unavailable — install interactsh-client "
@@ -7894,9 +7888,10 @@ def check_ssrf_oob(page_url: str, html_content) -> None:
             _ssrf_check_cloud_metadata(base, param, params, domain)
 
         else:
+            # No interaction — still a candidate worth reporting, but unconfirmed
             alert(
                 "SSRF CANDIDATE (NO OOB INTERACTION)",
-                "LOW",
+                "MEDIUM",
                 base,
                 f"Parameter '{param}' on {base} accepts URLs but no OOB "
                 f"interaction was received within 10s. Server may block "
@@ -13478,7 +13473,7 @@ def _reset_per_domain_state() -> None:
     global _deserial_passive_seen, _deserial_active_tested
     global _price_tested, _jwt_tested, _hpp_tested, _wcp_tested, _probe_baseline, _entropy_seen
     global _timing_profiles
-    global _ssrf_flagged, _ssrf_tested
+    global _ssrf_flagged, _ssrf_candidates, _ssrf_tested
     global _idor_tested, _takeover_checked, _s3_checked, _s3_permutation_checked
     global _subdomain_enriched, _ct_queried, _cookie_seen, _js_analysis_threads
     _zone_transfer_checked  = set()
@@ -13533,6 +13528,7 @@ def _reset_per_domain_state() -> None:
     _entropy_seen           = set()
     _timing_profiles        = {}
     _ssrf_flagged           = set()
+    _ssrf_candidates        = {}
     _ssrf_tested            = set()
     # Note: _ssrf_oob_client and _ssrf_oob_base_url are session-scoped and NOT reset
     _idor_tested            = set()
