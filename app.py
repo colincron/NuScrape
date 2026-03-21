@@ -885,7 +885,7 @@ td a:hover{text-decoration:underline}
         <div class="panel-header">
           <span class="panel-title" style="color:var(--red)">!! Alerts</span>
           <span class="cnt-badge" id="c-alerts" style="background:rgba(255,62,94,.1);color:var(--red);border-color:rgba(255,62,94,.3)">0</span>
-          <button onclick="loadAlerts()" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
+          <button onclick="loadAlerts(true)" style="margin-left:auto;background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .7rem;cursor:pointer">↻ Refresh</button>
           <a href="/api/export/alerts.csv" class="xbtn">↓ CSV</a>
           <a href="/api/export/alerts.json" class="xbtn">↓ JSON</a>
         </div>
@@ -1558,35 +1558,81 @@ async function loadEmails(){
     :empty();
 }
 
-async function loadAlerts(){
-  const rows=await(await fetch('/api/alerts?_='+Date.now())).json();
-  document.getElementById('c-alerts').textContent=rows.length;
-  document.getElementById('pc-alerts').textContent=rows.length;
-  // Flash the pill red if there are alerts
-  const pill=document.getElementById('pill-alerts');
-  if(rows.length>0){
-    pill.style.color='var(--red)';
-    pill.style.borderLeftColor='var(--red)';
-  }
+// ── Alerts: interaction guard & smart diffing ──────────
+// Row IDs already rendered — used to detect new findings without replacing the DOM
+const _alertRowIds=new Set();
+// Timestamp of last mouse activity over the alerts table (ms)
+let _alertsLastMouse=0;
+
+function _alertsUserActive(){
+  // 1. Any HOW TO VERIFY collapsible is open
+  if(document.querySelector('#bAlerts details[open]'))return true;
+  // 2. Focus is inside the alerts tab (filter input, etc.)
+  if(document.activeElement&&document.activeElement.closest('#tab-alerts'))return true;
+  // 3. Mouse was recently over the alerts table (3-second grace period)
+  if(Date.now()-_alertsLastMouse<3000)return true;
+  return false;
+}
+
+function _renderAlertRow(r){
   const sevCls={CRITICAL:'br',HIGH:'br',MEDIUM:'by'};
   const sevIcon={CRITICAL:'🔴',HIGH:'🟠',MEDIUM:'🟡'};
   const confCls={'CONFIRMED':'bg','LIKELY':'by','NEEDS VERIFICATION':'bc'};
   const confIcon={'CONFIRMED':'✓','LIKELY':'~','NEEDS VERIFICATION':'?'};
-  document.getElementById('bAlerts').innerHTML=rows.length
-    ?rows.map(r=>{
-      const cls=sevCls[r.severity]||'by';
-      const conf=r.confidence||'NEEDS VERIFICATION';
-      const ccls=confCls[conf]||'bc';
-      return`<tr>
-        <td><span class="b ${cls}">${sevIcon[r.severity]||''} ${escHtml(r.severity||'-')}</span></td>
-        <td><span class="b ${ccls}" title="${escHtml(conf)}">${confIcon[conf]||'?'} ${escHtml(conf)}</span></td>
-        <td style="font-family:var(--mono);font-size:.72rem;color:var(--red)">${escHtml(r.alert_type||'-')}</td>
-        <td class="wrap" style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${escHtml(r.target||'-')}</td>
-        <td class="wrap" style="font-size:.72rem;white-space:normal;min-width:200px">${renderDetail(r.detail||'-')}</td>
-        <td style="font-size:.72rem;white-space:nowrap;color:var(--muted)">${escHtml(r.found_at||'-')}</td>
-      </tr>`;
-    }).join('')
-    :`<tr><td colspan="6" class="empty">// no alerts — system looks clean</td></tr>`;
+  const cls=sevCls[r.severity]||'by';
+  const conf=r.confidence||'NEEDS VERIFICATION';
+  const ccls=confCls[conf]||'bc';
+  return`<tr data-aid="${r.id}">
+    <td><span class="b ${cls}">${sevIcon[r.severity]||''} ${escHtml(r.severity||'-')}</span></td>
+    <td><span class="b ${ccls}" title="${escHtml(conf)}">${confIcon[conf]||'?'} ${escHtml(conf)}</span></td>
+    <td style="font-family:var(--mono);font-size:.72rem;color:var(--red)">${escHtml(r.alert_type||'-')}</td>
+    <td class="wrap" style="font-family:var(--mono);font-size:.72rem;word-break:break-all">${escHtml(r.target||'-')}</td>
+    <td class="wrap" style="font-size:.72rem;white-space:normal;min-width:200px">${renderDetail(r.detail||'-')}</td>
+    <td style="font-size:.72rem;white-space:nowrap;color:var(--muted)">${escHtml(r.found_at||'-')}</td>
+  </tr>`;
+}
+
+async function loadAlerts(force=false){
+  const rows=await(await fetch('/api/alerts?_='+Date.now())).json();
+  // Always update counts and pill — never blocked
+  document.getElementById('c-alerts').textContent=rows.length;
+  document.getElementById('pc-alerts').textContent=rows.length;
+  const pill=document.getElementById('pill-alerts');
+  if(rows.length>0){pill.style.color='var(--red)';pill.style.borderLeftColor='var(--red)';}
+
+  // Pause DOM update while user is interacting (unless manually forced)
+  if(!force&&_alertsUserActive())return;
+
+  const tbody=document.getElementById('bAlerts');
+  const wrap=tbody.closest('.tbl-wrap');
+
+  if(force||_alertRowIds.size===0){
+    // Full render: initial load or manual refresh button
+    const scrollTop=wrap?wrap.scrollTop:0;
+    _alertRowIds.clear();
+    tbody.innerHTML=rows.length
+      ?rows.map(r=>_renderAlertRow(r)).join('')
+      :`<tr><td colspan="6" class="empty">// no alerts — system looks clean</td></tr>`;
+    rows.forEach(r=>_alertRowIds.add(r.id));
+    if(wrap)wrap.scrollTop=scrollTop;
+  } else {
+    // Incremental: prepend only new rows, preserving existing DOM state
+    const newRows=rows.filter(r=>!_alertRowIds.has(r.id));
+    if(!newRows.length)return;
+    const scrollTop=wrap?wrap.scrollTop:0;
+    tbody.insertAdjacentHTML('afterbegin',newRows.map(r=>_renderAlertRow(r)).join(''));
+    newRows.forEach(r=>_alertRowIds.add(r.id));
+    // Restore scroll — new rows are added above so offset by their height
+    if(wrap){
+      const added=tbody.querySelectorAll('tr[data-aid]');
+      let addedH=0;
+      for(let i=0;i<newRows.length&&i<added.length;i++)addedH+=added[i].offsetHeight;
+      wrap.scrollTop=scrollTop+addedH;
+    }
+  }
+  // Re-apply any active filter so newly added rows respect it
+  const fi=document.querySelector('#tab-alerts .search-row input');
+  if(fi&&fi.value)filterTbl('tAlerts',fi.value);
 }
 
 async function loadDNS(){
@@ -1828,6 +1874,17 @@ document.addEventListener('visibilitychange',()=>{
     pollStatus();pollStats();pollLogs();
   }
 });
+
+// ── Alerts interaction guard — event wiring ─────────────
+// Update mouse timestamp whenever the pointer moves over the alerts table body
+// (covers: hovering over open details, hovering over rows, tooltip inspection)
+document.getElementById('bAlerts').addEventListener('mouseover',()=>{
+  _alertsLastMouse=Date.now();
+},true);
+// Also fire when a details element inside the table is toggled open
+document.getElementById('bAlerts').addEventListener('toggle',e=>{
+  if(e.target.open)_alertsLastMouse=Date.now();
+},true);
 
 pollLogs();
 pollStatus();
