@@ -7289,6 +7289,11 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                 url_seen.add(su)
                 _pq_push(url_queue, su)
 
+    # Register interact.sh OOB session eagerly so the domain is ready before
+    # any SSRF probes fire.  The call is idempotent — subsequent calls in
+    # check_ssrf_oob() return the cached session.
+    _ssrf_init_oob_client()
+
     _ghost_shuffle_at = random.randint(10, 20) if STEALTH_PROFILE == "GHOST" else 0
     _ghost_crawl_count = 0
     while url_queue:
@@ -8716,7 +8721,7 @@ _SSRF_CLOUD_PROBES: list = [
 ]
 
 
-def _ssrf_setup_oob() -> tuple:
+def _ssrf_init_oob_client() -> tuple:
     """
     Register a session with the interact.sh HTTP API for OOB SSRF detection.
     Returns (session_dict, oob_domain) on success, or (None, "") on failure.
@@ -8984,7 +8989,7 @@ def check_ssrf_oob(page_url: str, html_content) -> None:
         return
 
     # ── Setup OOB client (lazy; reused for the entire scan session) ───────────
-    oob_client, oob_url = _ssrf_setup_oob()
+    oob_client, oob_url = _ssrf_init_oob_client()
     oob_available = oob_client is not None and bool(oob_url)
 
     target_ip = _ssrf_resolve_target_ip(page_url)

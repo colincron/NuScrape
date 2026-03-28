@@ -527,3 +527,24 @@ AttributeError: module 'websockets.exceptions' has no attribute 'RejectHandshake
 
 2026-03-28 13:18:48 Path traversal probe: https://tahoechamber.org/wp-json/oembed/1.0/embed param=url
 2026-03-28 13:18:48 [Baseline] https://tahoechamber.org/wp-json/oembed/1.0/embed — status=200 len=2412±0 fp=7ed728eecb5d544f
+2026-03-28 13:20:52 [Baseline] https://visitor.r20.constantcontact.com/manage/optin — status=200 len=90558±0 fp=290989762ccb296c
+2026-03-28 13:20:53 [Baseline] https://tahoechamber.org/wp-json/oembed/1.0/embed — status=200 len=2576±0 fp=17409051dce57f4d
+2026-03-28 13:20:53 [Baseline] https://tahoechamber.org/xmlrpc.php — status=405 len=42±0 fp=b5318ac100f7dc67
+2026-03-28 13:22:03 [Context] SQLi param=v in js_string context
+2026-03-28 13:22:03 SQLi probe: https://visitor.r20.constantcontact.com/manage/optin param=v
+2026-03-28 13:22:22 [Timing] Baseline https://visitor.r20.constantcontact.com/manage/optin param=v: mean=670ms σ=210ms max=1069ms
+2026-03-28 13:22:25 [Timing] Baseline: 670ms ±210ms | Probe(SLEEP 2): 713ms (threshold 3300ms) ✗ → NOT TRIGGERED
+2026-03-28 13:22:25 SQLi probe: https://business.tahoechamber.org/events/search param=c
+2026-03-28 13:22:52 [Timing] Baseline https://business.tahoechamber.org/events/search param=c: mean=539ms σ=152ms max=760ms
+2026-03-28 13:22:55 [Timing] Baseline: 539ms ±152ms | Probe(SLEEP 2): 389ms (threshold 2995ms) ✗ → NOT TRIGGERED
+2026-03-28 13:22:55 SQLi probe: https://tahoechamber.org/ param=page_id
+2026-03-28 13:23:19 [Timing] Baseline https://tahoechamber.org/ param=page_id: mean=1152ms σ=167ms max=1372ms
+2026-03-28 13:23:23 [Timing] Baseline: 1152ms ±167ms | Probe(SLEEP 2): 1425ms (threshold 3652ms) ✗ → NOT TRIGGERED
+2026-03-28 13:23:45 [Context] CMDi param=v in js_string context — using context-specific payloads
+2026-03-28 13:23:45 CMDi probe: https://visitor.r20.constantcontact.com/manage/optin param=v
+2026-03-28 13:24:14 CMDi probe: https://business.tahoechamber.org/events/search param=c
+2026-03-28 13:24:41 CMDi probe: https://tahoechamber.org/ param=page_id
+2026-03-28 13:25:32 LDAPi probe: https://visitor.r20.constantcontact.com/manage/optin param=v
+2026-03-28 13:25:47 LDAPi probe: https://business.tahoechamber.org/events/search param=c
+2026-03-28 13:26:03 LDAPi probe: https://tahoechamber.org/ param=page_id
+2026-03-28 13:27:30 Race condition probe: https://tahoechamber.org/wp-content/uploads/2020/03/vision2025-nobleed.pdf [GET] (file upload)
