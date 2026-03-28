@@ -6573,6 +6573,17 @@ _ENT_DOM_ID_ATTR_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ── CSP hash suppression ─────────────────────────────────────────────────────
+
+# Immediately-preceding sha256-/sha384-/sha512- prefix
+_ENT_CSP_HASH_PREFIX_RE = re.compile(r'sha(?:256|384|512)-\s*$', re.IGNORECASE)
+
+# CSP directive keywords that indicate a string lives inside a CSP context
+_ENT_CSP_DIRECTIVE_RE = re.compile(
+    r'Content-Security-Policy|script-src|style-src',
+    re.IGNORECASE,
+)
+
 # ── Meta verification tag suppression ────────────────────────────────────────
 
 # Exact name= values used by search engines / security vendors for domain ownership
@@ -7106,6 +7117,27 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
                     return True
         return False
 
+    def _in_csp_hash_context(m_start: int) -> bool:
+        """
+        Return True if the base64 match is a CSP hash or integrity value, not
+        a secret.
+
+        Two detection paths:
+          1. Immediately preceded by sha256-, sha384-, or sha512- — the candidate
+             is the digest portion of a CSP hash expression (e.g. sha256-<b64>).
+          2. The 400-char window around the match contains a CSP directive keyword
+             (Content-Security-Policy, script-src, or style-src) — the string sits
+             inside a CSP header or meta-equiv block where all base64 values are
+             integrity hashes, not application secrets.
+        """
+        pre10 = scan_body[max(0, m_start - 10): m_start]
+        if _ENT_CSP_HASH_PREFIX_RE.search(pre10):
+            return True
+        window = scan_body[max(0, m_start - 400): m_start + 400]
+        if _ENT_CSP_DIRECTIVE_RE.search(window):
+            return True
+        return False
+
     # ── Scan response body ────────────────────────────────────────────────────
     for m in _ENT_B64_RE.finditer(scan_body):
         if _in_cdn_skip_url(m.start()):
@@ -7121,6 +7153,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         if _in_html_input_value(m.start()):
             continue
         if _in_jwt_component(m.start(), m.end(), m.group()):
+            continue
+        if _in_csp_hash_context(m.start()):
             continue
         _try_flag(m.group(), "base64", "body")
     for m in _ENT_HEX_RE.finditer(scan_body):
@@ -7150,6 +7184,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
             continue
         if _in_jwt_component(m.start(), m.end(), m.group()):
             continue
+        if _in_csp_hash_context(m.start()):
+            continue
         # Only flag alnum if it wasn't already caught by B64/hex
         val = m.group()
         if not _ENT_B64_RE.fullmatch(val) and not _ENT_HEX_RE.fullmatch(val):
@@ -7165,6 +7201,10 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
     })
     for hdr_name, hdr_val in (response_headers or {}).items():
         if hdr_name.lower() in skip_headers:
+            continue
+        # Skip Content-Security-Policy headers entirely — all base64 values in
+        # them are sha256-/sha384-/sha512- integrity hashes, never secrets.
+        if _ENT_CSP_DIRECTIVE_RE.search(hdr_name) or _ENT_CSP_DIRECTIVE_RE.search(hdr_val):
             continue
         for m in _ENT_B64_RE.finditer(hdr_val):
             _try_flag(m.group(), "base64", f"header '{hdr_name}'", sev_override="LOW")

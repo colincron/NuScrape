@@ -1,0 +1,374 @@
+
+============================================================
+[NuScrape] Starting scan → https://clearstreet.io  @ 2026-03-28 12:47:36.472336
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Tutorial mode enabled — HOW TO VERIFY guidance will be appended to findings
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 12:47:36 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 12:47:36 ERROR: Could not load recent crawl history: no such table: HTTPHistory
+2026-03-28 12:47:36 Starting NuScrape → https://clearstreet.io
+2026-03-28 12:47:36 Same-domain-only: staying on clearstreet.io
+2026-03-28 12:47:36 robots.txt: ignored (--ignore-robots)
+2026-03-28 12:47:36 Fetching sitemap...
+2026-03-28 12:47:39 Sitemap found 219 URLs for https://clearstreet.io
+2026-03-28 12:47:39 Batch 3 [workers=3] | crawled=0 queue=217
+2026-03-28 12:47:40 HTTP 200 https://clearstreet.io/about
+2026-03-28 12:47:40 HTTP 200 https://clearstreet.io/
+2026-03-28 12:47:40 HTTP 200 https://clearstreet.io
+2026-03-28 12:47:43 JS-heavy page detected, switching to Playwright: https://clearstreet.io
+2026-03-28 12:47:44 Playwright rendering: https://clearstreet.io
+2026-03-28 12:47:46 XHR: GET https://www.clearstreet.io/data/blog/index.json
+2026-03-28 12:47:46 XHR: GET https://www.clearstreet.io/data/spotify/index.json
+2026-03-28 12:47:46 XHR: GET https://www.clearstreet.io/data/pressReleases/index.json
+2026-03-28 12:47:46 XHR: GET https://www.clearstreet.io/data/team/index.json
+2026-03-28 12:47:46 XHR: GET https://www.clearstreet.io/data/contact/index.json
+2026-03-28 12:47:46 XHR: GET https://www.clearstreet.io/_nuxt/builds/meta/99c51cb4-2812-42fe-ab9b-9c284bdcf3d2.json
+2026-03-28 12:47:47 XHR: GET https://boards-api.greenhouse.io/v1/boards/clearstreet/departments?render_as=tree
+2026-03-28 12:47:47 XHR: GET https://unpkg.com/@rive-app/canvas@2.21.3/rive.wasm
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/news/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/studio/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/contact/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/clients/traders/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/clients/family-offices/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/clients/hedge-funds/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/clients/etf-issuers/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/clients/broker-dealers/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/services/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/services/clearing/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/services/financing/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/services/execution-trading/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/services/investment-banking/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/services/active-traders/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/about/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/careers/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/legal/regulatory-disclosures/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/legal/privacy-notice/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/legal/security/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/clients/_payload.json?99c51cb4-2812-42fe-ab9b-9c284bdcf3d2
+2026-03-28 12:47:47 XHR: GET https://tags.srv.stackadapt.com/sa.jpeg
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/globe/world.png
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/globe/noise3d.png
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/globe/world.geojson.gz
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/globe/world.geojson.gz
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/globe/world.geojson.gz
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/globe/world.geojson.gz
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/globe/world.geojson.gz
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/globe/world.geojson.gz
+2026-03-28 12:47:47 XHR: GET https://www.clearstreet.io/globe/glow.png
+2026-03-28 12:47:47 XHR: GET https://tags.srv.stackadapt.com/saq_pxl?uid=Yn8RPAfQFUNa5Zgk3mHNuw&is_js=true&landing_url=https%3A%2F%2Fwww.clearstreet.io%2F&t=Clear%20Street%20%E2%80%94%20Speed%2C%20Transparency%20and%20Scale%20for%20Sophisticated%20Investors.%E2%84%A2&tip=P0Db-v_s8exhzSD2v_l6XWkZ7kHh_dLmX0Jlx5Mg92A&host=https%3A%2F%2Fwww.clearstreet.io&sa_conv_data_css_value=%27%27&sa_conv_data_image_value=ffd8ffe000104a46494600010101006000600000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffdb0043010909090c0b0c180d0d1832211c213232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232ffc00011080001000103012200021101031101ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffc4001f0100030101010101010101010000000000000102030405060708090a0bffc400b51100020102040403040705040400010277000102031104052131061241510761711322328108144291a1b1c109233352f0156272d10a162434e125f11718191a262728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a82838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae2e3e4e5e6e7e8e9eaf2f3f4f5f6f7f8f9faffda000c03010002110311003f00f7fa28a2803fffd913095b36f3585bdf5814338297877759935d95c2&l_src=&l_src_d=&u_src=&u_src_d=&shop=false&sa-user-id-v3=s%253AAQAKIInt_o9JKEeaXge2Qqq0rNyuYhequRBIpUHqZh0HMH6oEL0BGAQgs4ygzgYwAToEz3MC7kIESnPk1w.5%252BtRAUFcq7DDM%252F8fQ%252FbvbP1EFUeqp2d8de%252BJWPZHloM&sa-user-id-v2=s%253AEwlbNvNYW99YFDOCl4d3WZNdlcI.VByj21FeJ%252FaFV8k5KdFizkqqObKbFJQV13rVxYczMXY&sa-user-id=s%253A0-13095b36-f358-5bdf-5814-338297877759.vthKt7qKbkoWMOARhmIuaVE7shK9TGwldZ4BbdlDX%252Fk
+2026-03-28 12:47:47 XHR: GET https://boards-api.greenhouse.io/v1/boards/clearstreet/jobs?content=true
+2026-03-28 12:47:48 XHR: GET https://forms.hscollectedforms.net/collected-forms/v1/config/json?portalId=49689956&utk=
+2026-03-28 12:47:48 XHR: POST https://api.userway.org/api/v1/tunings/zfZrmBgDGG
+2026-03-28 12:47:48 XHR: GET https://pixel-config.reddit.com/pixels/a2_fpzm5y1rn7lj/config
+2026-03-28 12:47:48 XHR: GET https://www.clearstreet.io/lotties/scroll-btn.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/386bebb09582ccf09ea4c375762758702f33c029.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/e4b9f87300e4626ca6907acb45a3e5348c08d745.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/4567f9029ddbfeb116e317738f945f84f2ec9447.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/6614fef61a9084867cbe5c6a78872c2c78cb671f.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/2039b6b689c1bed8b19e49dc9a861954bca76e48.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/0dad6e380e80b1d7816e1c380c8f9c02fa857029.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/bb1a79c621a28db2d8f810667a662558df27a15d.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/386bebb09582ccf09ea4c375762758702f33c029.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/e4b9f87300e4626ca6907acb45a3e5348c08d745.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/4567f9029ddbfeb116e317738f945f84f2ec9447.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/6614fef61a9084867cbe5c6a78872c2c78cb671f.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/2039b6b689c1bed8b19e49dc9a861954bca76e48.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/0dad6e380e80b1d7816e1c380c8f9c02fa857029.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/bb1a79c621a28db2d8f810667a662558df27a15d.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/313fc1372840037d9fab08ed2cb237c74cc09fef.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/91fec6d1364198016e661efe37c8f0909cfcdb3e.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/c43c24bed5bca9f911ad2938f2e430cf92570420.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/f47ffc93cedf4839f9f3aafc7d4a4d2a7953bd63.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.sanity.io/files/40fnhjbe/production/ccf71bbad7b0c48c552ba823b558ad7be2e48a11.riv
+2026-03-28 12:47:48 XHR: GET https://cdn.userway.org/widgetapp/2026-03-20-13-54-16/locales/en-US.json
+2026-03-28 12:47:49 XHR: GET https://consentcdn.cookiebot.com/consentconfig/8e52775c-e002-4c07-a36b-5506dafd41eb/settings.json
+2026-03-28 12:47:50 XHR: POST https://api-gateway.umami.dev/api/send
+2026-03-28 12:47:52 Playwright got 473970 bytes from https://clearstreet.io
+2026-03-28 12:47:53 Playwright content richer — using rendered HTML
+2026-03-28 12:47:53 Parsed: https://clearstreet.io
+2026-03-28 12:47:53 [WS] Discovered WebSocket endpoint: wss://ws-us3.pusher.com
+Exception in thread Thread-3 (_run_checks):
+Traceback (most recent call last):
+  File "/home/colin/Code/NuScrape/main.py", line 9660, in _origin_check
+    async with websockets.connect(
+               ~~~~~~~~~~~~~~~~~~^
+        ws_url,
+        ^^^^^^^
+    ...<3 lines>...
+        ssl=None,
+        ^^^^^^^^^
+    ) as ws:
+    ^
+  File "/home/colin/Code/NuScrape/.venv/lib64/python3.14/site-packages/websockets/asyncio/client.py", line 590, in __aenter__
+    return await self
+           ^^^^^^^^^^
+  File "/home/colin/Code/NuScrape/.venv/lib64/python3.14/site-packages/websockets/asyncio/client.py", line 544, in __await_impl__
+    self.connection = await self.create_connection()
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/colin/Code/NuScrape/.venv/lib64/python3.14/site-packages/websockets/asyncio/client.py", line 398, in create_connection
+    raise ValueError("ssl=None is incompatible with a wss:// URI")
+ValueError: ssl=None is incompatible with a wss:// URI
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/lib64/python3.14/threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/usr/lib64/python3.14/threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/colin/Code/NuScrape/main.py", line 9728, in _run_checks
+    loop.run_until_complete(_origin_check())
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/home/colin/Code/NuScrape/main.py", line 9680, in _origin_check
+    websockets.exceptions.RejectHandshake,
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/colin/Code/NuScrape/.venv/lib64/python3.14/site-packages/websockets/imports.py", line 93, in __getattr__
+    raise AttributeError(f"module {package!r} has no attribute {name!r}")
+AttributeError: module 'websockets.exceptions' has no attribute 'RejectHandshake'. Did you mean: 'RedirectHandshake'?
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 4.97 | Class: base64 | Context: "l.net/fb.js 'sha256-kbVAimXI+Ivyqz6BNaolD8T7DF1h6a3wd4TH4ySHHcI=' 'sha256-dVBjHDO3tU"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=4.97) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.10 | Class: base64 | Context: "TH4ySHHcI=' 'sha256-dVBjHDO3tUaYETRIoA+hnfnt0QlzMRMxWgW/5iX/zH4=' 'sha256-uJvUZDkiZ7"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.10) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 4.88 | Class: base64 | Context: "msFEkYkE8=' 'sha256-2hrAUe8IkGUNTzPu9De3RiApMAFOd+mk1bT89xzvveM=' 'sha384-gyTf7AxMRK"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=4.88) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.10 | Class: base64 | Context: "T89xzvveM=' 'sha384-gyTf7AxMRKKeMEhXUmU4w00TgBxNFLuVSnjMBMhOZisIQKtUQ9NE6KgXRnKMdWBl' 'sha384-2vzweevJmQ"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.10) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.00 | Class: base64 | Context: "gXRnKMdWBl' 'sha384-2vzweevJmQAbse9ewm4KDMP6tcslWZKDsk2FQ7MFZ8KcmJ7jVG4dFe/xxJvUlTth' 'sha384-L1MiF4QY/Z"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.00) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.09 | Class: base64 | Context: "/xxJvUlTth' 'sha384-L1MiF4QY/ZE8olVI0l7k2ujJV0MailtkkU/g9MK8yl5RK+d493ry4u69w2T9kF33' 'sha384-aDX01AKXZP"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.09) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.12 | Class: base64 | Context: "69w2T9kF33' 'sha384-aDX01AKXZPlZpv2H/MQTEH3swkweuHy2ck0ooZO6Pew3rIabnl6XBFW0VsxcDD2l' 'sha384-LYSvUS5Fw/"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.12) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.26 | Class: base64 | Context: "W0VsxcDD2l' 'sha384-LYSvUS5Fw/buxSwjtvi9JQseMHCL6XH7Joun0a1zWgw51tLK2irGapJ1FmkU+Uvd' 'sha384-VoxIZ4ckY8"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.26) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.10 | Class: base64 | Context: "J1FmkU+Uvd' 'sha384-VoxIZ4ckY84Vf6ib+GZqq6PLXzVALmRGGeYLIX1LouAJcFEEi1MuopK+s1T0qrCM' 'sha384-v241fRo4sk"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.10) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.20 | Class: base64 | Context: "K+s1T0qrCM' 'sha384-v241fRo4skCo7mUhBDJ8T4nAFYEehtz97c/ory/QRvZ+rDAg2RQrui4kt5DepVfZ' 'sha384-48kH3+4fvT"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.20) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 4.97 | Class: base64 | Context: "4kt5DepVfZ' 'sha384-48kH3+4fvTxMOC6TfPyIOBX8bSB42WSEG5c3zL32yhITbrxEv/E/BB9Jf8X6/eWO' 'sha384-67yHKFiUZA"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=4.97) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.38 | Class: base64 | Context: "9Jf8X6/eWO' 'sha384-67yHKFiUZAPjbRvtkrOLdCXamNQnb4xOTFFMm5pnGD7uOUpUwoF5IZYh2uK40gws' 'sha384-aQWOYmC9eZ"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.38) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.31 | Class: base64 | Context: "Yh2uK40gws' 'sha384-aQWOYmC9eZ7Vk3hLJl9Q2fA7pT+/mC2QpBJaNq0ySdH+eyGUzHD/832n5DZJRvG4' 'sha384-dic2MAxUZ8"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.31) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.17 | Class: base64 | Context: "2n5DZJRvG4' 'sha384-dic2MAxUZ8gUXwPWfWiK1yOYUh9BHtKlkLRmkNgUyEZOHXFoSIoDTjYmkkWmN4Tk' 'sha384-oim9zsikoY"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.17) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.00 | Class: base64 | Context: "YmkkWmN4Tk' 'sha384-oim9zsikoYc/XXsvSkXAKecRi+t7sYDiIIg2JZPGsndgHeHhY5GpyBqKkHXH7+gS' 'sha384-gzxolgDXB8"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.00) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.27 | Class: base64 | Context: "qKkHXH7+gS' 'sha384-gzxolgDXB8pmYj3s9cEeNxXw4aWUCwJEnhRjnC9mm6qkRQMsTghHaKv4y3hOUyjr' 'sha384-ML4bUQj9mX"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.27) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.23 | Class: base64 | Context: "v4y3hOUyjr' 'sha384-ML4bUQj9mX68QUZ8NBkzxOj+oZR1Meu6Ml5jyg6sColrTctJSqpdAC+fMkNUleRA' 'sha384-OjOklOgXRE"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.23) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.12 | Class: base64 | Context: "+fMkNUleRA' 'sha384-OjOklOgXREMNP1GeBUk6ghEaWhsQIyxmQxCrBZU0CwOn0SeEUNZpJVPjbg9PObDn' 'sha384-fhXPdd2VJb"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.12) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.21 | Class: base64 | Context: "Pjbg9PObDn' 'sha384-fhXPdd2VJb8p5N/1FGswFecLgP0BB5CFQYsaGg6hLSWCeX/0VBHqmJcCkMiFKhnO' 'sha384-6LlohvmLV/"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.21) at https://clearstreet.io
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://clearstreet.io
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://clearstreet.io | Entropy: 5.28 | Class: base64 | Context: "cCkMiFKhnO' 'sha384-6LlohvmLV/Yk+2BKQx81UkevsJJ1zjYjhY4+CJiOZG956+RVNqI63qnxOVMHDDzy'; upgrade-insecure-"
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 12:47:53
+================================================================
+
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.28) at https://clearstreet.io
+2026-03-28 12:47:53 [FP Suppressed] HIGH ENTROPY STRING: HIGH ENTROPY STRING on https://clearstreet.io matched fingerprint: asset_hashes/integrity="sha
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.05) at https://clearstreet.io
+2026-03-28 12:47:53 [FP Suppressed] HIGH ENTROPY STRING: HIGH ENTROPY STRING on https://clearstreet.io matched fingerprint: asset_hashes/integrity="sha
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.08) at https://clearstreet.io
+2026-03-28 12:47:53 [FP Suppressed] HIGH ENTROPY STRING: HIGH ENTROPY STRING on https://clearstreet.io matched fingerprint: asset_hashes/integrity="sha
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.25) at https://clearstreet.io
+2026-03-28 12:47:53 [FP Suppressed] HIGH ENTROPY STRING: HIGH ENTROPY STRING on https://clearstreet.io matched fingerprint: asset_hashes/integrity="sha
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.22) at https://clearstreet.io
+2026-03-28 12:47:53 [FP Suppressed] HIGH ENTROPY STRING: HIGH ENTROPY STRING on https://clearstreet.io matched fingerprint: asset_hashes/integrity="sha
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.27) at https://clearstreet.io
+2026-03-28 12:47:53 [FP Suppressed] HIGH ENTROPY STRING: HIGH ENTROPY STRING on https://clearstreet.io matched fingerprint: asset_hashes/integrity="sha
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.26) at https://clearstreet.io
+2026-03-28 12:47:53 [FP Suppressed] HIGH ENTROPY STRING: HIGH ENTROPY STRING on https://clearstreet.io matched fingerprint: asset_hashes/integrity="sha
+2026-03-28 12:47:53 [!] Entropy: high entropy string (entropy=5.27) at https://clearstreet.io
+2026-03-28 12:48:27 [Baseline] https://www.cookiebot.com/en/what-is-behind-powered-by-cookiebot/ — status=200 len=201802±143152 fp=13fbaff7d6147ea3
+2026-03-28 12:48:51 [Baseline] https://clearstreet.io/services — status=200 len=138276±96019 fp=6da2b64513a5b00a
+2026-03-28 12:49:59 SQLi probe: https://www.cookiebot.com/en/what-is-behind-powered-by-cookiebot/ param=utm_source
+2026-03-28 12:50:14 [Baseline] https://clearstreet.io/services/clearing — status=200 len=147606±103089 fp=d0dfc6a946c79a58
+2026-03-28 12:50:34 [Timing] Noisy baseline for https://www.cookiebot.com/en/what-is-behind-powered-by-cookiebot/ (σ=814ms > 500ms) — skipping time-based probing
+2026-03-28 12:50:34 [Context] SQLi param=utm_medium in js_string context
+2026-03-28 12:50:34 SQLi probe: https://www.cookiebot.com/en/what-is-behind-powered-by-cookiebot/ param=utm_medium
+2026-03-28 12:50:50 [Context] SQLi param=utm_content in js_string context
+2026-03-28 12:50:50 SQLi probe: https://www.cookiebot.com/en/what-is-behind-powered-by-cookiebot/ param=utm_content
+2026-03-28 12:51:02 [Baseline] https://clearstreet.io/services/investment-banking — status=200 len=161466±114956 fp=e7c9069ba0a5a731
+2026-03-28 12:51:34 CMDi probe: https://www.cookiebot.com/en/what-is-behind-powered-by-cookiebot/ param=utm_source
+2026-03-28 12:51:37 [Baseline] https://clearstreet.io/services/execution-trading — status=200 len=54833±0 fp=89d232e10310fb5b
+2026-03-28 12:52:06 [Timing] Noisy baseline for https://www.cookiebot.com/en/what-is-behind-powered-by-cookiebot/ (σ=989ms > 500ms) — skipping time-based probing
+2026-03-28 12:52:06 [Context] CMDi param=utm_medium in js_string context — using context-specific payloads
+2026-03-28 12:52:06 CMDi probe: https://www.cookiebot.com/en/what-is-behind-powered-by-cookiebot/ param=utm_medium
+2026-03-28 12:52:27 [Context] CMDi param=utm_content in js_string context — using context-specific payloads
+2026-03-28 12:52:27 CMDi probe: https://www.cookiebot.com/en/what-is-behind-powered-by-cookiebot/ param=utm_content
