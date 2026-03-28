@@ -720,3 +720,148 @@ AttributeError: module 'websockets.exceptions' has no attribute 'RejectHandshake
 ================================================================
 
 2026-03-28 13:41:39 [!] Entropy: high entropy string (entropy=5.12) at https://tahoechamber.org/contact/
+
+============================================================
+[NuScrape] Starting scan → https://www.thechambernv.org/  @ 2026-03-28 13:44:14.841439
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Tutorial mode enabled — HOW TO VERIFY guidance will be appended to findings
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 13:44:15 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 13:44:15 Skipping 11 URLs crawled in the last 14 days.
+2026-03-28 13:44:15 Starting NuScrape → https://www.thechambernv.org/
+2026-03-28 13:44:15 robots.txt: ignored (--ignore-robots)
+2026-03-28 13:44:15 Fetching sitemap...
+2026-03-28 13:44:19 Sitemap found 1 URLs for https://www.thechambernv.org
+2026-03-28 13:44:21 [SSRF] interact.sh registration failed (HTTPSConnectionPool(host='interact.sh', port=443): Max retries exceeded with url) — blind fallback active
+2026-03-28 13:44:21 Batch 2 [workers=3] | crawled=0 queue=0
+2026-03-28 13:44:24 HTTP 200 https://www.thechambernv.org/page-sitemap.xml
+2026-03-28 13:44:24 HTTP 200 https://www.thechambernv.org/
+2026-03-28 13:44:27 JS-heavy page detected, switching to Playwright: https://www.thechambernv.org/
+2026-03-28 13:44:27 Playwright rendering: https://www.thechambernv.org/
+2026-03-28 13:44:32 XHR: POST https://api.userway.org/api/abn/events
+2026-03-28 13:44:34 XHR: POST https://www.youtube-nocookie.com/youtubei/v1/player?prettyPrint=false
+2026-03-28 13:44:34 XHR: POST https://rr1---sn-vgqsrnz6.googlevideo.com/videoplayback?expire=1774741474&ei=ghPIaeSXK6_XvPEPr42p4AU&ip=147.93.149.194&id=o-AB1Q-kaJpSTjZ3bOc4gwBjUDYuP2okuI0UJmfUpRq7Xw&source=youtube&requiressl=yes&xpc=EgVo2aDSNQ%3D%3D&cps=345&met=1774719874%2C&mh=YF&mm=31%2C26&mn=sn-vgqsrnz6%2Csn-ab5sznzs&ms=au%2Conr&mv=m&mvi=1&pl=24&rms=au%2Cau&initcwndbps=4355000&spc=jlWavU45TtiB0qUR47TPBMskddNdPiQde3aNb21slfFhz0Pu7-Bol5WIkq-MhlfOrel07w&svpuc=1&ns=MQkSwLfCsp78KsavUjxq-D4T&sabr=1&rqh=1&mt=1774719448&fvip=1&keepalive=yes&fexp=51565115%2C51565682&c=WEB_EMBEDDED_PLAYER&n=djw5je2RGE86Zg&sparams=expire%2Cei%2Cip%2Cid%2Csource%2Crequiressl%2Cxpc%2Cspc%2Csvpuc%2Cns%2Csabr%2Crqh&sig=AHEqNM4wRgIhANZgFNaieCUU7tkAfltc0tTHUBnExLd9E9MclzR1ftQ0AiEAkB01pNu2uU2-obF5m-boKI9WICfGsxLf8Xrw7hfXaNA%3D&lsparams=cps%2Cmet%2Cmh%2Cmm%2Cmn%2Cms%2Cmv%2Cmvi%2Cpl%2Crms%2Cinitcwndbps&lsig=APaTxxMwRQIgPrO7chC4YK8S1SB2VZl9eluw05fi2js3cxUa5W2DK9ACIQDDDboCHUxCxOiTOfa5_dGEaiJqzqw90VqHxREhcISRTw%3D%3D&cpn=T4sIMaFPy2aqPrgU&cver=2.20260326.04.00&rn=1&alr=yes
+2026-03-28 13:44:34 XHR: POST https://www.youtube-nocookie.com/youtubei/v1/account/get_setting_values?prettyPrint=false
+2026-03-28 13:44:34 XHR: POST https://www.youtube-nocookie.com/youtubei/v1/next?prettyPrint=false
+2026-03-28 13:44:35 XHR: POST https://www.youtube-nocookie.com/api/stats/qoe?fmt=134&cpn=T4sIMaFPy2aqPrgU&el=embedded&ns=yt&fexp=v1%2C24004644%2C27005591%2C53408%2C34656%2C106030%2C18644%2C117689%2C9252%2C3479%2C13030%2C23206%2C15179%2C20225%2C65298%2C9720%2C5385%2C25059%2C4174%2C29683%2C763%2C13518%2C5188%2C1734%2C18758%2C945%2C4571%2C5238%2C5800%2C1977%2C1192%2C14896%2C9404%2C23826%2C9500%2C1840%2C12605%2C8105%2C1764%2C11771%2C1350%2C15%2C516%2C9590%2C13159%2C2281%2C3511%2C13952%2C1448%2C328%2C7376%2C763%2C12201%2C350%2C9739%2C4602%2C1170%2C3030%2C71%2C386%2C954%2C776%2C1978%2C3358%2C1488%2C4886%2C110%2C2788%2C145%2C3793%2C2954%2C221%2C1181%2C2103%2C1439%2C6524%2C4139%2C14066&cl=888952760&seq=1&docid=rFEejO5A4Z8&ei=ghPIaeSXK6_XvPEPr42p4AU&event=streamingstats&plid=AAZOGSu10HWXvEt6&cbrand=apple&cbr=Safari%20Mobile&cbrver=17.4.1.15E148&c=WEB_EMBEDDED_PLAYER&cver=2.20260326.04.00&cplayer=UNIPLAYER&cmodel=iphone&cos=iPhone&cosver=17_4_1&cplatform=MOBILE&vps=0.000:N,0.006:B,0.008:S,0.506:S,0.506:S&cat=streaming,sabr&cmt=0.006:0.000,0.008:0.000,0.506:0.000&ctmp=esfw:usbc.1;hsu.1&vfs=0.506:134:134::a:sms.2:CAEoAQ&view=0.506:960:540&bwm=0.506:1263:0.353&bwe=0.506:655360&bat=0.506:0.79:1&vis=0.506:0&bh=0.506:0.000&qclc=ChBUNHNJTWFGUHkyYXFQcmdVEAE
+2026-03-28 13:44:35 XHR: GET https://www.gstatic.com/youtube/img/icons/mweb/youtube_fill/logo/v2/67px.svg
+2026-03-28 13:44:35 XHR: GET https://fonts.gstatic.com/s/i/youtube_outline_experimental/player_full_enter_alt/v1/24px.svg
+2026-03-28 13:44:35 XHR: GET https://www.youtube-nocookie.com/api/stats/playback?ns=yt&el=embedded&cpn=T4sIMaFPy2aqPrgU&ver=2&cmt=0.021&fmt=134&fs=0&rt=0.697&euri=https%3A%2F%2Fwww.thechambernv.org%2F&lact=476&cl=888952760&mos=1&volume=100&cbrand=apple&cbr=Safari%20Mobile&cbrver=17.4.1.15E148&c=WEB_EMBEDDED_PLAYER&cver=2.20260326.04.00&cplayer=UNIPLAYER&cmodel=iphone&cos=iPhone&cosver=17_4_1&cplatform=MOBILE&autoplay=1&epm=1&splay=1&hl=en_US&cr=US&len=73&fexp=v1%2C24004644%2C27005591%2C53408%2C34656%2C106030%2C18644%2C117689%2C9252%2C3479%2C13030%2C23206%2C15179%2C20225%2C65298%2C9720%2C5385%2C25059%2C4174%2C29683%2C763%2C13518%2C5188%2C1734%2C18758%2C945%2C4571%2C5238%2C5800%2C1977%2C1192%2C14896%2C9404%2C23826%2C9500%2C1840%2C12605%2C8105%2C1764%2C11771%2C1350%2C15%2C516%2C9590%2C13159%2C2281%2C3511%2C13952%2C1448%2C328%2C7376%2C763%2C12201%2C350%2C9739%2C4602%2C1170%2C3030%2C71%2C386%2C954%2C776%2C1978%2C3358%2C1488%2C4886%2C110%2C2788%2C145%2C3793%2C2954%2C221%2C1181%2C2103%2C1439%2C6524%2C4139%2C14066&rtn=4&afmt=251&size=960%3A540&inview=0&muted=1&docid=rFEejO5A4Z8&ei=ghPIaeSXK6_XvPEPr42p4AU&plid=AAZOGSu10HWXvEt6&referrer=https%3A%2F%2Fwww.youtube-nocookie.com%2Fembed%2FrFEejO5A4Z8%3Fcontrols%3D0%26rel%3D0%26playsinline%3D1%26cc_load_policy%3D0%26enablejsapi%3D1%26origin%3Dhttps%253A%252F%252Fwww.thechambernv.org%26widgetid%3D1%26forigin%3Dhttps%253A%252F%252Fwww.thechambernv.org%252F%26aoriginsup%3D1%26vf%3D5&of=wbAUJoLFDaeeOSJrHXH1sg&vm=CAEQABgEOjJBSHFpSlRJejNLbERYY0t4RkFGa3dhLWd0Z3pEczRsNkVtZWZ4MUhyRGEyNnRjSlJJd2JoQUVZQjIxZ3U4Qmt4ZW9wN3RFSUxOUXpwU0l0WjF1cnZEZGVyTW9TeFR2bUZxUlNfRUl0Q21tdmVScUdyMl9ibkFyTmJyaU9tWVdmazVMS1lPOGFCQ0hacHF4c1dZSkQ3WlVCNVhXX0E
+2026-03-28 13:44:35 XHR: GET https://www.youtube-nocookie.com/ptracking?html5=1&video_id=rFEejO5A4Z8&cpn=T4sIMaFPy2aqPrgU&ei=ghPIaeSXK6_XvPEPr42p4AU&ptk=youtube_none&pltype=contentugc
+2026-03-28 13:44:35 XHR: POST https://www.youtube-nocookie.com/youtubei/v1/log_event?alt=json
+2026-03-28 13:44:35 XHR: POST https://jnn-pa.googleapis.com/$rpc/google.internal.waa.v1.Waa/GenerateIT
+2026-03-28 13:44:38 XHR: POST https://www.youtube-nocookie.com/api/stats/atr?ns=yt&el=embedded&cpn=T4sIMaFPy2aqPrgU&ver=2&cmt=3.019&fmt=134&fs=0&rt=3.702&euri=https%3A%2F%2Fwww.thechambernv.org%2F&lact=3481&cl=888952760&mos=1&volume=100&cbrand=apple&cbr=Safari%20Mobile&cbrver=17.4.1.15E148&c=WEB_EMBEDDED_PLAYER&cver=2.20260326.04.00&cplayer=UNIPLAYER&cmodel=iphone&cos=iPhone&cosver=17_4_1&cplatform=MOBILE&autoplay=1&epm=1&splay=1&hl=en_US&cr=US&len=73&fexp=v1%2C24004644%2C27005591%2C53408%2C34656%2C106030%2C18644%2C117689%2C9252%2C3479%2C13030%2C23206%2C15179%2C20225%2C65298%2C9720%2C5385%2C25059%2C4174%2C29683%2C763%2C13518%2C5188%2C1734%2C18758%2C945%2C4571%2C5238%2C5800%2C1977%2C1192%2C14896%2C9404%2C23826%2C9500%2C1840%2C12605%2C8105%2C1764%2C11771%2C1350%2C15%2C516%2C9590%2C13159%2C2281%2C3511%2C13952%2C1448%2C328%2C7376%2C763%2C12201%2C350%2C9739%2C4602%2C1170%2C3030%2C71%2C386%2C954%2C776%2C1978%2C3358%2C1488%2C4886%2C110%2C2788%2C145%2C3793%2C2954%2C221%2C1181%2C2103%2C1439%2C6524%2C4139%2C14066&afmt=251&muted=1&docid=rFEejO5A4Z8&ei=ghPIaeSXK6_XvPEPr42p4AU&plid=AAZOGSu10HWXvEt6&vm=CAEQABgEOjJBSHFpSlRJejNLbERYY0t4RkFGa3dhLWd0Z3pEczRsNkVtZWZ4MUhyRGEyNnRjSlJJd2JoQUVZQjIxZ3U4Qmt4ZW9wN3RFSUxOUXpwU0l0WjF1cnZEZGVyTW9TeFR2bUZxUlNfRUl0Q21tdmVScUdyMl9ibkFyTmJyaU9tWVdmazVMS1lPOGFCQ0hacHF4c1dZSkQ3WlVCNVhXX0E
+2026-03-28 13:44:38 Playwright got 327533 bytes from https://www.thechambernv.org/
+2026-03-28 13:44:38 Playwright content richer — using rendered HTML
+2026-03-28 13:44:38 Parsed: https://www.thechambernv.org/
+2026-03-28 13:44:38 SSRF candidates queued on www.thechambernv.org: url
+2026-03-28 13:44:38 SSRF OOB probe: https://www.thechambernv.org/ param=url
+
+================================================================
+  !! MEDIUM ALERT: SSRF CANDIDATE (OOB UNAVAILABLE) !!
+  Target     : https://www.thechambernv.org/
+  Detail     : Parameter 'url' on https://www.thechambernv.org/ accepts URLs. OOB detection unavailable — interact.sh registration failed at startup. Manual verification required.
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:44:38
+================================================================
+
+2026-03-28 13:44:41 Path traversal probe: https://www.thechambernv.org/wp-json/oembed/1.0/embed param=url
+2026-03-28 13:44:43 [Baseline] https://www.thechambernv.org/wp-json/oembed/1.0/embed — status=200 len=2402±0 fp=a812faa3e89f50c9
+2026-03-28 13:45:25 [Baseline] https://www.thechambernv.org/events/ — status=200 len=0±0 fp=e3b0c44298fc1c14
+2026-03-28 13:45:29 [Baseline] https://www.thechambernv.org/wp-json/oembed/1.0/embed — status=200 len=2556±0 fp=12b9c481c496fbc5
+2026-03-28 13:47:42 SQLi probe: https://renosparkschamberofcommerce.growthzoneapp.com/chamber-events/Details/2026-biggest-business-expo-career-fair-1536558 param=sourceTypeId
+[NuScrape] Scan stopped by user @ 2026-03-28 13:47:47.457851
+
+[*] Received signal 15 — shutting down cleanly...
+[NuScrape] Scan stopped by user @ 2026-03-28 13:47:48.939771
+
+[*] Received signal 15 — shutting down cleanly...
+Exception ignored on threading shutdown:
+Traceback (most recent call last):
+  File "/usr/lib64/python3.14/threading.py", line 1577, in _shutdown
+    atexit_call()
+  File "/usr/lib64/python3.14/threading.py", line 1548, in <lambda>
+    _threading_atexits.append(lambda: func(*arg, **kwargs))
+  File "/usr/lib64/python3.14/concurrent/futures/thread.py", line 31, in _python_exit
+    t.join()
+  File "/usr/lib64/python3.14/threading.py", line 1133, in join
+    self._os_thread_handle.join(timeout)
+  File "/home/colin/Code/NuScrape/main.py", line 15805, in _handle_stop_signal
+[NuScrape] Scan stopped by user @ 2026-03-28 13:47:49.776030
+
+[*] Received signal 15 — shutting down cleanly...
+SystemExit: 0
+
+============================================================
+[NuScrape] Starting scan → https://vegaschamber.com/  @ 2026-03-28 13:51:50.917589
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Tutorial mode enabled — HOW TO VERIFY guidance will be appended to findings
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 13:51:51 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 13:51:51 Starting NuScrape → https://vegaschamber.com/
+2026-03-28 13:51:51 robots.txt: ignored (--ignore-robots)
+2026-03-28 13:51:51 Fetching sitemap...
+2026-03-28 13:52:01 Sitemap found 7 URLs for https://vegaschamber.com
+2026-03-28 13:52:01 [SSRF] OOB client registered: 1e093a07db2e11cff419.interact.sh
+2026-03-28 13:52:01 Batch 3 [workers=3] | crawled=0 queue=5
+2026-03-28 13:52:04 HTTP 200 https://www.vegaschamber.com/page-sitemap.xml
+2026-03-28 13:52:04 HTTP 200 https://www.vegaschamber.com/post-sitemap.xml
+2026-03-28 13:52:05 HTTP 200 https://vegaschamber.com/
+2026-03-28 13:52:07 JS-heavy page detected, switching to Playwright: https://vegaschamber.com/
+2026-03-28 13:52:07 Playwright rendering: https://vegaschamber.com/
+2026-03-28 13:52:17 XHR: POST https://vegaschamber.com/cdn-cgi/challenge-platform/h/g/jsd/oneshot/ea2d291c0fdc/0.36707159097325237:1774424211:9_pSV23kWGmNtldQToc5YDBzJFUfKD8QS_h75YB-Zx0/9e387ca109e74bc9
+2026-03-28 13:52:23 Playwright got 451762 bytes from https://vegaschamber.com/
+2026-03-28 13:52:23 Playwright content richer — using rendered HTML
+2026-03-28 13:52:23 Parsed: https://vegaschamber.com/
+2026-03-28 13:52:23 Saved email: info@vegaschamber.com
+2026-03-28 13:52:23 SSRF candidates queued on vegaschamber.com: url
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://vegaschamber.com/
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'Report-To' of https://vegaschamber.com/ | Entropy: 5.34 | Class: base64 | Context: 'DY9z3OOBduYJSDYZ6Yz7P6c3e8lZ6U5bX6v2gDZTJ82xL4CmnLNXGNKvslaj'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:52:23
+================================================================
+
+2026-03-28 13:52:23 [!] Entropy: high entropy string (entropy=5.34) at https://vegaschamber.com/
+2026-03-28 13:52:23 SSRF OOB probe: https://vegaschamber.com/ param=url
+2026-03-28 13:52:36 [SSRF] Polling OOB (10s) for https://vegaschamber.com/ param=url ...
+
+================================================================
+  !! MEDIUM ALERT: SSRF CANDIDATE (NO OOB INTERACTION) !!
+  Target     : https://vegaschamber.com/
+  Detail     : Parameter 'url' on https://vegaschamber.com/ accepts URLs but no OOB interaction was received within 10s. Server may block outbound connections, use an allowlist, or DNS is not leaking. Manual verification recommended.
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:52:48
+================================================================
+
+2026-03-28 13:52:50 Path traversal probe: https://vegaschamber.com/wp-json/oembed/1.0/embed param=url
+2026-03-28 13:52:50 [Baseline] https://vegaschamber.com/wp-json/oembed/1.0/embed — status=200 len=2540±0 fp=446f4bf995bb62fb
+2026-03-28 13:53:14 [Baseline] https://web.vegaschamber.com/events — status=200 len=12460±0 fp=e007e48e0c4fa0c0
+2026-03-28 13:53:23 [Baseline] https://vegaschamber.com/wp-json/oembed/1.0/embed — status=200 len=3169±0 fp=2b0fd5007496a0bf
+2026-03-28 13:53:34 [Baseline] https://vegaschamber.com/xmlrpc.php — status=405 len=42±0 fp=b5318ac100f7dc67
+2026-03-28 13:53:37 SQLi probe: https://web.vegaschamber.com/events param=oe
+2026-03-28 13:53:49 [Timing] Baseline https://web.vegaschamber.com/events param=oe: mean=191ms σ=11ms max=212ms
+2026-03-28 13:53:50 [Timing] Baseline: 191ms ±11ms | Probe(SLEEP 2): 61ms (threshold 2225ms) ✗ → NOT TRIGGERED
+2026-03-28 13:53:50 CMDi probe: https://web.vegaschamber.com/events param=oe

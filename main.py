@@ -5220,12 +5220,12 @@ def _tutorial_note(alert_type: str) -> str:
     elif "ssrf" in atype:
         guidance = (
             "1. Register an interact.sh session:\n"
-            "   curl -s -X POST https://interact.sh/api/v1/register\n"
+            "   curl -s -X POST https://oast.pro/api/v1/register\n"
             "   Note the correlation-id and subdomain returned.\n"
             "2. Send the SSRF payload:\n"
             "   curl -s 'https://target.com/page?url=http://YOUR-ID.interact.sh'\n"
             "3. Poll for interactions:\n"
-            "   curl -s 'https://interact.sh/api/v1/poll?id=YOUR-ID&secret=YOUR-SECRET'\n"
+            "   curl -s 'https://oast.pro/api/v1/poll?id=YOUR-ID&secret=YOUR-SECRET'\n"
             "DNS or HTTP interaction from target IP = confirmed SSRF."
         )
     elif "idor" in atype:
@@ -7200,6 +7200,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         "permissions-policy", "server", "via", "age", "connection",
         # Cookie headers — values are session tokens by design, not leaked secrets.
         "set-cookie", "cookie",
+        # Reporting headers — values are endpoint URLs and group names, not secrets.
+        "report-to", "reporting-endpoints",
     })
     for hdr_name, hdr_val in (response_headers or {}).items():
         if hdr_name.lower() in skip_headers:
@@ -8691,7 +8693,7 @@ def flag_ssrf_candidates(page_url, html_content):
 # SSRF OOB confirmation (interact.sh HTTP API)
 # ─────────────────────────────────────────────
 
-_INTERACTSH_SERVER = "https://interact.sh"
+_INTERACTSH_SERVER = "https://oast.pro"
 # Set True once HTTP registration with interact.sh succeeds at startup
 _INTERACTSH_AVAILABLE = False
 
