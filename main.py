@@ -6684,6 +6684,45 @@ _ENT_DOM_ID_ATTR_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ── Proofpoint URL-rewrite token suppression ─────────────────────────────────
+# Proofpoint rewrites links in emails using a !! sentinel followed by a token.
+# Patterns: !!BqXa_…, !!XJXNBI…, *_;!!…, SUlJSU!!…, or any !!<word>! block.
+_ENT_PROOFPOINT_RE = re.compile(
+    r'!!(?:BqXa_|XJXNBI|[\w]{4,}!)'
+    r'|\*__;!!'
+    r'|SUlJSU!!',
+)
+
+# ── SharePoint sharing-token suppression ─────────────────────────────────────
+# SharePoint personal/site URLs carry a high-entropy share token in the ?e=
+# query parameter.  The token is a short alnum share code, not a secret.
+_ENT_SHAREPOINT_RE = re.compile(
+    r'(?:/personal/|/sites/)[^"\'<>\s]*\?e=[A-Za-z0-9]{4,20}(?:&|$|")',
+    re.IGNORECASE,
+)
+
+# ── Hive email marketing tracking suppression ─────────────────────────────────
+# Hive.co tracking URLs embed a high-entropy session identifier in the path or
+# h_sid= query parameter.
+_ENT_HIVE_EMAIL_RE = re.compile(
+    r'app\.hive\.co/email/elt/'
+    r'|h_sid='
+    r'|%2Femail%2Felt%2F',
+    re.IGNORECASE,
+)
+
+# ── URL-encoded redirect/token parameter suppression ─────────────────────────
+# A high-entropy string immediately following = or %3D in a URL context and
+# terminated by & or %26 or end-of-URL is a redirect or SSO token embedded in
+# a URL parameter, not a raw secret.
+_ENT_URL_ENCODED_PARAM_RE = re.compile(
+    r'(?:=|%3D)\s*$',
+    re.IGNORECASE,
+)
+_ENT_URL_ENCODED_PARAM_END_RE = re.compile(
+    r'^[A-Za-z0-9+/=_\-]{10,}(?:&|%26|$|\s)',
+)
+
 # ── CSP hash suppression ─────────────────────────────────────────────────────
 
 # Immediately-preceding sha256-/sha384-/sha512- prefix
@@ -6881,6 +6920,12 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         # Known public key prefixes
         if is_public_key(candidate):
             return
+        # Proofpoint URL-rewrite tokens (!!BqXa_…, *_;!!…, SUlJSU!!…)
+        if _ENT_PROOFPOINT_RE.search(candidate):
+            return
+        # Hive email marketing tracking tokens (app.hive.co/email/elt/, h_sid=)
+        if _ENT_HIVE_EMAIL_RE.search(candidate):
+            return
         # Entropy threshold gate.
         # Strings over 80 chars are likely cryptographic payloads (signatures,
         # encoded tokens, PKCE verifiers) rather than API keys — raise the bar.
@@ -6915,6 +6960,16 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
             # CSS property value context: background:, font:, style="…
             if _ENT_CSS_VALUE_RE.search(pre_ctx):
                 return
+            # SharePoint sharing token: /personal/ or /sites/ path with ?e=<token>
+            ctx_window = scan_body[max(0, pos - 200): pos + len(candidate) + 10]
+            if _ENT_SHAREPOINT_RE.search(ctx_window):
+                return
+            # URL-encoded parameter value: candidate directly follows = or %3D
+            # and is terminated by & / %26 / end-of-context — redirect/SSO token
+            if _ENT_URL_ENCODED_PARAM_RE.search(pre_ctx):
+                after = scan_body[pos + len(candidate): pos + len(candidate) + 4]
+                if not after or _ENT_URL_ENCODED_PARAM_END_RE.match(candidate + after):
+                    return
         else:
             context = candidate[:60]
 
