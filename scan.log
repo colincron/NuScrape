@@ -865,3 +865,1353 @@ SystemExit: 0
 2026-03-28 13:53:49 [Timing] Baseline https://web.vegaschamber.com/events param=oe: mean=191ms σ=11ms max=212ms
 2026-03-28 13:53:50 [Timing] Baseline: 191ms ±11ms | Probe(SLEEP 2): 61ms (threshold 2225ms) ✗ → NOT TRIGGERED
 2026-03-28 13:53:50 CMDi probe: https://web.vegaschamber.com/events param=oe
+2026-03-28 13:54:04 LDAPi probe: https://web.vegaschamber.com/events param=oe
+2026-03-28 13:54:17 Race condition probe: https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf [GET] (file upload)
+2026-03-28 13:54:39 [Race] Attempt 1/3: 10/10 requests succeeded
+2026-03-28 13:54:45 [Race] Attempt 2/3: 10/10 requests succeeded
+2026-03-28 13:54:52 [Race] Attempt 3/3: 10/10 requests succeeded
+2026-03-28 13:54:52 [Race] Running idempotency check on https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf
+2026-03-28 13:54:52 [Race] Endpoint is idempotent — downgrading to LOW
+
+================================================================
+  !! LOW ALERT: RACE CONDITION: IDEMPOTENT ENDPOINT !!
+  Target     : https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf
+  Detail     : Race condition probe on file upload endpoint https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf — sent 10 simultaneous GET requests. Status codes: 200 (10/10 succeeded). Response times: min=19898ms max=19966ms cv=0%. Responses are identical across concurrent requests — possible race condition, manual verification required. Sequential duplicate requests returned the same result — endpoint may handle duplicates correctly, but concurrent timing window may still exist.
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:54:52
+================================================================
+
+2026-03-28 13:54:52 [!] Race condition (RACE CONDITION: IDEMPOTENT ENDPOINT) at https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf
+2026-03-28 13:54:52 HPP probe: https://web.vegaschamber.com/events param=oe
+2026-03-28 13:54:58 WCP probe: https://vegaschamber.com/ header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 13:55:01 WCP probe: https://vegaschamber.com/ header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 13:55:05 WCP probe: https://vegaschamber.com/ header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 13:55:06 [Baseline] https://vegaschamber.com/ — status=200 len=345743±0 fp=4988c4721d86bd39
+2026-03-28 13:55:08 WCP probe: https://vegaschamber.com/ header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 13:55:11 WCP probe: https://vegaschamber.com/ header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 13:55:15 WCP probe: https://vegaschamber.com/ header=X-Forwarded-For: 127.0.0.1
+2026-03-28 13:55:17 WCP cloak probe: https://vegaschamber.com/?param=cloak-probe-9d4e
+2026-03-28 13:55:20 IDOR verify: https://vegaschamber.com/wp-json/wp/v2/pages/{id} param=path_id value=618167
+2026-03-28 13:55:22 IDOR dismissed (not auth-gated or no per-object diff): https://vegaschamber.com/wp-json/wp/v2/pages/{id}
+2026-03-28 13:55:22 IDOR verify: https://vegaschamber.com/wp-content/uploads/{id}/09/cropped-VC-no-Background-300x300.png param=path_id value=2023
+2026-03-28 13:55:22 IDOR dismissed (not auth-gated or no per-object diff): https://vegaschamber.com/wp-content/uploads/{id}/09/cropped-VC-no-Background-300x300.png
+2026-03-28 13:55:22 IDOR verify: https://vegaschamber.com/wp-content/uploads/{id}/09/cropped-VC-no-Background-150x150.png param=path_id value=2023
+2026-03-28 13:55:22 IDOR dismissed (not auth-gated or no per-object diff): https://vegaschamber.com/wp-content/uploads/{id}/09/cropped-VC-no-Background-150x150.png
+2026-03-28 13:55:22 IDOR verify: https://vegaschamber.com/wp-content/uploads/{id}/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf param=path_id value=2024
+2026-03-28 13:55:22 IDOR dismissed (not auth-gated or no per-object diff): https://vegaschamber.com/wp-content/uploads/{id}/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf
+2026-03-28 13:55:22 IDOR verify: https://web.vegaschamber.com/atlas/events/{id}/details param=path_id value=10270
+2026-03-28 13:55:22 IDOR dismissed (not auth-gated or no per-object diff): https://web.vegaschamber.com/atlas/events/{id}/details
+2026-03-28 13:55:22 Batch 3 [workers=3] | crawled=1 queue=25
+2026-03-28 13:55:23 HTTP 200 https://www.vegaschamber.com/project-sitemap.xml
+2026-03-28 13:55:23 HTTP 200 https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'ndow.mozPerformance,f="data-cf-beacon",l=document.currentScript||("function"==typeof document.querySelector?document.querySelector("script[".concat(f,"]")):void 0),d=(0,c.v4)(),v=[],p=window.__cfBeacon?window.__cfBeacon:{};if(!p||"single"!==p.load){if(l){var m=l.getAttribute(f);if(m)try{p=r(r({},p),'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:55:24
+================================================================
+
+2026-03-28 13:55:24 [!] PP client-side sink 'JSON.parse(…)[': https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516
+2026-03-28 13:55:24 HTTP 200 https://www.vegaschamber.com/category-sitemap.xml
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://vegaschamber.com/wp-content/uploads/760/258/assets/991/961.js?ver=3.0.9
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'eeded":advads.privacy.get_state(),theId:window.advanced_ads_pro_ajax_object.the_id,isSingular:advanced_ads_pro_ajax_object.is_singular};document.dispatchEvent(new CustomEvent("advanced-ads-ajax-cb-payload",{detail:{payload:e}}));for(const e of this.deferedAds)this.ajaxAdArgsByElementId[e.elementId]='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:55:25
+================================================================
+
+2026-03-28 13:55:25 [!] PP client-side sink 'JSON.parse(…)[': https://vegaschamber.com/wp-content/uploads/760/258/assets/991/961.js?ver=3.0.9
+2026-03-28 13:55:27 Parsed: https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf
+2026-03-28 13:55:27 WCP probe: https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 13:55:28 WCP probe: https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 13:55:29 WCP probe: https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 13:55:30 ERROR: check_js_source_map failed for https://vegaschamber.com/wp-content/uploads/760/258/assets/js/634.js?ver=3.0.9.map: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 13:55:30 WCP probe: https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 13:55:31 WCP probe: https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 13:55:31 ERROR: check_js_source_map failed for https://vegaschamber.com/wp-content/plugins/supreme-modules-pro-for-divi/includes/modules/BlockRevealText/frontend.min.js?ver=4.9.97.42.map: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 13:55:32 WCP probe: https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf header=X-Forwarded-For: 127.0.0.1
+2026-03-28 13:55:33 WCP cloak probe: https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf?param=cloak-probe-9d4e
+2026-03-28 13:55:35 [Baseline] https://vegaschamber.com/wp-content/uploads/2024/10/Vegas-Chamber-Announces-General-Election-Endorsements-10724_fin.pdf — status=200 len=148111±0 fp=0c0bcdb5bf0965e2
+2026-03-28 13:56:08 Batch 3 [workers=3] | crawled=2 queue=22
+2026-03-28 13:56:10 HTTP 200 https://www.vegaschamber.com/project_category-sitemap.xml
+2026-03-28 13:56:10 HTTP 200 https://www.vegaschamber.com/post_tag-sitemap.xml
+2026-03-28 13:56:10 HTTP 200 https://www.vegaschamber.com/author-sitemap.xml
+2026-03-28 13:56:13 Batch 3 [workers=3] | crawled=2 queue=19
+2026-03-28 13:56:16 HTTP 200 https://vegaschamber.com/membership/
+2026-03-28 13:56:17 HTTP 200 https://vegaschamber.com/about/
+2026-03-28 13:56:17 HTTP 200 https://vegaschamber.com/events-programs/
+2026-03-28 13:56:20 JS-heavy page detected, switching to Playwright: https://vegaschamber.com/about/
+2026-03-28 13:56:20 Playwright rendering: https://vegaschamber.com/about/
+2026-03-28 13:56:22 XHR: POST https://vegaschamber.com/cdn-cgi/challenge-platform/h/g/jsd/oneshot/ea2d291c0fdc/0.36707159097325237:1774424211:9_pSV23kWGmNtldQToc5YDBzJFUfKD8QS_h75YB-Zx0/9e3882cdfdaf4bcc
+2026-03-28 13:56:28 Playwright got 892147 bytes from https://vegaschamber.com/about/
+2026-03-28 13:56:28 Playwright content richer — using rendered HTML
+2026-03-28 13:56:28 Parsed: https://vegaschamber.com/about/
+2026-03-28 13:56:28 Saved email: mbsewald@vegaschamber.com
+2026-03-28 13:56:28 Saved email: pmoradkhan@vegaschamber.com
+2026-03-28 13:56:28 Saved email: jvalle@vegaschamber.com
+2026-03-28 13:56:28 Saved email: aharley@vegaschamber.com
+2026-03-28 13:56:28 Saved email: cclarke@vegaschamber.com
+2026-03-28 13:56:28 Saved email: jandres@vegaschamber.com
+2026-03-28 13:56:28 Saved email: jherbert@vegaschamber.com
+2026-03-28 13:56:28 Saved email: ebardho@vegaschamber.com
+2026-03-28 13:56:28 Saved email: acastelan@vegaschamber.com
+2026-03-28 13:56:28 Saved email: jporras@vegaschamber.com
+2026-03-28 13:56:28 Saved email: csantana@vegaschamber.com
+2026-03-28 13:56:28 Saved email: jjuarez@vegaschamber.com
+2026-03-28 13:56:28 Saved email: jesqueda@vegaschamber.com
+2026-03-28 13:56:28 Saved email: jchatman@vegaschamber.com
+2026-03-28 13:56:28 Saved email: tsquires@vegaschamber.com
+2026-03-28 13:56:28 Saved email: dmakiri@vegaschamber.com
+2026-03-28 13:56:28 Saved email: shamlett@vegaschamber.com
+2026-03-28 13:56:28 Saved email: agoldberg@vegaschamber.com
+2026-03-28 13:56:28 Saved email: jgreen@vegaschamber.com
+2026-03-28 13:56:28 Saved email: lstein@vegaschamber.com
+2026-03-28 13:56:28 Saved email: kbrengle@vegaschamber.com
+2026-03-28 13:56:28 Saved email: dschneitter@vegaschamber.com
+2026-03-28 13:56:28 Saved email: iallen@vegaschamber.com
+2026-03-28 13:56:28 Saved email: kwilkens@vegaschamber.com
+2026-03-28 13:56:28 Saved email: tparrish@vegaschamber.com
+2026-03-28 13:56:28 Saved email: tavery@vegaschamber.com
+2026-03-28 13:56:28 Saved email: ajohnson@vegaschamber.com
+2026-03-28 13:56:28 Saved email: lgough@vegaschamber.com
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://vegaschamber.com/about/
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'Report-To' of https://vegaschamber.com/about/ | Entropy: 5.27 | Class: base64 | Context: '2BaXuDLFegof4lSOuu6dIDDj1MjGsUNyywlCiFztmIi6Yvy9nSQitruYVb3c'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:56:28
+================================================================
+
+2026-03-28 13:56:28 [!] Entropy: high entropy string (entropy=5.27) at https://vegaschamber.com/about/
+2026-03-28 13:56:40 ERROR: SSTI probe failed for https://www.pnc.com/en/corporate-and-institutional.html?lnksrc={{A}*{B}}: HTTPSConnectionPool(host='www.pnc.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 13:56:42 [Baseline] Skipping https://www.pnc.com/en/corporate-and-institutional.html — timed out
+2026-03-28 13:56:48 ERROR: SSTI probe failed for https://www.pnc.com/en/corporate-and-institutional.html?lnksrc=#{6207*8671}: HTTPSConnectionPool(host='www.pnc.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 13:56:50 [Baseline] https://www.dickinson-wright.com/our-people/michael-n-feder — status=200 len=48009±0 fp=a0ba2e38cdda6831
+2026-03-28 13:56:52 [Baseline] https://vegaschamber.com/wp-json/oembed/1.0/embed — status=200 len=2494±0 fp=007cf2a0918cb32c
+2026-03-28 13:56:53 [Baseline] https://vegaschamber.com/wp-json/oembed/1.0/embed — status=200 len=3121±0 fp=5ce9330a9fb5f11a
+2026-03-28 13:57:01 SQLi probe: https://www.dickinson-wright.com/our-people/michael-n-feder param=tab
+2026-03-28 13:57:13 [Timing] Baseline https://www.dickinson-wright.com/our-people/michael-n-feder param=tab: mean=139ms σ=41ms max=165ms
+2026-03-28 13:57:16 [Timing] Baseline: 139ms ±41ms | Probe(SLEEP 2): 166ms (threshold 2263ms) ✗ → NOT TRIGGERED
+2026-03-28 13:57:16 SQLi probe: https://www.pnc.com/en/corporate-and-institutional.html param=lnksrc
+2026-03-28 13:57:26 [Timing] Baseline https://www.pnc.com/en/corporate-and-institutional.html param=lnksrc: mean=135ms σ=75ms max=279ms
+2026-03-28 13:57:28 [Timing] Baseline: 135ms ±75ms | Probe(SLEEP 2): 197ms (threshold 2361ms) ✗ → NOT TRIGGERED
+2026-03-28 13:57:28 CMDi probe: https://www.dickinson-wright.com/our-people/michael-n-feder param=tab
+2026-03-28 13:57:43 CMDi probe: https://www.pnc.com/en/corporate-and-institutional.html param=lnksrc
+2026-03-28 13:58:02 LDAPi probe: https://www.dickinson-wright.com/our-people/michael-n-feder param=tab
+2026-03-28 13:58:13 LDAPi probe: https://www.pnc.com/en/corporate-and-institutional.html param=lnksrc
+2026-03-28 13:58:34 HPP probe: https://www.dickinson-wright.com/our-people/michael-n-feder param=tab
+2026-03-28 13:58:40 HPP probe: https://www.pnc.com/en/corporate-and-institutional.html param=lnksrc
+2026-03-28 13:58:41 WCP probe: https://vegaschamber.com/about/ header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 13:58:42 WCP probe: https://vegaschamber.com/about/ header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 13:58:43 WCP probe: https://vegaschamber.com/about/ header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 13:58:45 WCP probe: https://vegaschamber.com/about/ header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 13:58:47 WCP probe: https://vegaschamber.com/about/ header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 13:58:48 WCP probe: https://vegaschamber.com/about/ header=X-Forwarded-For: 127.0.0.1
+2026-03-28 13:58:50 WCP cloak probe: https://vegaschamber.com/about/?param=cloak-probe-9d4e
+2026-03-28 13:59:33 HTTP 200 https://vegaschamber.com
+2026-03-28 13:59:33 Missing security headers on vegaschamber.com: Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Permissions-Policy
+2026-03-28 13:59:33 Leaking headers on vegaschamber.com: Server: cloudflare
+2026-03-28 13:59:47 ASN 104.21.52.23 -> AS13335 Cloudflare, Inc. [CDN: Cloudflare]
+2026-03-28 14:01:17 [ASN] AS13335 (AS13335 Cloudflare, Inc.) — 5596 prefixes: 2a09:bac0:663::/48, 2400:cb00:923::/48, 172.71.124.0/24, 172.66.208.0/21, 104.23.245.0/24, 2a06:98c0:1c53::/48 (+5590 more)
+
+================================================================
+  !! INFO ALERT: ASN PREFIX ENUMERATION !!
+  Target     : AS13335
+  Detail     : RIPE NCC reports 5596 announced prefix(es) for AS13335 (AS13335 Cloudflare, Inc.): 2a09:bac0:663::/48, 2400:cb00:923::/48, 172.71.124.0/24, 172.66.208.0/21, 104.23.245.0/24, 2a06:98c0:1c53::/48 (+5590 more)
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 14:01:17
+================================================================
+
+2026-03-28 14:01:17 Technologies on https://vegaschamber.com: WordPress, jQuery, Cloudflare, Google Analytics
+2026-03-28 14:01:17 DNS vegaschamber.com → 172.67.194.78
+2026-03-28 14:01:17 TLS config analysis: vegaschamber.com:443 [sslyze]
+2026-03-28 14:01:17 MX vegaschamber.com → mailstream-east.mxrecord.io (pri 10)
+2026-03-28 14:01:17 Open port 80 on vegaschamber.com
+2026-03-28 14:01:17 Open port 53 on vegaschamber.com
+2026-03-28 14:01:17 DNS vegaschamber.com → 104.21.52.23
+2026-03-28 14:01:17 SSL vegaschamber.com expires Jun 17 04:53:53 2026 GMT
+2026-03-28 14:01:17 MX vegaschamber.com → mailstream-west.mxrecord.io (pri 5)
+2026-03-28 14:01:17 Open port 443 on vegaschamber.com
+2026-03-28 14:01:17 Open port 8443 on vegaschamber.com
+2026-03-28 14:01:17 Open port 8080 on vegaschamber.com
+2026-03-28 14:01:17 MX vegaschamber.com → mailstream-central.mxrecord.mx (pri 10)
+2026-03-28 14:01:17 Zone transfer attempt for vegaschamber.com (2 nameservers)...
+2026-03-28 14:01:17 ERROR: Zone transfer probe failed for vegaschamber.com via mira.ns.cloudflare.com: 
+2026-03-28 14:01:17 ERROR: Zone transfer probe failed for vegaschamber.com via arch.ns.cloudflare.com: 
+2026-03-28 14:01:18 SSL wildcard SANs on vegaschamber.com: *.vegaschamber.com
+2026-03-28 14:01:18 SSL SANs (2): vegaschamber.com, *.vegaschamber.com
+2026-03-28 14:01:19 WHOIS vegaschamber.com registrar=GoDaddy.com, LLC
+/home/colin/Code/NuScrape/.venv/lib64/python3.14/site-packages/sslyze/plugins/certificate_info/trust_stores/trust_store.py:55: CryptographyDeprecationWarning: Parsed a negative serial number, which is disallowed by RFC 5280. Loading this certificate will cause an exception in the next release of cryptography.
+  self._x509_store = Store(load_pem_x509_certificates(self.path.read_bytes()))
+2026-03-28 14:01:55 CT log query for vegaschamber.com (crt.sh)...
+2026-03-28 14:01:55 Subdomain enumeration for vegaschamber.com (94 probes)...
+2026-03-28 14:01:57 Subdomain found: staging.vegaschamber.com -> 172.67.194.78 [200]
+
+================================================================
+  !! HIGH ALERT: HIGH-VALUE SUBDOMAIN EXPOSED: staging !!
+  Target     : staging.vegaschamber.com
+  Detail     : staging.vegaschamber.com resolves to 172.67.194.78 and returns HTTP 200
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 14:01:57
+================================================================
+
+2026-03-28 14:01:58 Subdomain found: old.vegaschamber.com -> 194.1.147.93
+2026-03-28 14:01:58 Subdomain found: portal.vegaschamber.com -> 104.21.52.23
+2026-03-28 14:02:02 Subdomain found: www.vegaschamber.com -> 172.67.194.78
+2026-03-28 14:02:03 Subdomain enumeration complete for vegaschamber.com -- 4 found.
+2026-03-28 14:02:17 ERROR: CT log query failed for vegaschamber.com: HTTPSConnectionPool(host='crt.sh', port=443): Read timed out. (read timeout=20)
+2026-03-28 14:02:26 WAF detected on vegaschamber.com: Cloudflare (normal:header:cf-ray, normal:header:cf-cache-status, normal:server:cloudflare)
+
+================================================================
+  !! HIGH ALERT: ADMIN PANEL EXPOSED !!
+  Target     : https://vegaschamber.com/cpanel
+  Detail     : cPanel accessible (HTTP 200)
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 14:02:32
+================================================================
+
+2026-03-28 14:02:33 [!!] Admin panel [HIGH]: https://vegaschamber.com/cpanel
+
+================================================================
+  !! CRITICAL ALERT: ADMIN PANEL EXPOSED !!
+  Target     : https://vegaschamber.com/whm
+  Detail     : WHM (Web Host Manager) accessible (HTTP 200)
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 14:02:34
+================================================================
+
+2026-03-28 14:02:34 [!!] Admin panel [CRITICAL]: https://vegaschamber.com/whm
+2026-03-28 14:02:37 ERROR: check_actuator_exposure failed for https://vegaschamber.com/actuator/mappings: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 14:02:42 ERROR: check_actuator_exposure failed for https://vegaschamber.com/actuator/beans: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 14:02:44 ERROR: Host header injection probe failed (X-Forwarded-Server) for vegaschamber.com: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=8)
+2026-03-28 14:02:49 ERROR: check_actuator_exposure failed for https://vegaschamber.com/actuator/configprops: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 14:02:53 ERROR: Host header injection probe failed (X-Original-Host) for vegaschamber.com: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=8)
+2026-03-28 14:02:55 ERROR: check_actuator_exposure failed for https://vegaschamber.com/actuator/loggers: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 14:03:00 ERROR: GraphQL probe failed for https://vegaschamber.com/graphql: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:03:02 ERROR: check_actuator_exposure failed for https://vegaschamber.com/actuator/metrics: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 14:03:06 ERROR: check_cors_misconfiguration failed for vegaschamber.com: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=8)
+
+================================================================
+  !! MEDIUM ALERT: DANGEROUS HTTP METHOD: TRACE ENABLED (405) !!
+  Target     : vegaschamber.com
+  Detail     : TRACE https://vegaschamber.com returned 405 — server parsed the TRACE request; verify whether response headers are reflected (XST risk)
+  Confidence : LIKELY
+  Time       : 2026-03-28 14:03:07
+================================================================
+
+2026-03-28 14:03:07 [!] TRACE 405 on https://vegaschamber.com — possible XST risk
+2026-03-28 14:03:07 ERROR: GraphQL probe failed for https://vegaschamber.com/graphql/: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:03:08 ERROR: check_actuator_exposure failed for https://vegaschamber.com/actuator/info: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 14:03:14 ERROR: GraphQL probe failed for https://vegaschamber.com/api/graphql: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:03:14 ERROR: check_actuator_exposure failed for https://vegaschamber.com/actuator: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 14:03:15 ERROR: check_dangerous_http_methods: PUT https://vegaschamber.com: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:03:21 ERROR: check_actuator_exposure failed for https://vegaschamber.com/env: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 14:03:21 ERROR: GraphQL probe failed for https://vegaschamber.com/api/graphql/: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:03:22 ERROR: check_dangerous_http_methods: DELETE https://vegaschamber.com: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:03:27 ERROR: check_actuator_exposure failed for https://vegaschamber.com/dump: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 14:03:29 ERROR: GraphQL probe failed for https://vegaschamber.com/v1/graphql: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:03:31 ERROR: check_dangerous_http_methods: PATCH https://vegaschamber.com: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:03:33 ERROR: check_actuator_exposure failed for https://vegaschamber.com/trace: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 14:03:36 ERROR: GraphQL probe failed for https://vegaschamber.com/v2/graphql: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:03:38 Detected Adminer — trying default creds...
+2026-03-28 14:03:39 ERROR: check_actuator_exposure failed for https://vegaschamber.com/mappings: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 14:03:43 ERROR: GraphQL probe failed for https://vegaschamber.com/query: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:03:45 ERROR: check_actuator_exposure failed for https://vegaschamber.com/beans: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 14:03:46 ERROR: Default cred attempt failed for Adminer at https://vegaschamber.com/adminer.php: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:03:51 ERROR: GraphQL probe failed for https://vegaschamber.com/gql: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:03:51 ERROR: check_actuator_exposure failed for https://vegaschamber.com/autoconfig: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=5)
+2026-03-28 14:03:52 ERROR: Default cred attempt failed for Adminer at https://vegaschamber.com/adminer.php: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:03:59 ERROR: Default cred attempt failed for Adminer at https://vegaschamber.com/adminer/: HTTPSConnectionPool(host='vegaschamber.com', port=443): Read timed out. (read timeout=6)
+2026-03-28 14:04:11 Detected phpMyAdmin — trying default creds...
+[NuScrape] Scan stopped by user @ 2026-03-28 14:04:23.570254
+
+[*] Received signal 15 — shutting down cleanly...
+[NuScrape] Scan stopped by user @ 2026-03-28 14:04:24.618708
+
+[*] Received signal 15 — shutting down cleanly...
+[NuScrape] Scan stopped by user @ 2026-03-28 14:04:26.134589
+
+[*] Received signal 15 — shutting down cleanly...
+Exception ignored on threading shutdown:
+Traceback (most recent call last):
+  File "/usr/lib64/python3.14/threading.py", line 1577, in _shutdown
+    atexit_call()
+  File "/usr/lib64/python3.14/threading.py", line 1548, in <lambda>
+    _threading_atexits.append(lambda: func(*arg, **kwargs))
+  File "/usr/lib64/python3.14/concurrent/futures/thread.py", line 31, in _python_exit
+    t.join()
+  File "/usr/lib64/python3.14/threading.py", line 1133, in join
+    self._os_thread_handle.join(timeout)
+  File "/home/colin/Code/NuScrape/main.py", line 15805, in _handle_stop_signal
+    if remaining > 0:
+SystemExit: 0
+[NuScrape] Scan stopped by user @ 2026-03-28 14:04:26.810283
+
+============================================================
+[NuScrape] Starting scan → https://defenseinnovationunit.mil  @ 2026-03-28 14:04:59.823593
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Tutorial mode enabled — HOW TO VERIFY guidance will be appended to findings
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 14:05:00 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 14:05:00 Skipping 13 URLs crawled in the last 14 days.
+2026-03-28 14:05:00 Starting NuScrape → https://defenseinnovationunit.mil
+2026-03-28 14:05:00 robots.txt: ignored (--ignore-robots)
+2026-03-28 14:05:00 Fetching sitemap...
+2026-03-28 14:05:01 No sitemap.xml for https://defenseinnovationunit.mil
+2026-03-28 14:05:02 [SSRF] OOB client registered: d403506445bcfd1b2ea2.interact.sh
+2026-03-28 14:05:02 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 14:05:03 ERROR: Async fetch failed for https://defenseinnovationunit.mil: Cannot connect to host defenseinnovationunit.mil:443 ssl:default [Name or service not known]
+2026-03-28 14:05:04 Done! Crawled 0 pages.
+[NuScrape] Scan completed cleanly (exit 0) for https://defenseinnovationunit.mil.
+
+============================================================
+[NuScrape] Starting scan → https://www.diu.mil  @ 2026-03-28 14:05:57.391022
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Tutorial mode enabled — HOW TO VERIFY guidance will be appended to findings
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 14:05:57 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 14:05:57 Skipping 13 URLs crawled in the last 14 days.
+2026-03-28 14:05:57 Starting NuScrape → https://www.diu.mil
+2026-03-28 14:05:57 robots.txt: ignored (--ignore-robots)
+2026-03-28 14:05:57 Fetching sitemap...
+2026-03-28 14:05:59 Sitemap found 12 URLs for https://www.diu.mil
+2026-03-28 14:06:00 [SSRF] OOB client registered: f42925348326847a8a2a.interact.sh
+2026-03-28 14:06:00 Batch 3 [workers=3] | crawled=0 queue=10
+2026-03-28 14:06:03 HTTP 200 https://www.diu.mil
+2026-03-28 14:06:03 HTTP 200 http://diu.mil/
+2026-03-28 14:06:03 HTTP 200 http://diu.mil/about
+2026-03-28 14:06:06 JS-heavy page detected, switching to Playwright: https://www.diu.mil
+2026-03-28 14:06:06 Playwright rendering: https://www.diu.mil
+2026-03-28 14:06:09 XHR: POST https://analytics.google.com/g/collect?v=2&tid=G-K01PBMZQMC&gtm=45je63p1v887413445z8830517132za20gzb830517132zd830517132&_p=1774721167726&_gaz=1&gcd=13l3l3l3l1l1&npa=0&dma=0&cid=567335542.1774721169&ul=en-us&sr=1280x720&uaa=x86&uab=64&uafvl=Not%253AA-Brand%3B99.0.0.0%7CHeadlessChrome%3B145.0.7632.6%7CChromium%3B145.0.7632.6&uamb=0&uam=&uap=Windows&uapv=10.0&uaw=0&are=1&frm=0&pscdl=noapi&_eu=AAAAAGA&_s=1&tag_exp=0~115616985~115938466~115938469~116133313~117384405~117484252&sid=1774721169&sct=1&seg=0&dl=https%3A%2F%2Fwww.diu.mil%2F&dt=Defense%20Innovation%20Unit&en=page_view&_fv=1&_nsi=1&_ss=1&tfd=2468
+2026-03-28 14:06:09 XHR: POST https://jnn-pa.googleapis.com/$rpc/google.internal.waa.v1.Waa/GenerateIT
+2026-03-28 14:06:09 XHR: GET https://px.ads.linkedin.com/attribution_trigger?pid=3933505&time=1774721169792&url=https%3A%2F%2Fwww.diu.mil%2F
+2026-03-28 14:06:11 XHR: POST https://px.ads.linkedin.com/wa/?medium=fetch&fmt=g
+2026-03-28 14:06:12 XHR: POST https://www.youtube.com/youtubei/v1/log_event?alt=json
+2026-03-28 14:06:12 XHR: GET https://www.gstatic.com/youtube/img/icons/mweb/youtube_fill/logo/v2/67px.svg
+2026-03-28 14:06:13 Playwright got 3324912 bytes from https://www.diu.mil
+2026-03-28 14:06:13 Playwright content richer — using rendered HTML
+2026-03-28 14:06:14 Parsed: https://www.diu.mil
+2026-03-28 14:06:14 WCP probe: https://www.diu.mil header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 14:06:18 WCP probe: https://www.diu.mil header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 14:06:22 WCP probe: https://www.diu.mil header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 14:06:25 WCP probe: https://www.diu.mil header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 14:06:30 WCP probe: https://www.diu.mil header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 14:06:34 WCP probe: https://www.diu.mil header=X-Forwarded-For: 127.0.0.1
+2026-03-28 14:06:37 WCP cloak probe: https://www.diu.mil?param=cloak-probe-9d4e
+2026-03-28 14:06:43 IDOR verify: https://www.war.gov/News/Releases/Release/Article/{id}/the-war-department-overhauls-innovation-ecosystem-to-accelerate-technology-to-t/ param=path_id value=4376441
+2026-03-28 14:06:43 IDOR dismissed (not auth-gated or no per-object diff): https://www.war.gov/News/Releases/Release/Article/{id}/the-war-department-overhauls-innovation-ecosystem-to-accelerate-technology-to-t/
+2026-03-28 14:06:45 S3 bucket reference found: assets (from https://www.diu.mil)
+2026-03-28 14:06:47 S3 bucket reference found: assets (from https://www.diu.mil/_nuxt/5bb3c41.js)
+2026-03-28 14:06:47 S3 bucket reference found: publicdocs (from https://www.diu.mil/_nuxt/83b9c3c.js)
+2026-03-28 14:06:49 JS-heavy page detected, switching to Playwright: http://diu.mil/
+2026-03-28 14:06:49 S3 bucket reference found: publicdocs (from https://www.diu.mil/_nuxt/31381d8.js)
+2026-03-28 14:06:49 S3 bucket reference found: assets (from https://www.diu.mil/_nuxt/31381d8.js)
+2026-03-28 14:06:49 Playwright rendering: http://diu.mil/
+2026-03-28 14:06:49 S3 bucket reference found: assets (from https://www.diu.mil/_nuxt/83b9c3c.js)
+2026-03-28 14:06:50 JS analysis: 16 findings in https://www.diu.mil/_nuxt/31381d8.js
+2026-03-28 14:06:50 JS analysis: 7 findings in https://www.diu.mil/_nuxt/83b9c3c.js
+2026-03-28 14:06:52 XHR: POST https://analytics.google.com/g/collect?v=2&tid=G-K01PBMZQMC&gtm=45je63p1v887413445z8830517132za20gzb830517132zd830517132&_p=1774721211448&_gaz=1&gcd=13l3l3l3l1l1&npa=0&dma=0&cid=1770673139.1774721212&ul=en-us&sr=1280x720&uaa=x86&uab=64&uafvl=Not%253AA-Brand%3B99.0.0.0%7CHeadlessChrome%3B145.0.7632.6%7CChromium%3B145.0.7632.6&uamb=0&uam=&uap=Windows&uapv=10.0&uaw=0&are=1&frm=0&pscdl=noapi&_eu=AAAAAGA&_s=1&tag_exp=0~115938465~115938469~116133312~117484252&sid=1774721212&sct=1&seg=0&dl=https%3A%2F%2Fwww.diu.mil%2F&dt=Defense%20Innovation%20Unit&en=page_view&_fv=1&_nsi=1&_ss=1&tfd=2225
+2026-03-28 14:06:52 XHR: GET https://px.ads.linkedin.com/attribution_trigger?pid=3933505&time=1774721212458&url=https%3A%2F%2Fwww.diu.mil%2F
+2026-03-28 14:06:53 XHR: POST https://px.ads.linkedin.com/wa/?medium=fetch&fmt=g
+2026-03-28 14:06:53 XHR: POST https://jnn-pa.googleapis.com/$rpc/google.internal.waa.v1.Waa/GenerateIT
+2026-03-28 14:06:55 XHR: GET https://www.gstatic.com/youtube/img/icons/mweb/youtube_fill/logo/v2/67px.svg
+2026-03-28 14:06:57 XHR: POST https://www.youtube.com/youtubei/v1/log_event?alt=json
+2026-03-28 14:06:57 Playwright got 3323491 bytes from http://diu.mil/
+2026-03-28 14:06:57 Playwright content richer — using rendered HTML
+2026-03-28 14:06:58 Parsed: http://diu.mil/
+2026-03-28 14:07:22 WCP probe: http://diu.mil/ header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 14:07:23 WCP probe: http://diu.mil/ header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 14:07:24 WCP probe: http://diu.mil/ header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 14:07:26 WCP probe: http://diu.mil/ header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 14:07:27 WCP probe: http://diu.mil/ header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 14:07:28 WCP probe: http://diu.mil/ header=X-Forwarded-For: 127.0.0.1
+2026-03-28 14:07:29 WCP cloak probe: http://diu.mil/?param=cloak-probe-9d4e
+2026-03-28 14:07:38 S3 bucket reference found: assets (from http://diu.mil/)
+2026-03-28 14:07:40 S3 bucket reference found: assets (from http://diu.mil/_nuxt/5bb3c41.js)
+2026-03-28 14:07:42 S3 bucket reference found: publicdocs (from http://diu.mil/_nuxt/83b9c3c.js)
+2026-03-28 14:07:42 S3 bucket reference found: assets (from http://diu.mil/_nuxt/83b9c3c.js)
+2026-03-28 14:07:43 JS analysis: 7 findings in http://diu.mil/_nuxt/83b9c3c.js
+2026-03-28 14:07:44 JS-heavy page detected, switching to Playwright: http://diu.mil/about
+2026-03-28 14:07:45 Playwright rendering: http://diu.mil/about
+2026-03-28 14:07:47 S3 bucket reference found: publicdocs (from http://diu.mil/_nuxt/31381d8.js)
+2026-03-28 14:07:47 S3 bucket reference found: assets (from http://diu.mil/_nuxt/31381d8.js)
+2026-03-28 14:07:48 JS analysis: 16 findings in http://diu.mil/_nuxt/31381d8.js
+2026-03-28 14:07:48 XHR: POST https://analytics.google.com/g/collect?v=2&tid=G-K01PBMZQMC&gtm=45je63p1v887413445z8830517132za20gzb830517132zd830517132&_p=1774721267758&_gaz=1&gcd=13l3l3l3l1l1&npa=0&dma=0&cid=1694472697.1774721269&ul=en-us&sr=1280x720&uaa=x86&uab=64&uafvl=Not%253AA-Brand%3B99.0.0.0%7CHeadlessChrome%3B145.0.7632.6%7CChromium%3B145.0.7632.6&uamb=0&uam=&uap=Linux&uapv=&uaw=0&are=1&frm=0&pscdl=noapi&_eu=AAAAAGA&_s=1&tag_exp=0~115938465~115938469~117384406~117484252&sid=1774721268&sct=1&seg=0&dl=https%3A%2F%2Fwww.diu.mil%2Fabout&dt=About%20DIU&en=page_view&_fv=1&_nsi=1&_ss=1&tfd=2718
+2026-03-28 14:07:49 XHR: GET https://px.ads.linkedin.com/attribution_trigger?pid=3933505&time=1774721268937&url=https%3A%2F%2Fwww.diu.mil%2Fabout
+2026-03-28 14:07:49 XHR: POST https://px.ads.linkedin.com/wa/?medium=fetch&fmt=g
+2026-03-28 14:07:55 Playwright got 3329133 bytes from http://diu.mil/about
+2026-03-28 14:07:55 Playwright content richer — using rendered HTML
+2026-03-28 14:07:57 Parsed: http://diu.mil/about
+2026-03-28 14:08:53 WCP probe: http://diu.mil/about header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 14:08:54 WCP probe: http://diu.mil/about header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 14:08:55 WCP probe: http://diu.mil/about header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 14:08:56 WCP probe: http://diu.mil/about header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 14:08:58 WCP probe: http://diu.mil/about header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 14:08:59 WCP probe: http://diu.mil/about header=X-Forwarded-For: 127.0.0.1
+2026-03-28 14:09:00 WCP cloak probe: http://diu.mil/about?param=cloak-probe-9d4e
+2026-03-28 14:09:10 S3 bucket reference found: assets (from http://diu.mil/about)
+2026-03-28 14:09:10 S3 bucket reference found: publicdocs (from http://diu.mil/about)
+2026-03-28 14:09:12 S3 bucket reference found: assets (from http://diu.mil/_nuxt/0011d57.js)
+2026-03-28 14:09:15 Batch 3 [workers=3] | crawled=3 queue=17
+2026-03-28 14:09:18 HTTP 200 http://diu.mil/team
+2026-03-28 14:09:21 HTTP 200 http://diu.mil/solutions
+2026-03-28 14:09:23 HTTP 200 http://diu.mil/work-with-us
+2026-03-28 14:09:29 ERROR: Timeout fetching: http://diu.mil/team
+2026-03-28 14:09:29 ERROR: Timeout fetching: http://diu.mil/solutions
+2026-03-28 14:09:29 ERROR: Timeout fetching: http://diu.mil/work-with-us
+2026-03-28 14:09:32 Batch 3 [workers=3] | crawled=3 queue=14
+2026-03-28 14:09:36 HTTP 200 http://diu.mil/contact-DIU
+2026-03-28 14:09:38 HTTP 200 http://diu.mil/work-with-us/commercial
+2026-03-28 14:09:38 HTTP 200 http://diu.mil/work-with-us/dod-entities
+2026-03-28 14:09:45 ERROR: Timeout fetching: http://diu.mil/contact-DIU
+2026-03-28 14:09:45 ERROR: Timeout fetching: http://diu.mil/work-with-us/commercial
+2026-03-28 14:09:45 ERROR: Timeout fetching: http://diu.mil/work-with-us/dod-entities
+2026-03-28 14:09:48 Batch 3 [workers=3] | crawled=3 queue=11
+2026-03-28 14:09:51 HTTP 200 http://diu.mil/solutions/portfolio
+2026-03-28 14:09:54 HTTP 200 http://diu.mil/latest
+2026-03-28 14:09:56 HTTP 200 http://diu.mil/privacy-policy
+2026-03-28 14:10:03 ERROR: Timeout fetching: http://diu.mil/privacy-policy
+2026-03-28 14:10:03 ERROR: Timeout fetching: http://diu.mil/solutions/portfolio
+2026-03-28 14:10:04 ERROR: Timeout fetching: http://diu.mil/latest
+2026-03-28 14:10:06 Batch 3 [workers=3] | crawled=3 queue=8
+2026-03-28 14:10:09 HTTP 403 https://www.war.gov/News/Releases/Release/Article/4376441/the-war-department-overhauls-innovation-ecosystem-to-accelerate-technology-to-t/
+2026-03-28 14:10:09 HTTP 200 https://s3.us-gov-west-1.amazonaws.com/publicdocs.diu.mil/DIU_Annual_Report_FY2023.pdf
+2026-03-28 14:10:09 HTTP 500 http://diu.mil/team/
+2026-03-28 14:10:18 ERROR: Timeout fetching: https://s3.us-gov-west-1.amazonaws.com/publicdocs.diu.mil/DIU_Annual_Report_FY2023.pdf
+2026-03-28 14:10:20 Batch 3 [workers=3] | crawled=3 queue=5
+2026-03-28 14:10:23 HTTP 200 https://s3.us-gov-west-1.amazonaws.com/publicdocs.diu.mil/Digital_Version_-_Final_-_DIU_-_2021_Annual_Report.pdf
+2026-03-28 14:10:24 HTTP 200 https://s3.us-gov-west-1.amazonaws.com/publicdocs.diu.mil/DIU_-_2020_Annual_Report_FINAL.pdf
+2026-03-28 14:10:24 HTTP 200 https://s3.us-gov-west-1.amazonaws.com/assets.diu.mil/3nanhbfkr0pc/5guJIhcMGwIgoop4z9r5QM/89f44fe62f981e5f0d28932618719196/DIU_Annual_Report_FY22_Final_0131.pdf
+2026-03-28 14:10:33 ERROR: Timeout fetching: https://s3.us-gov-west-1.amazonaws.com/publicdocs.diu.mil/Digital_Version_-_Final_-_DIU_-_2021_Annual_Report.pdf
+2026-03-28 14:10:33 ERROR: Timeout fetching: https://s3.us-gov-west-1.amazonaws.com/publicdocs.diu.mil/DIU_-_2020_Annual_Report_FINAL.pdf
+2026-03-28 14:10:33 ERROR: Timeout fetching: https://s3.us-gov-west-1.amazonaws.com/assets.diu.mil/3nanhbfkr0pc/5guJIhcMGwIgoop4z9r5QM/89f44fe62f981e5f0d28932618719196/DIU_Annual_Report_FY22_Final_0131.pdf
+2026-03-28 14:10:36 Batch 3 [workers=3] | crawled=3 queue=2
+2026-03-28 14:10:38 HTTP 200 https://s3.us-gov-west-1.amazonaws.com/publicdocs.diu.mil/DIUx_2017_Annual_Report_FINAL.pdf
+2026-03-28 14:10:39 HTTP 200 https://s3.us-gov-west-1.amazonaws.com/publicdocs.diu.mil/DIU_2019_Annual_Report.pdf
+2026-03-28 14:10:42 HTTP 200 https://s3.us-gov-west-1.amazonaws.com/publicdocs.diu.mil/DIU_2018_Annual_Report_FINAL.pdf
+2026-03-28 14:10:48 ERROR: Timeout fetching: https://s3.us-gov-west-1.amazonaws.com/publicdocs.diu.mil/DIU_2019_Annual_Report.pdf
+2026-03-28 14:10:49 ERROR: Timeout fetching: https://s3.us-gov-west-1.amazonaws.com/publicdocs.diu.mil/DIU_2018_Annual_Report_FINAL.pdf
+2026-03-28 14:10:52 [AdaptiveConcurrency] 3→1 workers (avg=10.80s err=85%)
+2026-03-28 14:13:02 Parsed: https://s3.us-gov-west-1.amazonaws.com/publicdocs.diu.mil/DIUx_2017_Annual_Report_FINAL.pdf
+2026-03-28 14:20:09 Batch 1 [workers=1] | crawled=4 queue=1
+2026-03-28 14:20:11 HTTP 200 https://www.diu.mil/latest/diu-3-0-scaling-defense-innovation-for-strategic-impact
+2026-03-28 14:20:19 JS-heavy page detected, switching to Playwright: https://www.diu.mil/latest/diu-3-0-scaling-defense-innovation-for-strategic-impact
+2026-03-28 14:20:20 Playwright rendering: https://www.diu.mil/latest/diu-3-0-scaling-defense-innovation-for-strategic-impact
+2026-03-28 14:20:23 XHR: POST https://analytics.google.com/g/collect?v=2&tid=G-K01PBMZQMC&gtm=45je63p1v887413445z8830517132za20gzb830517132zd830517132&_p=1774722022297&_gaz=1&gcd=13l3l3l3l1l1&npa=0&dma=0&cid=1528888519.1774722023&ul=en-us&sr=1280x720&uaa=arm&uab=64&uafvl=Not%253AA-Brand%3B99.0.0.0%7CHeadlessChrome%3B145.0.7632.6%7CChromium%3B145.0.7632.6&uamb=0&uam=&uap=iOS&uapv=17_4&uaw=0&are=1&frm=0&pscdl=noapi&_eu=AAAAAGA&_s=1&tag_exp=0~115938466~115938469~117484252&sid=1774722023&sct=1&seg=0&dl=https%3A%2F%2Fwww.diu.mil%2Flatest%2Fdiu-3-0-scaling-defense-innovation-for-strategic-impact&dt=DIU%203.0%3A%20Scaling%20Defense%20Innovation%20for%20Strategic%20Impact&en=page_view&_fv=1&_nsi=1&_ss=1&tfd=1928
+2026-03-28 14:20:23 XHR: GET https://px.ads.linkedin.com/attribution_trigger?pid=3933505&time=1774722023440&url=https%3A%2F%2Fwww.diu.mil%2Flatest%2Fdiu-3-0-scaling-defense-innovation-for-strategic-impact
+2026-03-28 14:20:24 XHR: POST https://px.ads.linkedin.com/wa/?medium=fetch&fmt=g
+2026-03-28 14:20:30 Playwright got 3323479 bytes from https://www.diu.mil/latest/diu-3-0-scaling-defense-innovation-for-strategic-impact
+2026-03-28 14:20:30 Playwright content richer — using rendered HTML
+2026-03-28 14:20:32 Parsed: https://www.diu.mil/latest/diu-3-0-scaling-defense-innovation-for-strategic-impact
+2026-03-28 14:21:28 WCP probe: https://www.diu.mil/latest/diu-3-0-scaling-defense-innovation-for-strategic-impact header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 14:21:37 WCP probe: https://www.diu.mil/latest/diu-3-0-scaling-defense-innovation-for-strategic-impact header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 14:21:45 WCP probe: https://www.diu.mil/latest/diu-3-0-scaling-defense-innovation-for-strategic-impact header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 14:21:52 WCP probe: https://www.diu.mil/latest/diu-3-0-scaling-defense-innovation-for-strategic-impact header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 14:22:00 WCP probe: https://www.diu.mil/latest/diu-3-0-scaling-defense-innovation-for-strategic-impact header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 14:22:08 WCP probe: https://www.diu.mil/latest/diu-3-0-scaling-defense-innovation-for-strategic-impact header=X-Forwarded-For: 127.0.0.1
+2026-03-28 14:22:18 WCP cloak probe: https://www.diu.mil/latest/diu-3-0-scaling-defense-innovation-for-strategic-impact?param=cloak-probe-9d4e
+[NuScrape] Scan stopped by user @ 2026-03-28 14:22:19.180799
+
+[*] Received signal 15 — shutting down cleanly...
+[NuScrape] Scan stopped by user @ 2026-03-28 14:22:19.792408
+
+[*] Received signal 15 — shutting down cleanly...
+
+============================================================
+[NuScrape] Starting scan → https://dla.mil  @ 2026-03-28 14:22:35.307273
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Tutorial mode enabled — HOW TO VERIFY guidance will be appended to findings
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 14:22:35 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 14:22:35 Skipping 35 URLs crawled in the last 14 days.
+2026-03-28 14:22:35 Starting NuScrape → https://dla.mil
+2026-03-28 14:22:35 robots.txt: ignored (--ignore-robots)
+2026-03-28 14:22:35 Fetching sitemap...
+2026-03-28 14:22:37 No sitemap.xml for https://dla.mil
+2026-03-28 14:22:38 [SSRF] OOB client registered: 5eb1cc0ba6ed20f6416e.interact.sh
+2026-03-28 14:22:38 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 14:22:38 ERROR: Async fetch failed for https://dla.mil: Cannot connect to host dla.mil:443 ssl:default [No address associated with hostname]
+2026-03-28 14:22:41 Done! Crawled 0 pages.
+[NuScrape] Scan completed cleanly (exit 0) for https://dla.mil.
+
+============================================================
+[NuScrape] Starting scan → https://www.dla.mil  @ 2026-03-28 14:22:50.598517
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Tutorial mode enabled — HOW TO VERIFY guidance will be appended to findings
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 14:22:51 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 14:22:51 Skipping 35 URLs crawled in the last 14 days.
+2026-03-28 14:22:51 Starting NuScrape → https://www.dla.mil
+2026-03-28 14:22:51 robots.txt: ignored (--ignore-robots)
+2026-03-28 14:22:51 Fetching sitemap...
+2026-03-28 14:22:53 No sitemap.xml for https://www.dla.mil
+2026-03-28 14:22:53 [SSRF] OOB client registered: cdba23e38630456b2bc9.interact.sh
+2026-03-28 14:22:53 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 14:22:54 HTTP 403 https://www.dla.mil
+2026-03-28 14:22:56 Done! Crawled 0 pages.
+[NuScrape] Scan completed cleanly (exit 0) for https://www.dla.mil.
+
+============================================================
+[NuScrape] Starting scan → https://portal.chra.army.mil  @ 2026-03-28 14:25:24.407822
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Tutorial mode enabled — HOW TO VERIFY guidance will be appended to findings
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 14:25:24 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 14:25:24 Skipping 36 URLs crawled in the last 14 days.
+2026-03-28 14:25:24 Starting NuScrape → https://portal.chra.army.mil
+2026-03-28 14:25:24 robots.txt: ignored (--ignore-robots)
+2026-03-28 14:25:24 Fetching sitemap...
+2026-03-28 14:25:27 Sitemap found 0 URLs for https://portal.chra.army.mil
+2026-03-28 14:25:28 [SSRF] OOB client registered: dcc916e7082f3cbf7800.interact.sh
+2026-03-28 14:25:28 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 14:25:31 HTTP 200 https://portal.chra.army.mil
+2026-03-28 14:25:33 JS-heavy page detected, switching to Playwright: https://portal.chra.army.mil
+2026-03-28 14:25:33 Playwright rendering: https://portal.chra.army.mil
+2026-03-28 14:25:35 XHR: GET https://portal.chra.army.mil/api/now/sp/page?time=1774722335922&portal_id=f62f275764583d90404b25d60013027c&request_uri=%2Furl_redirection_portal%2F
+2026-03-28 14:25:36 XHR: GET https://portal.chra.army.mil/angular.do?sysparm_type=get_partial&name=sn_banner.xml
+2026-03-28 14:25:36 XHR: GET https://portal.chra.army.mil/api/now/sp/page?time=1774722336570&portal_id=19f9fb981bf110503ac0419ae54bcb9c&request_uri=%2Fhr_public
+2026-03-28 14:25:36 XHR: GET https://portal.chra.army.mil/angular.do?sysparm_type=get_partial&name=sn_banner.xml
+2026-03-28 14:25:41 Playwright got 206261 bytes from https://portal.chra.army.mil
+2026-03-28 14:25:41 Playwright content richer — using rendered HTML
+2026-03-28 14:25:41 Parsed: https://portal.chra.army.mil
+
+================================================================
+  !! LOW ALERT: INSECURE COOKIE: MISSING SameSite !!
+  Target     : https://portal.chra.army.mil
+  Detail     : Cookie 'glide_user' has no SameSite flag — vulnerable to CSRF
+  Confidence : CONFIRMED
+  Time       : 2026-03-28 14:25:41
+================================================================
+
+2026-03-28 14:25:41 Cookie issue [LOW]: 'glide_user' missing SameSite on https://portal.chra.army.mil
+2026-03-28 14:26:27 SQLi probe: https://portal.chra.army.mil/hr_public param=id
+2026-03-28 14:26:46 [Timing] Baseline https://portal.chra.army.mil/hr_public param=id: mean=579ms σ=88ms max=750ms
+2026-03-28 14:26:49 [Timing] Baseline: 579ms ±88ms | Probe(SLEEP 2): 648ms (threshold 2843ms) ✗ → NOT TRIGGERED
+2026-03-28 14:26:49 SQLi probe: https://portal.chra.army.mil/hr_public param=kb_base
+2026-03-28 14:27:06 [Timing] Baseline https://portal.chra.army.mil/hr_public param=kb_base: mean=579ms σ=88ms max=750ms
+2026-03-28 14:27:09 [Timing] Baseline: 579ms ±88ms | Probe(SLEEP 2): 695ms (threshold 2843ms) ✗ → NOT TRIGGERED
+2026-03-28 14:27:09 SQLi probe: https://portal.chra.army.mil/hr_public param=kb_category
+2026-03-28 14:27:28 [Timing] Baseline https://portal.chra.army.mil/hr_public param=kb_category: mean=695ms σ=86ms max=836ms
+2026-03-28 14:27:32 [Timing] Baseline: 695ms ±86ms | Probe(SLEEP 2): 911ms (threshold 2952ms) ✗ → NOT TRIGGERED
+2026-03-28 14:27:41 CMDi probe: https://portal.chra.army.mil/hr_public param=id
+2026-03-28 14:27:43 [Verify] Confirming CRITICAL COMMAND INJECTION (CONFIRMED) on portal.chra.army.mil ...
+2026-03-28 14:27:46 [Verify] Confirmed — firing alert
+
+================================================================
+  !! CRITICAL ALERT: COMMAND INJECTION (CONFIRMED) !!
+  Target     : portal.chra.army.mil
+  Detail     : Parameter 'id' on https://portal.chra.army.mil/hr_public echoed canary string with payload: ';echo probe-test-7f3a' | Snippet: ".page_id = 'chra_kb_home;echo probe-test-7f3a';\n\t\twindow.NOW.portal_id = '19f9fb981bf110503ac0419ae54bcb9"
+  Confidence : CONFIRMED
+  Time       : 2026-03-28 14:27:46
+================================================================
+
+2026-03-28 14:27:54 LDAPi probe: https://portal.chra.army.mil/hr_public param=id
+2026-03-28 14:28:13 LDAPi probe: https://portal.chra.army.mil/hr_public param=kb_base
+2026-03-28 14:28:31 LDAPi probe: https://portal.chra.army.mil/hr_public param=kb_category
+2026-03-28 14:29:17 HPP probe: https://portal.chra.army.mil/hr_public param=id
+2026-03-28 14:29:19 HPP probe: https://portal.chra.army.mil/hr_public param=kb_base
+2026-03-28 14:29:19 HPP probe: https://portal.chra.army.mil/hr_public param=kb_category
+2026-03-28 14:29:21 WCP probe: https://portal.chra.army.mil header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 14:29:22 WCP probe: https://portal.chra.army.mil header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 14:29:24 WCP probe: https://portal.chra.army.mil header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 14:29:25 WCP probe: https://portal.chra.army.mil header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 14:29:27 WCP probe: https://portal.chra.army.mil header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 14:29:28 WCP probe: https://portal.chra.army.mil header=X-Forwarded-For: 127.0.0.1
+2026-03-28 14:29:30 WCP cloak probe: https://portal.chra.army.mil?param=cloak-probe-9d4e
+2026-03-28 14:29:48 JS analysis: 2 findings in https://portal.chra.army.mil/app_com.jsdbx?c=21
+2026-03-28 14:29:48 JS analysis: 2 findings in https://portal.chra.army.mil/app_com.cxs.contextual_search.jsdbx?c=56
+2026-03-28 14:29:48 JS analysis: 2 findings in https://portal.chra.army.mil/scripts/js_includes_sp_libs_min.jsx?v=12-03-2025_1405&lp=Fri_Mar_20_18_45_42_UTC_2026&c=25_479
+2026-03-28 14:29:50 Batch 2 [workers=3] | crawled=1 queue=0
+2026-03-28 14:29:52 HTTP 200 https://service.chra.army.mil/chra
+2026-03-28 14:29:53 HTTP 200 https://service.chra.army.mil/dodea_home
+2026-03-28 14:30:06 JS-heavy page detected, switching to Playwright: https://service.chra.army.mil/chra
+2026-03-28 14:30:06 Playwright rendering: https://service.chra.army.mil/chra
+2026-03-28 14:30:09 XHR: GET https://service.chra.army.mil/api/now/sp/page?time=1774722609770&portal_id=13f569931bdf051068918592f54bcb9b&request_uri=%2Fchra
+2026-03-28 14:30:10 XHR: GET https://service.chra.army.mil/angular.do?sysparm_type=get_partial&name=sn_banner.xml
+2026-03-28 14:30:10 XHR: POST https://service.chra.army.mil/api/now/sp/rectangle/b8866544cb11120000f8d856634c9c5d
+2026-03-28 14:30:11 XHR: POST https://service.chra.army.mil/xmlhttp.do
+2026-03-28 14:30:16 ERROR: Playwright page error on https://service.chra.army.mil/chra: Page.evaluate: Execution context was destroyed, most likely because of a navigation
+2026-03-28 14:30:17 Parsed: https://service.chra.army.mil/chra
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://portal.chra.army.mil/scripts/dist/sp_min.jsx?v=12-03-2025_1405
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'm(e,JSON.stringify(n)),window.localStorage.removeItem(e)}),o(this,"on",function(e,t){if(n.registeredListeners.has(e)){var i=n.registeredListeners.get(e);window.removeEventListener("storage",i),n.LOGGER.debug("Removed storage event listener "+e)}var r=function(n){var i=n.key,r=n.newValue;i===e&&r&&t('
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 14:30:19
+================================================================
+
+2026-03-28 14:30:19 [!] PP client-side sink 'JSON.parse(…)[': https://portal.chra.army.mil/scripts/dist/sp_min.jsx?v=12-03-2025_1405
+2026-03-28 14:30:19 JS analysis: 70 findings in https://portal.chra.army.mil/scripts/dist/sp_min.jsx?v=12-03-2025_1405
+2026-03-28 14:30:57 [Baseline] https://portal.chra.army.mil/hr_public — status=200 len=163554±4 fp=4dc310a5ff57b819
+2026-03-28 14:31:44 WCP probe: https://service.chra.army.mil/chra header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 14:31:46 WCP probe: https://service.chra.army.mil/chra header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 14:31:48 WCP probe: https://service.chra.army.mil/chra header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 14:31:49 WCP probe: https://service.chra.army.mil/chra header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 14:31:51 WCP probe: https://service.chra.army.mil/chra header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 14:31:52 WCP probe: https://service.chra.army.mil/chra header=X-Forwarded-For: 127.0.0.1
+2026-03-28 14:31:53 [Baseline] https://portal.chra.army.mil/hr_public — status=200 len=163554±3 fp=ae3dac7edf508a39
+2026-03-28 14:31:54 WCP cloak probe: https://service.chra.army.mil/chra?param=cloak-probe-9d4e
+2026-03-28 14:32:11 JS analysis: 2 findings in https://service.chra.army.mil/app_com.cxs.contextual_search.jsdbx?c=56
+2026-03-28 14:32:11 JS analysis: 2 findings in https://service.chra.army.mil/app_com.jsdbx?c=21
+2026-03-28 14:32:12 JS analysis: 2 findings in https://service.chra.army.mil/scripts/js_includes_sp_libs_min.jsx?v=12-03-2025_1405&lp=Fri_Mar_20_19_32_20_UTC_2026&c=30_506
+2026-03-28 14:32:19 JS-heavy page detected, switching to Playwright: https://service.chra.army.mil/dodea_home
+2026-03-28 14:32:20 Playwright rendering: https://service.chra.army.mil/dodea_home
+2026-03-28 14:32:22 XHR: GET https://service.chra.army.mil/api/now/sp/page?time=1774722742900&portal_id=42e6cfcd1bda14103ac0419ae54bcb2f&request_uri=%2Fdodea_home
+2026-03-28 14:32:23 XHR: GET https://service.chra.army.mil/angular.do?sysparm_type=get_partial&name=sn_banner.xml
+2026-03-28 14:32:23 XHR: POST https://service.chra.army.mil/api/now/sp/rectangle/b8866544cb11120000f8d856634c9c5d
+2026-03-28 14:32:24 XHR: POST https://service.chra.army.mil/xmlhttp.do
+2026-03-28 14:32:31 Playwright got 20047 bytes from https://service.chra.army.mil/dodea_home
+2026-03-28 14:32:33 Parsed: https://service.chra.army.mil/dodea_home
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://service.chra.army.mil/scripts/dist/sp_min.jsx?v=12-03-2025_1405
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'm(e,JSON.stringify(n)),window.localStorage.removeItem(e)}),o(this,"on",function(e,t){if(n.registeredListeners.has(e)){var i=n.registeredListeners.get(e);window.removeEventListener("storage",i),n.LOGGER.debug("Removed storage event listener "+e)}var r=function(n){var i=n.key,r=n.newValue;i===e&&r&&t('
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 14:32:41
+================================================================
+
+2026-03-28 14:32:41 [!] PP client-side sink 'JSON.parse(…)[': https://service.chra.army.mil/scripts/dist/sp_min.jsx?v=12-03-2025_1405
+2026-03-28 14:32:41 JS analysis: 71 findings in https://service.chra.army.mil/scripts/dist/sp_min.jsx?v=12-03-2025_1405
+2026-03-28 14:33:54 WCP probe: https://service.chra.army.mil/dodea_home header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 14:33:57 WCP probe: https://service.chra.army.mil/dodea_home header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 14:33:58 WCP probe: https://service.chra.army.mil/dodea_home header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 14:34:00 WCP probe: https://service.chra.army.mil/dodea_home header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 14:34:02 WCP probe: https://service.chra.army.mil/dodea_home header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 14:34:04 WCP probe: https://service.chra.army.mil/dodea_home header=X-Forwarded-For: 127.0.0.1
+2026-03-28 14:34:05 WCP cloak probe: https://service.chra.army.mil/dodea_home?param=cloak-probe-9d4e
+2026-03-28 14:34:22 Waiting for 17 JS analysis threads to complete...
+2026-03-28 14:34:25 Probing 43 JS-discovered endpoints unauthenticated...
+
+================================================================
+  !! MEDIUM ALERT: JS ENDPOINT — SENSITIVE DATA EXPOSED !!
+  Target     : https://portal.chra.army.mil/api/now/sp/page
+  Detail     : Unauthenticated GET returned 1 non-generic email address(es)
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 14:34:27
+================================================================
+
+2026-03-28 14:34:29  JS endpoint exposes email(s) (1 non-generic): https://portal.chra.army.mil/api/now/sp/page
+2026-03-28 14:34:33 [Baseline] https://portal.chra.army.mil/hr_public — status=200 len=163558±0 fp=fb28b7ff95a14d81
+2026-03-28 14:34:35 JS endpoint probe complete — 43 probed.
+2026-03-28 14:34:35 Done! Crawled 3 pages.
+2026-03-28 14:38:18 [Baseline] https://portal.chra.army.mil/hr_public — status=200 len=163548±4 fp=ae3dac7edf508a39
+2026-03-28 14:38:53 [Baseline] https://portal.chra.army.mil/hr_public — status=200 len=163554±3 fp=e1d7534643d4bf96
+2026-03-28 14:39:41 [Baseline] https://portal.chra.army.mil — status=200 len=163667±4 fp=802b0ebfcc3dcacc
+[NuScrape] Scan completed cleanly (exit 0) for https://portal.chra.army.mil.
+
+============================================================
+[NuScrape] Starting scan → https://civilians.army.mil  @ 2026-03-28 14:50:57.823584
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 14:50:58 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 14:50:58 Skipping 39 URLs crawled in the last 14 days.
+2026-03-28 14:50:58 Starting NuScrape → https://civilians.army.mil
+2026-03-28 14:50:58 robots.txt: ignored (--ignore-robots)
+2026-03-28 14:50:58 Fetching sitemap...
+2026-03-28 14:51:00 No sitemap.xml for https://civilians.army.mil
+2026-03-28 14:51:01 [SSRF] OOB client registered: 7470b64f4aa2d05faea6.interact.sh
+2026-03-28 14:51:01 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 14:51:03 HTTP 200 https://civilians.army.mil
+2026-03-28 14:51:05 Parsed: https://civilians.army.mil
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://civilians.army.mil
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://civilians.army.mil | Entropy: 4.81 | Class: base64 | Context: 'InmCM2IXWG9Us0wt98_-LFFlJyZcNpft0egfQcOACJPfEoVjjWuIe8w16W-IU4paAfITmJcjzn08Ro'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 14:51:05
+================================================================
+
+2026-03-28 14:51:05 [!] Entropy: high entropy string (entropy=4.81) at https://civilians.army.mil
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://civilians.army.mil
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://civilians.army.mil | Entropy: 5.11 | Class: base64 | Context: 'ACJPfEoVjjWuIe8w16W-IU4paAfITmJcjzn08Ro4lK3ZZIc9cLaqtr4oRuGqmO07yoc5z1a53KPNnzz9HyYRi8_sZgS7joQGB9JSE" />'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 14:51:05
+================================================================
+
+2026-03-28 14:51:05 [!] Entropy: high entropy string (entropy=5.11) at https://civilians.army.mil
+2026-03-28 14:51:08 [Baseline] https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations — status=200 len=17432±0 fp=e6fba644b9dfa815
+2026-03-28 14:51:25 SQLi probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=groupId
+2026-03-28 14:51:39 [Timing] Baseline https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=groupId: mean=370ms σ=4ms max=377ms
+2026-03-28 14:51:42 [Timing] Baseline: 370ms ±4ms | Probe(SLEEP 2): 385ms (threshold 2382ms) ✗ → NOT TRIGGERED
+2026-03-28 14:51:42 SQLi probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=tenantId
+2026-03-28 14:51:54 [Timing] Baseline https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=tenantId: mean=370ms σ=4ms max=377ms
+2026-03-28 14:51:56 [Timing] Baseline: 370ms ±4ms | Probe(SLEEP 2): 374ms (threshold 2382ms) ✗ → NOT TRIGGERED
+2026-03-28 14:51:56 CMDi probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=groupId
+2026-03-28 14:52:16 CMDi probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=tenantId
+2026-03-28 14:52:35 LDAPi probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=groupId
+2026-03-28 14:52:49 LDAPi probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=tenantId
+2026-03-28 14:53:05 HPP probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=groupId
+2026-03-28 14:53:12 HPP probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=tenantId
+2026-03-28 14:53:17 Batch 3 [workers=3] | crawled=1 queue=3
+2026-03-28 14:53:19 HTTP 200 https://www.army.mil/
+2026-03-28 14:53:19 HTTP 200 https://portal.chra.army.mil/hr_public
+2026-03-28 14:53:20 HTTP 200 https://www.goarmy.com/careers-and-jobs/find-your-path/army-civilians.html
+2026-03-28 14:53:22 Parsed: https://www.army.mil/
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://civilians.army.mil/lib/kendo-ui/js/kendo.all.min.js?v=P1kJ2XP5GIQwkLR7uBsryFU2h7aN6zm5AefM6nXv19s
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: '),t._downloadData.done((function(n){i.ui.progress(t.viewer.pageContainer,!1);var r=new FileReader;r.readAsDataURL(n.file),r.onload=function(){i.saveAs({dataURI:r.result,fileName:e+".pdf",proxyURL:function(){return r.result}})}}))},navigateToDestination:function(e){var t=this;e=e.split("#")[1];try{e='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 14:53:23
+================================================================
+
+2026-03-28 14:53:23 [!] PP client-side sink 'JSON.parse(…)[': https://civilians.army.mil/lib/kendo-ui/js/kendo.all.min.js?v=P1kJ2XP5GIQwkLR7uBsryFU2h7aN6zm5AefM6nXv19s
+2026-03-28 14:53:52 SQLi probe: https://www.goarmy.com/ param=iom
+2026-03-28 14:54:10 [Timing] Baseline https://www.goarmy.com/ param=iom: mean=844ms σ=396ms max=1271ms
+2026-03-28 14:54:12 [Timing] Baseline: 844ms ±396ms | Probe(SLEEP 2): 422ms (threshold 4031ms) ✗ → NOT TRIGGERED
+2026-03-28 14:54:16 CMDi probe: https://www.goarmy.com/ param=iom
+2026-03-28 14:54:39 LDAPi probe: https://www.goarmy.com/ param=iom
+2026-03-28 14:55:12 HPP probe: https://www.goarmy.com/ param=iom
+2026-03-28 14:55:13 WCP probe: https://www.army.mil/ header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 14:55:15 WCP probe: https://www.army.mil/ header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 14:55:17 WCP probe: https://www.army.mil/ header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 14:55:18 WCP probe: https://www.army.mil/ header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 14:55:19 WCP probe: https://www.army.mil/ header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 14:55:20 WCP probe: https://www.army.mil/ header=X-Forwarded-For: 127.0.0.1
+2026-03-28 14:55:21 WCP cloak probe: https://www.army.mil/?param=cloak-probe-9d4e
+2026-03-28 14:55:51 IDOR verify: https://www.army.mil/article/{id}/army_strategic_capital_initiatives_seeking_private_sector_partners_to_accelerate_enterprise_wide_modernization param=path_id value=290810
+2026-03-28 14:55:53 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/army_strategic_capital_initiatives_seeking_private_sector_partners_to_accelerate_enterprise_wide_modernization
+2026-03-28 14:55:53 IDOR verify: https://www.army.mil/article/{id}/wyoming_national_guard_grows_himars_force_through_transition_course param=path_id value=291313
+2026-03-28 14:55:54 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/wyoming_national_guard_grows_himars_force_through_transition_course
+2026-03-28 14:55:54 IDOR verify: https://www.army.mil/article/{id}/containerized_autonomous_kitchen_expands_army_food_modernization_to_the_field param=path_id value=291363
+2026-03-28 14:55:56 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/containerized_autonomous_kitchen_expands_army_food_modernization_to_the_field
+2026-03-28 14:55:56 IDOR verify: https://api.army.mil/e2/c/images/{id}/03/27/704bc78f/original.jpg param=path_id value=2026
+2026-03-28 14:55:56 IDOR dismissed (not auth-gated or no per-object diff): https://api.army.mil/e2/c/images/{id}/03/27/704bc78f/original.jpg
+2026-03-28 14:55:56 IDOR verify: https://www.army.mil/article/{id}/army_updates_retention_program_for_2026_rewarding_performance_and_commitment param=path_id value=291324
+2026-03-28 14:55:57 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/army_updates_retention_program_for_2026_rewarding_performance_and_commitment
+2026-03-28 14:55:57 IDOR verify: https://www.army.mil/article/{id}/update_fallen_heroes param=path_id value=290862
+2026-03-28 14:55:58 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/update_fallen_heroes
+2026-03-28 14:55:58 IDOR verify: https://www.army.mil/article/{id}/six_new_york_army_national_guard_soldiers_receive_french_medal_for_actions_in_iraq param=path_id value=290673
+2026-03-28 14:55:59 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/six_new_york_army_national_guard_soldiers_receive_french_medal_for_actions_in_iraq
+2026-03-28 14:55:59 IDOR verify: https://www.army.mil/article/{id}/quick_acting_jtf_southern_border_soldiers_aid_elderly_man_in_overturned_vehicle param=path_id value=291390
+2026-03-28 14:56:01 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/quick_acting_jtf_southern_border_soldiers_aid_elderly_man_in_overturned_vehicle
+2026-03-28 14:56:01 IDOR verify: https://www.army.mil/article/{id}/carrying_the_legacy_forward_army_national_guard_establishes_temple_leadership_award param=path_id value=290563
+2026-03-28 14:56:03 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/carrying_the_legacy_forward_army_national_guard_establishes_temple_leadership_award
+2026-03-28 14:56:03 IDOR verify: https://www.army.mil/article/{id}/army_announces_winners_of_inaugural_best_drone_warfighter_competition param=path_id value=290645
+2026-03-28 14:56:04 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/army_announces_winners_of_inaugural_best_drone_warfighter_competition
+2026-03-28 14:56:04 IDOR verify: https://www.army.mil/article/{id}/army_lieutenant_among_the_first_soldiers_to_direct_commission_as_public_affairs_officer param=path_id value=291163
+2026-03-28 14:56:06 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/army_lieutenant_among_the_first_soldiers_to_direct_commission_as_public_affairs_officer
+2026-03-28 14:56:06 IDOR verify: https://www.army.mil/article/{id}/us_army_breaks_ground_on_new_barracks_in_puerto_rico param=path_id value=291346
+2026-03-28 14:56:07 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/us_army_breaks_ground_on_new_barracks_in_puerto_rico
+2026-03-28 14:56:07 IDOR verify: https://www.army.mil/article/{id}/modernized_platform_provides_real_time_accurate_picture_of_soldier_readiness param=path_id value=291388
+2026-03-28 14:56:09 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/modernized_platform_provides_real_time_accurate_picture_of_soldier_readiness
+2026-03-28 14:56:09 IDOR verify: https://www.army.mil/article/{id}/four_guard_members_compete_in_2026_olympic_games param=path_id value=290463
+2026-03-28 14:56:10 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/four_guard_members_compete_in_2026_olympic_games
+2026-03-28 14:56:10 IDOR verify: https://www.army.mil/article/{id}/army_announces_upcoming_unit_deployments param=path_id value=290289
+2026-03-28 14:56:11 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/army_announces_upcoming_unit_deployments
+2026-03-28 14:56:11 IDOR verify: https://www.army.mil/article/{id}/u_s_army_world_class_athlete_program_soldier_athletes_soldier_coaches_show_competitive_spirit_resilience_during_2026_winter_olympics param=path_id value=290865
+2026-03-28 14:56:12 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/u_s_army_world_class_athlete_program_soldier_athletes_soldier_coaches_show_competitive_spirit_resilience_during_2026_winter_olympics
+2026-03-28 14:56:12 IDOR verify: https://www.army.mil/article/{id}/trio_of_army_medal_of_honor_recipients_inducted_into_pentagons_hall_of_heroes param=path_id value=290844
+2026-03-28 14:56:13 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/trio_of_army_medal_of_honor_recipients_inducted_into_pentagons_hall_of_heroes
+2026-03-28 14:56:13 IDOR verify: https://www.army.mil/article/{id}/army_reaches_conditional_agreement_with_private_industry_for_hyperscaled_data_centers param=path_id value=291360
+2026-03-28 14:56:15 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/army_reaches_conditional_agreement_with_private_industry_for_hyperscaled_data_centers
+2026-03-28 14:56:21 JS-heavy page detected, switching to Playwright: https://portal.chra.army.mil/hr_public
+2026-03-28 14:56:21 Playwright rendering: https://portal.chra.army.mil/hr_public
+2026-03-28 14:56:24 XHR: GET https://portal.chra.army.mil/api/now/sp/page?time=1774724184499&portal_id=19f9fb981bf110503ac0419ae54bcb9c&request_uri=%2Fhr_public
+2026-03-28 14:56:24 XHR: GET https://portal.chra.army.mil/angular.do?sysparm_type=get_partial&name=sn_banner.xml
+2026-03-28 14:56:31 Playwright got 206334 bytes from https://portal.chra.army.mil/hr_public
+2026-03-28 14:56:31 Playwright content richer — using rendered HTML
+2026-03-28 14:56:32 Parsed: https://portal.chra.army.mil/hr_public
+2026-03-28 14:57:51 SQLi probe: https://portal.chra.army.mil/hr_public param=id
+2026-03-28 14:58:08 [Timing] Baseline https://portal.chra.army.mil/hr_public param=id: mean=567ms σ=69ms max=678ms
+2026-03-28 14:58:12 [Timing] Baseline: 567ms ±69ms | Probe(SLEEP 2): 714ms (threshold 2774ms) ✗ → NOT TRIGGERED
+2026-03-28 14:58:12 SQLi probe: https://portal.chra.army.mil/hr_public param=kb_base
+2026-03-28 14:58:27 [Timing] Baseline https://portal.chra.army.mil/hr_public param=kb_base: mean=567ms σ=69ms max=678ms
+2026-03-28 14:58:30 [Timing] Baseline: 567ms ±69ms | Probe(SLEEP 2): 954ms (threshold 2774ms) ✗ → NOT TRIGGERED
+2026-03-28 14:58:30 SQLi probe: https://portal.chra.army.mil/hr_public param=kb_category
+2026-03-28 14:58:50 [Timing] Baseline https://portal.chra.army.mil/hr_public param=kb_category: mean=699ms σ=85ms max=830ms
+2026-03-28 14:58:54 [Timing] Baseline: 699ms ±85ms | Probe(SLEEP 2): 993ms (threshold 2954ms) ✗ → NOT TRIGGERED
+2026-03-28 14:59:01 CMDi probe: https://portal.chra.army.mil/hr_public param=id
+2026-03-28 14:59:03 [Verify] Confirming CRITICAL COMMAND INJECTION (CONFIRMED) on portal.chra.army.mil ...
+2026-03-28 14:59:06 [Verify] Confirmed — firing alert
+
+================================================================
+  !! CRITICAL ALERT: COMMAND INJECTION (CONFIRMED) !!
+  Target     : portal.chra.army.mil
+  Detail     : Parameter 'id' on https://portal.chra.army.mil/hr_public echoed canary string with payload: ';echo probe-test-7f3a' | Snippet: ".page_id = 'chra_kb_home;echo probe-test-7f3a';\n\t\twindow.NOW.portal_id = '19f9fb981bf110503ac0419ae54bcb9"
+  Confidence : CONFIRMED
+  Time       : 2026-03-28 14:59:06
+================================================================
+
+2026-03-28 14:59:14 LDAPi probe: https://portal.chra.army.mil/hr_public param=id
+2026-03-28 14:59:32 LDAPi probe: https://portal.chra.army.mil/hr_public param=kb_base
+2026-03-28 14:59:49 LDAPi probe: https://portal.chra.army.mil/hr_public param=kb_category
+2026-03-28 15:00:42 HPP probe: https://portal.chra.army.mil/hr_public param=id
+2026-03-28 15:00:43 HPP probe: https://portal.chra.army.mil/hr_public param=kb_base
+2026-03-28 15:00:44 HPP probe: https://portal.chra.army.mil/hr_public param=kb_category
+2026-03-28 15:00:45 WCP probe: https://portal.chra.army.mil/hr_public header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 15:00:48 WCP probe: https://portal.chra.army.mil/hr_public header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 15:00:50 WCP probe: https://portal.chra.army.mil/hr_public header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 15:00:51 WCP probe: https://portal.chra.army.mil/hr_public header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 15:00:53 WCP probe: https://portal.chra.army.mil/hr_public header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 15:00:55 WCP probe: https://portal.chra.army.mil/hr_public header=X-Forwarded-For: 127.0.0.1
+2026-03-28 15:00:56 WCP cloak probe: https://portal.chra.army.mil/hr_public?param=cloak-probe-9d4e
+2026-03-28 15:01:18 JS analysis: 2 findings in https://portal.chra.army.mil/app_com.jsdbx?c=21
+2026-03-28 15:01:19 JS analysis: 2 findings in https://portal.chra.army.mil/app_com.cxs.contextual_search.jsdbx?c=56
+2026-03-28 15:01:21 JS analysis: 2 findings in https://portal.chra.army.mil/scripts/js_includes_sp_libs_min.jsx?v=12-03-2025_1405&lp=Fri_Mar_20_18_45_42_UTC_2026&c=25_479
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://portal.chra.army.mil/scripts/dist/sp_min.jsx?v=12-03-2025_1405
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'm(e,JSON.stringify(n)),window.localStorage.removeItem(e)}),o(this,"on",function(e,t){if(n.registeredListeners.has(e)){var i=n.registeredListeners.get(e);window.removeEventListener("storage",i),n.LOGGER.debug("Removed storage event listener "+e)}var r=function(n){var i=n.key,r=n.newValue;i===e&&r&&t('
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 15:01:50
+================================================================
+
+2026-03-28 15:01:50 [!] PP client-side sink 'JSON.parse(…)[': https://portal.chra.army.mil/scripts/dist/sp_min.jsx?v=12-03-2025_1405
+2026-03-28 15:01:50 JS analysis: 70 findings in https://portal.chra.army.mil/scripts/dist/sp_min.jsx?v=12-03-2025_1405
+2026-03-28 15:02:03 JS-heavy page detected, switching to Playwright: https://www.goarmy.com/careers-and-jobs/find-your-path/army-civilians.html
+2026-03-28 15:02:04 Playwright rendering: https://www.goarmy.com/careers-and-jobs/find-your-path/army-civilians.html
+2026-03-28 15:02:06 XHR: GET https://www.goarmy.com/libs/cq/i18n/dict.en.json
+2026-03-28 15:02:06 XHR: POST https://collect.tealiumiq.com/goarmy/nextgen/2/i.gif
+2026-03-28 15:02:07 XHR: GET https://dpm.demdex.net/id?d_visid_ver=5.5.0&d_fieldgroup=MC&d_rtbd=json&d_ver=2&d_orgid=B37C4968652F7E4F0A495CF2%40AdobeOrg&d_nsid=0&ts=1774724527003
+2026-03-28 15:02:07 XHR: GET https://collection.decibelinsight.net/i/13974/1760326/c.json
+2026-03-28 15:02:07 XHR: GET https://tr.snapchat.com/config/com/cfa798c6-8970-43e6-9332-9f7b772df6a5.json?v=3.54.5-2603262043
+2026-03-28 15:02:07 XHR: GET https://pixel-config.reddit.com/pixels/t2_4yeeyfnl/config
+2026-03-28 15:02:07 XHR: GET https://px.ads.linkedin.com/attribution_trigger?pid=1835468&time=1774724527547&url=https%3A%2F%2Fwww.goarmy.com%2Fcareers-and-jobs%2Ffind-your-path%2Farmy-civilians
+2026-03-28 15:02:07 XHR: POST https://bat.bing.com/p/insights/c/s
+2026-03-28 15:02:07 XHR: POST https://usarmy2024.tt.omtrdc.net/rest/v1/delivery?client=usarmy2024&sessionId=aa5b12c5ba3644cd9f1b45b77d82d844&version=2.11.4
+2026-03-28 15:02:07 XHR: POST https://mpc2-prod-28-is5qnl632q-ue.a.run.app/events?cee=no
+2026-03-28 15:02:07 XHR: GET https://collection.decibelinsight.net/i/13974/1760326/c.json
+2026-03-28 15:02:09 XHR: POST https://px.ads.linkedin.com/wa/?medium=fetch&fmt=g
+2026-03-28 15:02:12 XHR: POST https://bat.bing.com/p/insights/c/s
+2026-03-28 15:02:13 Playwright got 253941 bytes from https://www.goarmy.com/careers-and-jobs/find-your-path/army-civilians.html
+2026-03-28 15:02:14 Playwright content richer — using rendered HTML
+2026-03-28 15:02:20 Parsed: https://www.goarmy.com/careers-and-jobs/find-your-path/army-civilians.html
+2026-03-28 15:03:34 [Baseline] https://portal.chra.army.mil/hr_public — status=200 len=163558±0 fp=fb28b7ff95a14d81
+2026-03-28 15:04:41 [Baseline] https://www.army.mil/ — status=200 len=146017±0 fp=7e6dd7d62908bb53
+2026-03-28 15:10:05 WCP probe: https://www.goarmy.com/careers-and-jobs/find-your-path/army-civilians.html header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 15:10:07 [Baseline] https://portal.chra.army.mil/hr_public — status=200 len=163550±6 fp=9dde772eca8e4dff
+2026-03-28 15:10:07 WCP probe: https://www.goarmy.com/careers-and-jobs/find-your-path/army-civilians.html header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 15:10:08 WCP probe: https://www.goarmy.com/careers-and-jobs/find-your-path/army-civilians.html header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 15:10:10 WCP probe: https://www.goarmy.com/careers-and-jobs/find-your-path/army-civilians.html header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 15:10:12 WCP probe: https://www.goarmy.com/careers-and-jobs/find-your-path/army-civilians.html header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 15:10:13 WCP probe: https://www.goarmy.com/careers-and-jobs/find-your-path/army-civilians.html header=X-Forwarded-For: 127.0.0.1
+2026-03-28 15:10:14 WCP cloak probe: https://www.goarmy.com/careers-and-jobs/find-your-path/army-civilians.html?param=cloak-probe-9d4e
+2026-03-28 15:10:34 [Baseline] https://portal.chra.army.mil/hr_public — status=200 len=163554±4 fp=fb28b7ff95a14d81
+2026-03-28 15:10:52 JS analysis: 2 findings in https://cdn.decibelinsight.net/i/13974/1760326/di.js
+2026-03-28 15:10:52 JS analysis: 1 findings in https://www.goarmy.com/etc.clientlibs/clientlibs/granite/utils.js
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://bat.bing.com/p/insights/s/0.8.57
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'r(var o=Wt(i[1]),u=o[0],c=o[1];u;)u=(n=Wt(c))[0],c=n[1];return e?c.endsWith("".concat("~","1"))?c.substring(0,c.length-2):null:c}}}return null}(t,e)}}function Ft(t,e,n){switch(t){case"_clck":Lt(e,0);break;case"_clsk":Lt(e,1)}}var Vt=null;function Jt(t){try{if(!Vt)return;var e=function(t){try{return '
+  Confidence : NEEDS VERIFICATION
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://www.redditstatic.com/ads/pixel.js
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: '(r);if(t+=1,r+=1,i>=55296&&i<=56319&&r<e)56320==(64512&n.charCodeAt(r))&&(r+=1)}return n.slice(0,r)}(n[e]);var i=b;n[i]=Fn(n[i]);var o,u={},a=Mn(g);try{for(a.s();!(o=a.n()).done;){var f=o.value;u[f]=f in n?n[f]:""}}catch(n){a.e(n)}finally{a.f()}return u},Fn=function(n){if(!n)return"";if(Hn(n))try{n='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 15:10:52
+================================================================
+
+
+  Time       : 2026-03-28 15:10:52
+================================================================
+
+2026-03-28 15:10:52 [!] PP client-side sink 'JSON.parse(…)[': https://www.redditstatic.com/ads/pixel.js2026-03-28 15:10:52 JS analysis: 1 findings in https://tags.tiqcdn.com/utag/goarmy/nextgen/prod/utag.js
+
+2026-03-28 15:10:52 [!] PP client-side sink 'JSON.parse(…)[': https://bat.bing.com/p/insights/s/0.8.57
+2026-03-28 15:10:53 JS analysis: 3 findings in https://www.goarmy.com/etc.clientlibs/clientlibs/granite/jquery.js
+2026-03-28 15:10:53 JS analysis: 1 findings in https://tags.tiqcdn.com/utag/goarmy/nextgen/prod/utag.6.js?utv=ut4.54.202507082000
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://tags.tiqcdn.com/utag/goarmy/nextgen/prod/utag.3.js?utv=ut4.54.202404161758
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'ubtract(val1,val2){var difference=0;if(val1>val2){difference=val1-val2;} return difference;} try{timing=localStorage.getItem("tealium_timing");t=window.performance.timing;if(timing!==null&&timing!=="{}"&&typeof b!=="undefined"&&u.performance_timing_count===0){utag.ut.merge(b,utag.ut.flatten({timing:'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 15:10:53
+================================================================
+
+2026-03-28 15:10:53 [!] PP client-side sink 'JSON.parse(…)[': https://tags.tiqcdn.com/utag/goarmy/nextgen/prod/utag.3.js?utv=ut4.54.202404161758
+2026-03-28 15:10:53 JS analysis: 1 findings in https://tags.tiqcdn.com/utag/goarmy/nextgen/prod/utag.3.js?utv=ut4.54.202404161758
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://resources.digital-cloud-west.medallia.com/wdcwest/747991/onsite/generic1772009569218.js
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: '_CONFIGURATION,false);} function formatConfiguration(propertyData){var formattedData=propertyData;var customParams;if(formattedData.formNodes&&formattedData.formNodes.length){for(var i=0;i<formattedData.formNodes.length;i++){if(typeof formattedData.formNodes[i].customParams==="string"){customParams='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 15:10:55
+================================================================
+
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://assets.adobedtm.com/a39464ea9824/bb5d8233c790/launch-ef989c6a2513.min.js
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'onent.medicalConcerns}}},"Adobe Target - Experience Name":{storageDuration:"visitor",modulePath:"core/src/lib/dataElements/sessionStorage.js",settings:{name:"adobeTargetExperienceName"}},"ACDL - CMT Random Job":{modulePath:"core/src/lib/dataElements/customCode.js",settings:{source:function(){return '
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 15:10:55
+================================================================
+
+2026-03-28 15:10:55 [!] PP client-side sink 'JSON.parse(…)[': https://resources.digital-cloud-west.medallia.com/wdcwest/747991/onsite/generic1772009569218.js
+2026-03-28 15:10:55 JS analysis: 5 findings in https://resources.digital-cloud-west.medallia.com/wdcwest/747991/onsite/generic1772009569218.js
+2026-03-28 15:10:56 [!] PP client-side sink 'JSON.parse(…)[': https://assets.adobedtm.com/a39464ea9824/bb5d8233c790/launch-ef989c6a2513.min.js
+2026-03-28 15:10:56 JS analysis: 3 findings in https://assets.adobedtm.com/a39464ea9824/bb5d8233c790/launch-ef989c6a2513.min.js
+2026-03-28 15:11:13 Batch 3 [workers=3] | crawled=4 queue=11
+2026-03-28 15:11:16 HTTP 200 https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations?groupId=a0120528-199c-47d9-a41b-ec11d3456a9c&tenantId=fae6d70f-954b-4811-92b6-0530d6f84c43
+2026-03-28 15:11:19 ERROR: Timeout fetching: https://secure.civilians.army.mil/TalentDev
+2026-03-28 15:11:20 ERROR: Timeout fetching: https://secure.civilians.army.mil/TalentMarketplace
+2026-03-28 15:11:22 JS-heavy page detected, switching to Playwright: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations?groupId=a0120528-199c-47d9-a41b-ec11d3456a9c&tenantId=fae6d70f-954b-4811-92b6-0530d6f84c43
+2026-03-28 15:11:22 Playwright rendering: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations?groupId=a0120528-199c-47d9-a41b-ec11d3456a9c&tenantId=fae6d70f-954b-4811-92b6-0530d6f84c43
+2026-03-28 15:11:27 XHR: POST https://pf.pipe.aria.microsoft.com/Collector/3.0?qsp=true&content-type=application%2Fbond-compact-binary&client-id=NO_AUTH&sdk-version=AWT-Web-JS-1.8.6&x-apikey=ff9c659dc93c4d18bc8b9ba70781b398-a1e71048-fec7-4aa4-8da3-6b0e0a4fbcea-7190&client-time-epoch-millis=1774725086762&time-delta-to-apply-millis=use-collector-delta
+2026-03-28 15:11:28 XHR: POST https://pf.pipe.aria.microsoft.com/Collector/3.0?qsp=true&content-type=application%2Fbond-compact-binary&client-id=NO_AUTH&sdk-version=AWT-Web-JS-1.8.6&x-apikey=ff9c659dc93c4d18bc8b9ba70781b398-a1e71048-fec7-4aa4-8da3-6b0e0a4fbcea-7190&client-time-epoch-millis=1774725088338&time-delta-to-apply-millis=1480
+2026-03-28 15:11:30 XHR: POST https://pf.pipe.aria.microsoft.com/Collector/3.0?qsp=true&content-type=application%2Fbond-compact-binary&client-id=NO_AUTH&sdk-version=AWT-Web-JS-1.8.6&x-apikey=ff9c659dc93c4d18bc8b9ba70781b398-a1e71048-fec7-4aa4-8da3-6b0e0a4fbcea-7190&client-time-epoch-millis=1774725090790&time-delta-to-apply-millis=1480
+2026-03-28 15:11:31 Playwright got 19713 bytes from https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations?groupId=a0120528-199c-47d9-a41b-ec11d3456a9c&tenantId=fae6d70f-954b-4811-92b6-0530d6f84c43
+2026-03-28 15:11:31 Playwright content richer — using rendered HTML
+2026-03-28 15:11:32 Parsed: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations?groupId=a0120528-199c-47d9-a41b-ec11d3456a9c&tenantId=fae6d70f-954b-4811-92b6-0530d6f84c43
+2026-03-28 15:11:50 SQLi probe: https://go.microsoft.com/fwlink/ param=LinkId
+2026-03-28 15:12:22 [Timing] Noisy baseline for https://go.microsoft.com/fwlink/ (σ=1350ms > 500ms) — skipping time-based probing
+2026-03-28 15:12:22 CMDi probe: https://go.microsoft.com/fwlink/ param=LinkId
+2026-03-28 15:12:41 LDAPi probe: https://go.microsoft.com/fwlink/ param=LinkId
+2026-03-28 15:13:03 HPP probe: https://go.microsoft.com/fwlink/ param=LinkId
+2026-03-28 15:13:04 WCP probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 15:13:07 WCP probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 15:13:09 WCP probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 15:13:10 WCP probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 15:13:11 WCP probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 15:13:13 WCP probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations header=X-Forwarded-For: 127.0.0.1
+2026-03-28 15:13:14 WCP fat-GET probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=groupId
+2026-03-28 15:13:16 WCP cloak probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations?groupId=a0120528-199c-47d9-a41b-ec11d3456a9c&tenantId=fae6d70f-954b-4811-92b6-0530d6f84c43;param=cloak-probe-9d4e
+2026-03-28 15:13:19 Batch 3 [workers=3] | crawled=5 queue=9
+2026-03-28 15:13:21 HTTP 200 https://www.army.mil/uniforms/
+2026-03-28 15:13:22 HTTP 200 https://www.army.mil/tomb
+2026-03-28 15:13:22 HTTP 200 https://www.goarmy.com/?iom=BNL7-22-0029_N_OSOC_OCPA_AL_ocpagen_xx_xx
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://statics.dod.teams.microsoft.us/hashedjs-launcher/launcher.1549544253c6c689bb81.js
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'h;i++){var o=n[i];if(!co(o)&&lo(o,t)){var a=this.getElementContent(o,ei.CONTENT_UPDATE);a&&r.push(a)}}return r},e.prototype.getElementContent=function(e,t){if(!e)return{};var n,r,i,o={};if(this._isTracked(e))if(this._isTrackedWithDataM(e)){r=(n=e).getAttribute(this._config.biBlobAttributeTag);try{o='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 15:13:31
+================================================================
+
+2026-03-28 15:13:32 [!] PP client-side sink 'JSON.parse(…)[': https://statics.dod.teams.microsoft.us/hashedjs-launcher/launcher.1549544253c6c689bb81.js
+2026-03-28 15:13:32 JS analysis: 6 findings in https://statics.dod.teams.microsoft.us/hashedjs-launcher/launcher.1549544253c6c689bb81.js
+2026-03-28 15:14:38 JS-heavy page detected, switching to Playwright: https://www.goarmy.com/?iom=BNL7-22-0029_N_OSOC_OCPA_AL_ocpagen_xx_xx
+2026-03-28 15:14:39 Playwright rendering: https://www.goarmy.com/?iom=BNL7-22-0029_N_OSOC_OCPA_AL_ocpagen_xx_xx
+2026-03-28 15:14:41 XHR: GET https://dpm.demdex.net/id?d_visid_ver=5.5.0&d_fieldgroup=MC&d_rtbd=json&d_ver=2&d_orgid=B37C4968652F7E4F0A495CF2%40AdobeOrg&d_nsid=0&ts=1774725281832
+2026-03-28 15:14:42 XHR: GET https://www.goarmy.com/libs/cq/i18n/dict.en.json
+2026-03-28 15:14:42 XHR: GET https://www.goarmy.com/content/dam/goarmy/static/data/schools.json
+2026-03-28 15:14:42 XHR: GET https://ws2.glb.goarmy.com/ga/api/v1/mac/info/BNL7
+2026-03-28 15:14:42 XHR: GET https://collection.decibelinsight.net/i/13974/1760326/c.json
+2026-03-28 15:14:42 XHR: POST https://usarmy2024.tt.omtrdc.net/rest/v1/delivery?client=usarmy2024&sessionId=93e1d1052542439a9d86c0e454621eb6&version=2.11.4
+2026-03-28 15:14:44 XHR: POST https://collect.tealiumiq.com/goarmy/nextgen/2/i.gif
+2026-03-28 15:14:44 XHR: GET https://collection.decibelinsight.net/i/13974/1760326/c.json
+2026-03-28 15:14:45 XHR: GET https://px.ads.linkedin.com/attribution_trigger?pid=1835468&time=1774725285427&url=https%3A%2F%2Fwww.goarmy.com%2F%3Fiom%3DBNL7-22-0029_N_OSOC_OCPA_AL_ocpagen_xx_xx
+2026-03-28 15:14:45 XHR: GET https://tr.snapchat.com/config/com/cfa798c6-8970-43e6-9332-9f7b772df6a5.json?v=3.54.5-2603262043
+2026-03-28 15:14:46 XHR: GET https://pixel-config.reddit.com/pixels/t2_4yeeyfnl/config
+2026-03-28 15:14:46 XHR: POST https://mpc2-prod-28-is5qnl632q-ue.a.run.app/events?cee=no
+2026-03-28 15:14:47 XHR: POST https://bat.bing.com/p/insights/c/s
+2026-03-28 15:14:47 XHR: POST https://px.ads.linkedin.com/wa/?medium=fetch&fmt=g
+2026-03-28 15:14:48 XHR: POST https://bat.bing.com/p/insights/c/s
+2026-03-28 15:14:48 Playwright got 451191 bytes from https://www.goarmy.com/?iom=BNL7-22-0029_N_OSOC_OCPA_AL_ocpagen_xx_xx
+2026-03-28 15:14:49 Playwright content richer — using rendered HTML
+2026-03-28 15:14:55 Parsed: https://www.goarmy.com/?iom=BNL7-22-0029_N_OSOC_OCPA_AL_ocpagen_xx_xx
+2026-03-28 15:17:01 [Baseline] https://portal.chra.army.mil/hr_public — status=200 len=163547±3 fp=9d3d4fdffd80796e
+2026-03-28 15:17:11 [Baseline] https://portal.chra.army.mil/hr_public — status=200 len=163554±4 fp=123054064cb82b3d
+[NuScrape] Scan stopped by user @ 2026-03-28 15:19:08.626738
+
+[*] Received signal 15 — shutting down cleanly...
+
+============================================================
+[NuScrape] Starting scan → https://civilians.army.mil  @ 2026-03-28 15:19:17.253775
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 15:19:17 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 15:19:17 Starting NuScrape → https://civilians.army.mil
+2026-03-28 15:19:17 Same-domain-only: staying on civilians.army.mil
+2026-03-28 15:19:17 robots.txt: ignored (--ignore-robots)
+2026-03-28 15:19:17 Fetching sitemap...
+2026-03-28 15:19:19 No sitemap.xml for https://civilians.army.mil
+2026-03-28 15:19:20 [SSRF] OOB client registered: 2497ee73375051255620.interact.sh
+2026-03-28 15:19:20 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 15:19:21 HTTP 200 https://civilians.army.mil
+2026-03-28 15:19:23 Parsed: https://civilians.army.mil
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://civilians.army.mil
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://civilians.army.mil | Entropy: 5.53 | Class: base64 | Context: 'TZzNo5cabowIhLGzyA6_ZGAXpErkQfTjf3eURsnvIL8zaArkFVeBFL6bIGbSH9A45pt1B2dJ1cnTDzjoEXyuN6eVoBPGFUHWG6bKa49Bua6iEShdGdgzPvxE" />\r\n<style>\r\n    .'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 15:19:23
+================================================================
+
+2026-03-28 15:19:23 [!] Entropy: high entropy string (entropy=5.53) at https://civilians.army.mil
+2026-03-28 15:19:26 [Baseline] https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations — status=200 len=17436±4 fp=6aa0ceb58b9294dc
+2026-03-28 15:19:37 SQLi probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=groupId
+2026-03-28 15:19:53 [Timing] Baseline https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=groupId: mean=412ms σ=52ms max=457ms
+2026-03-28 15:19:55 [Timing] Baseline: 412ms ±52ms | Probe(SLEEP 2): 346ms (threshold 2568ms) ✗ → NOT TRIGGERED
+2026-03-28 15:19:55 SQLi probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=tenantId
+2026-03-28 15:20:06 [Timing] Baseline https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=tenantId: mean=412ms σ=52ms max=457ms
+2026-03-28 15:20:09 [Timing] Baseline: 412ms ±52ms | Probe(SLEEP 2): 406ms (threshold 2568ms) ✗ → NOT TRIGGERED
+2026-03-28 15:20:09 CMDi probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=groupId
+2026-03-28 15:20:27 CMDi probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=tenantId
+2026-03-28 15:20:44 LDAPi probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=groupId
+2026-03-28 15:20:58 LDAPi probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=tenantId
+2026-03-28 15:21:15 HPP probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=groupId
+2026-03-28 15:21:21 HPP probe: https://dod.teams.microsoft.us/l/team/19%3adod%3a4981b99332a646efb2f3cff3f6a2f12f%40thread.tacv2/conversations param=tenantId
+2026-03-28 15:21:27 Waiting for 13 JS analysis threads to complete...
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://civilians.army.mil/lib/kendo-ui/js/kendo.all.min.js?v=P1kJ2XP5GIQwkLR7uBsryFU2h7aN6zm5AefM6nXv19s
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: '),t._downloadData.done((function(n){i.ui.progress(t.viewer.pageContainer,!1);var r=new FileReader;r.readAsDataURL(n.file),r.onload=function(){i.saveAs({dataURI:r.result,fileName:e+".pdf",proxyURL:function(){return r.result}})}}))},navigateToDestination:function(e){var t=this;e=e.split("#")[1];try{e='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 15:21:32
+================================================================
+
+2026-03-28 15:21:32 [!] PP client-side sink 'JSON.parse(…)[': https://civilians.army.mil/lib/kendo-ui/js/kendo.all.min.js?v=P1kJ2XP5GIQwkLR7uBsryFU2h7aN6zm5AefM6nXv19s
+2026-03-28 15:21:32 Done! Crawled 1 pages.
+[NuScrape] Scan completed cleanly (exit 0) for https://civilians.army.mil.
+[NuScrape] _launch_crawler blocked: invalid domain 'myarmybenefits.us.army.mil'
+[NuScrape] _launch_crawler blocked: invalid domain 'myarmybenefits.us.army.mil'
+[NuScrape] _launch_crawler blocked: invalid domain 'myarmybenefits.us.army.mil'
+[NuScrape] _launch_crawler blocked: invalid domain 'myarmybenefits.us.army.mil'
+
+============================================================
+[NuScrape] Starting scan → https://www.defense.gov  @ 2026-03-28 15:32:18.996456
+============================================================
+[*] Stealth profile: GHOST
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 15:32:19 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 15:32:19 Skipping 6 URLs crawled in the last 14 days.
+2026-03-28 15:32:19 Starting NuScrape → https://www.defense.gov
+2026-03-28 15:32:19 robots.txt: ignored (--ignore-robots)
+2026-03-28 15:32:19 Fetching sitemap...
+2026-03-28 15:32:22 No sitemap.xml for https://www.defense.gov
+2026-03-28 15:32:23 [SSRF] OOB client registered: 60826b52f5a7576c9f66.interact.sh
+2026-03-28 15:32:23 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 15:32:28 ERROR: Async fetch failed for https://www.defense.gov: Cannot connect to host www.defense.gov:443 ssl:default [Name or service not known]
+2026-03-28 15:32:31 Done! Crawled 0 pages.
+[NuScrape] Scan completed cleanly (exit 0) for https://www.defense.gov.
+
+============================================================
+[NuScrape] Starting scan → https://www.army.mil/  @ 2026-03-28 15:33:22.713208
+============================================================
+[*] Stealth profile: GHOST
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 15:33:23 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 15:33:23 Skipping 6 URLs crawled in the last 14 days.
+2026-03-28 15:33:23 Starting NuScrape → https://www.army.mil/
+2026-03-28 15:33:23 robots.txt: ignored (--ignore-robots)
+2026-03-28 15:33:23 Fetching sitemap...
+2026-03-28 15:33:27 Sitemap found 392 URLs for https://www.army.mil
+2026-03-28 15:33:28 [SSRF] OOB client registered: 4eaa5c1b0669e09f0a88.interact.sh
+2026-03-28 15:33:28 Batch 3 [workers=3] | crawled=0 queue=390
+2026-03-28 15:33:32 HTTP 200 https://www.army.mil/sitemaps/base-sitemap.xml
+2026-03-28 15:33:33 HTTP 200 https://www.army.mil/sitemaps/org-sitemap.xml
+2026-03-28 15:33:33 HTTP 200 https://www.army.mil/
+2026-03-28 15:33:36 Parsed: https://www.army.mil/
+2026-03-28 15:34:27 SQLi probe: https://www.goarmy.com/ param=iom
+2026-03-28 15:35:08 [Timing] Baseline https://www.goarmy.com/ param=iom: mean=570ms σ=317ms max=855ms
+2026-03-28 15:35:14 [Timing] Baseline: 570ms ±317ms | Probe(SLEEP 2): 365ms (threshold 3521ms) ✗ → NOT TRIGGERED
+2026-03-28 15:35:19 CMDi probe: https://www.goarmy.com/ param=iom
+2026-03-28 15:36:41 LDAPi probe: https://www.goarmy.com/ param=iom
+2026-03-28 15:38:03 HPP probe: https://www.goarmy.com/ param=iom
+2026-03-28 15:38:09 WCP probe: https://www.army.mil/ header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 15:38:12 WCP probe: https://www.army.mil/ header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 15:38:16 WCP probe: https://www.army.mil/ header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 15:38:18 WCP probe: https://www.army.mil/ header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 15:38:24 WCP probe: https://www.army.mil/ header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 15:38:28 WCP probe: https://www.army.mil/ header=X-Forwarded-For: 127.0.0.1
+2026-03-28 15:38:32 WCP cloak probe: https://www.army.mil/?param=cloak-probe-9d4e
+2026-03-28 15:38:59 IDOR verify: https://www.army.mil/article/{id}/quick_acting_jtf_southern_border_soldiers_aid_elderly_man_in_overturned_vehicle param=path_id value=291390
+2026-03-28 15:39:03 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/quick_acting_jtf_southern_border_soldiers_aid_elderly_man_in_overturned_vehicle
+2026-03-28 15:39:03 IDOR verify: https://www.army.mil/article/{id}/trio_of_army_medal_of_honor_recipients_inducted_into_pentagons_hall_of_heroes param=path_id value=290844
+2026-03-28 15:39:07 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/trio_of_army_medal_of_honor_recipients_inducted_into_pentagons_hall_of_heroes
+2026-03-28 15:39:07 IDOR verify: https://www.army.mil/article/{id}/u_s_army_world_class_athlete_program_soldier_athletes_soldier_coaches_show_competitive_spirit_resilience_during_2026_winter_olympics param=path_id value=290865
+2026-03-28 15:39:12 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/u_s_army_world_class_athlete_program_soldier_athletes_soldier_coaches_show_competitive_spirit_resilience_during_2026_winter_olympics
+2026-03-28 15:39:12 IDOR verify: https://www.army.mil/article/{id}/army_reaches_conditional_agreement_with_private_industry_for_hyperscaled_data_centers param=path_id value=291360
+2026-03-28 15:39:17 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/army_reaches_conditional_agreement_with_private_industry_for_hyperscaled_data_centers
+2026-03-28 15:39:17 IDOR verify: https://www.army.mil/article/{id}/four_guard_members_compete_in_2026_olympic_games param=path_id value=290463
+2026-03-28 15:39:23 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/four_guard_members_compete_in_2026_olympic_games
+2026-03-28 15:39:23 IDOR verify: https://api.army.mil/e2/c/images/{id}/03/27/704bc78f/original.jpg param=path_id value=2026
+2026-03-28 15:39:23 IDOR dismissed (not auth-gated or no per-object diff): https://api.army.mil/e2/c/images/{id}/03/27/704bc78f/original.jpg
+2026-03-28 15:39:23 IDOR verify: https://www.army.mil/article/{id}/army_announces_winners_of_inaugural_best_drone_warfighter_competition param=path_id value=290645
+2026-03-28 15:39:27 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/army_announces_winners_of_inaugural_best_drone_warfighter_competition
+2026-03-28 15:39:27 IDOR verify: https://www.army.mil/article/{id}/army_strategic_capital_initiatives_seeking_private_sector_partners_to_accelerate_enterprise_wide_modernization param=path_id value=290810
+2026-03-28 15:39:31 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/army_strategic_capital_initiatives_seeking_private_sector_partners_to_accelerate_enterprise_wide_modernization
+2026-03-28 15:39:31 IDOR verify: https://www.army.mil/article/{id}/us_army_breaks_ground_on_new_barracks_in_puerto_rico param=path_id value=291346
+2026-03-28 15:39:37 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/us_army_breaks_ground_on_new_barracks_in_puerto_rico
+2026-03-28 15:39:37 IDOR verify: https://www.army.mil/article/{id}/modernized_platform_provides_real_time_accurate_picture_of_soldier_readiness param=path_id value=291388
+2026-03-28 15:39:53 Batch 3 [workers=3] | crawled=1 queue=392
+2026-03-28 15:39:54 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/modernized_platform_provides_real_time_accurate_picture_of_soldier_readiness
+2026-03-28 15:39:54 IDOR verify: https://www.army.mil/article/{id}/army_lieutenant_among_the_first_soldiers_to_direct_commission_as_public_affairs_officer param=path_id value=291163
+2026-03-28 15:39:55 HTTP 404 https://www.army.mil/standto/rss/standto-fullsite.xml
+2026-03-28 15:39:58 HTTP 200 https://www.army.mil/sitemaps/featured-sitemap.xml
+2026-03-28 15:39:58 HTTP 200 https://www.army.mil/rss/static/0.xml
+2026-03-28 15:40:00 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/army_lieutenant_among_the_first_soldiers_to_direct_commission_as_public_affairs_officer
+2026-03-28 15:40:00 IDOR verify: https://www.army.mil/article/{id}/army_announces_upcoming_unit_deployments param=path_id value=290289
+2026-03-28 15:40:00 Batch 3 [workers=3] | crawled=1 queue=389
+2026-03-28 15:40:03 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/army_announces_upcoming_unit_deployments
+2026-03-28 15:40:03 IDOR verify: https://www.army.mil/article/{id}/update_fallen_heroes param=path_id value=290862
+2026-03-28 15:40:05 HTTP 200 https://www.army.mil/rss/static/73.xml
+2026-03-28 15:40:05 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/update_fallen_heroes
+2026-03-28 15:40:05 IDOR verify: https://www.army.mil/article/{id}/army_updates_retention_program_for_2026_rewarding_performance_and_commitment param=path_id value=291324
+2026-03-28 15:40:06 HTTP 200 https://www.army.mil/rss/static/85.xml
+2026-03-28 15:40:07 HTTP 200 https://www.army.mil/rss/static/104.xml
+2026-03-28 15:40:09 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/army_updates_retention_program_for_2026_rewarding_performance_and_commitment
+2026-03-28 15:40:09 IDOR verify: https://www.army.mil/article/{id}/carrying_the_legacy_forward_army_national_guard_establishes_temple_leadership_award param=path_id value=290563
+2026-03-28 15:40:10 Batch 3 [workers=3] | crawled=1 queue=386
+2026-03-28 15:40:13 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/carrying_the_legacy_forward_army_national_guard_establishes_temple_leadership_award
+2026-03-28 15:40:13 IDOR verify: https://www.army.mil/article/{id}/six_new_york_army_national_guard_soldiers_receive_french_medal_for_actions_in_iraq param=path_id value=290673
+2026-03-28 15:40:13 HTTP 200 https://www.army.mil/rss/static/110.xml
+2026-03-28 15:40:14 HTTP 200 https://www.army.mil/rss/static/107.xml
+2026-03-28 15:40:15 HTTP 200 https://www.army.mil/rss/static/106.xml
+2026-03-28 15:40:16 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/six_new_york_army_national_guard_soldiers_receive_french_medal_for_actions_in_iraq
+2026-03-28 15:40:16 IDOR verify: https://www.army.mil/article/{id}/wyoming_national_guard_grows_himars_force_through_transition_course param=path_id value=291313
+2026-03-28 15:40:17 Batch 3 [workers=3] | crawled=1 queue=383
+2026-03-28 15:40:19 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/wyoming_national_guard_grows_himars_force_through_transition_course
+2026-03-28 15:40:19 IDOR verify: https://www.army.mil/article/{id}/containerized_autonomous_kitchen_expands_army_food_modernization_to_the_field param=path_id value=291363
+2026-03-28 15:40:20 HTTP 200 https://www.army.mil/rss/static/111.xml
+2026-03-28 15:40:21 HTTP 200 https://www.army.mil/rss/static/113.xml
+2026-03-28 15:40:22 IDOR dismissed (not auth-gated or no per-object diff): https://www.army.mil/article/{id}/containerized_autonomous_kitchen_expands_army_food_modernization_to_the_field
+2026-03-28 15:40:23 HTTP 200 https://www.army.mil/rss/static/112.xml
+2026-03-28 15:40:26 Batch 3 [workers=3] | crawled=1 queue=380
+2026-03-28 15:40:28 HTTP 200 https://www.army.mil/rss/static/115.xml
+2026-03-28 15:40:29 HTTP 200 https://www.army.mil/rss/static/116.xml
+2026-03-28 15:40:29 HTTP 200 https://www.army.mil/rss/static/114.xml
+2026-03-28 15:40:32 Batch 3 [workers=3] | crawled=1 queue=377
+2026-03-28 15:40:36 HTTP 200 https://www.army.mil/rss/static/120.xml
+2026-03-28 15:40:38 HTTP 200 https://www.army.mil/rss/static/119.xml
+2026-03-28 15:40:39 HTTP 200 https://www.army.mil/rss/static/118.xml
+2026-03-28 15:40:41 [AdaptiveConcurrency] 3→2 workers (avg=4.89s err=5%)
+2026-03-28 15:40:41 [AdaptiveConcurrency] 2→1 workers (avg=4.83s err=5%)
+2026-03-28 15:40:41 Batch 1 [workers=1] | crawled=1 queue=376
+2026-03-28 15:40:47 HTTP 200 https://www.army.mil/rss/static/122.xml
+2026-03-28 15:40:49 Batch 1 [workers=1] | crawled=1 queue=375
+2026-03-28 15:40:56 HTTP 200 https://www.army.mil/rss/static/123.xml
+2026-03-28 15:40:58 Batch 1 [workers=1] | crawled=1 queue=374
+2026-03-28 15:41:01 HTTP 200 https://www.army.mil/rss/static/124.xml
+2026-03-28 15:41:03 Batch 1 [workers=1] | crawled=1 queue=373
+2026-03-28 15:41:07 HTTP 200 https://www.army.mil/rss/static/125.xml
+2026-03-28 15:41:09 Batch 1 [workers=1] | crawled=1 queue=372
+2026-03-28 15:41:15 HTTP 200 https://www.army.mil/rss/static/126.xml
+2026-03-28 15:41:18 Batch 1 [workers=1] | crawled=1 queue=371
+2026-03-28 15:41:21 HTTP 200 https://www.army.mil/rss/static/127.xml
+2026-03-28 15:41:24 Batch 1 [workers=1] | crawled=1 queue=370
+2026-03-28 15:41:27 HTTP 200 https://www.army.mil/rss/static/128.xml
+2026-03-28 15:41:28 Batch 1 [workers=1] | crawled=1 queue=369
+2026-03-28 15:41:31 HTTP 200 https://www.army.mil/rss/static/129.xml
+2026-03-28 15:41:33 Batch 1 [workers=1] | crawled=1 queue=368
+2026-03-28 15:41:37 HTTP 200 https://www.army.mil/rss/static/130.xml
+2026-03-28 15:41:39 Batch 1 [workers=1] | crawled=1 queue=367
+2026-03-28 15:41:42 HTTP 200 https://www.army.mil/rss/static/132.xml
+2026-03-28 15:41:45 Batch 1 [workers=1] | crawled=1 queue=366
+2026-03-28 15:41:49 HTTP 200 https://www.army.mil/rss/static/133.xml
+2026-03-28 15:41:52 Batch 1 [workers=1] | crawled=1 queue=365
+2026-03-28 15:41:58 HTTP 200 https://www.army.mil/rss/static/134.xml
+2026-03-28 15:42:00 Batch 1 [workers=1] | crawled=1 queue=364
+2026-03-28 15:42:05 HTTP 200 https://www.army.mil/rss/static/135.xml
+2026-03-28 15:42:07 Batch 1 [workers=1] | crawled=1 queue=363
+2026-03-28 15:42:13 HTTP 200 https://www.army.mil/rss/static/136.xml
+2026-03-28 15:42:16 Batch 1 [workers=1] | crawled=1 queue=362
+2026-03-28 15:42:20 HTTP 200 https://www.army.mil/rss/static/137.xml
+2026-03-28 15:42:21 Batch 1 [workers=1] | crawled=1 queue=361
+2026-03-28 15:42:27 HTTP 200 https://www.army.mil/rss/static/139.xml
+2026-03-28 15:42:29 Batch 1 [workers=1] | crawled=1 queue=360
+2026-03-28 15:42:32 HTTP 200 https://www.army.mil/rss/static/140.xml
+2026-03-28 15:42:34 Batch 1 [workers=1] | crawled=1 queue=359
+2026-03-28 15:42:38 HTTP 200 https://www.army.mil/rss/static/141.xml
+2026-03-28 15:42:40 Batch 1 [workers=1] | crawled=1 queue=358
+2026-03-28 15:42:46 HTTP 200 https://www.army.mil/rss/static/142.xml
+2026-03-28 15:42:48 Batch 1 [workers=1] | crawled=1 queue=357
+2026-03-28 15:42:53 HTTP 200 https://www.army.mil/rss/static/143.xml
+2026-03-28 15:42:56 Batch 1 [workers=1] | crawled=1 queue=356
+2026-03-28 15:43:01 HTTP 200 https://www.army.mil/rss/static/144.xml
+2026-03-28 15:43:04 Batch 1 [workers=1] | crawled=1 queue=355
+2026-03-28 15:43:09 HTTP 200 https://www.army.mil/rss/static/148.xml
+2026-03-28 15:43:12 Batch 1 [workers=1] | crawled=1 queue=354
+2026-03-28 15:43:16 HTTP 200 https://www.army.mil/rss/static/157.xml
+2026-03-28 15:43:18 Batch 1 [workers=1] | crawled=1 queue=353
+2026-03-28 15:43:22 HTTP 200 https://www.army.mil/rss/static/158.xml
+2026-03-28 15:43:26 Batch 1 [workers=1] | crawled=1 queue=352
+2026-03-28 15:43:32 HTTP 200 https://www.army.mil/rss/static/159.xml
+2026-03-28 15:43:36 Batch 1 [workers=1] | crawled=1 queue=351
+2026-03-28 15:43:43 HTTP 200 https://www.army.mil/rss/static/160.xml
+[NuScrape] Scan stopped by user @ 2026-03-28 15:43:44.784399
+
+[*] Received signal 15 — shutting down cleanly...
+
+============================================================
+[NuScrape] Starting scan → https://api.army.mil/  @ 2026-03-28 15:43:57.899320
+============================================================
+[*] Stealth profile: GHOST
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 15:43:58 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 15:43:58 Skipping 53 URLs crawled in the last 14 days.
+2026-03-28 15:43:58 Starting NuScrape → https://api.army.mil/
+2026-03-28 15:43:58 robots.txt: ignored (--ignore-robots)
+2026-03-28 15:43:58 Fetching sitemap...
+2026-03-28 15:44:04 No sitemap.xml for https://api.army.mil
+2026-03-28 15:44:05 [SSRF] OOB client registered: a9cee7807cec06a37e6d.interact.sh
+2026-03-28 15:44:05 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 15:44:09 HTTP 200 https://api.army.mil/
+2026-03-28 15:44:11 JS-heavy page detected, switching to Playwright: https://api.army.mil/
+2026-03-28 15:44:11 Playwright rendering: https://api.army.mil/
+2026-03-28 15:44:12 XHR: GET https://api.army.mil/docs?api-docs.json
+2026-03-28 15:44:15 Playwright got 83196 bytes from https://api.army.mil/
+2026-03-28 15:44:15 Playwright content richer — using rendered HTML
+2026-03-28 15:44:15 Parsed: https://api.army.mil/
+2026-03-28 15:44:28 WCP probe: https://api.army.mil/ header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 15:44:28 [Baseline] https://api.army.mil/ — status=200 len=1024±0 fp=6c4990bba3524736
+2026-03-28 15:44:34 WCP probe: https://api.army.mil/ header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 15:44:40 WCP probe: https://api.army.mil/ header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 15:44:43 WCP probe: https://api.army.mil/ header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 15:44:49 WCP probe: https://api.army.mil/ header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 15:44:51 WCP probe: https://api.army.mil/ header=X-Forwarded-For: 127.0.0.1
+2026-03-28 15:44:57 WCP cloak probe: https://api.army.mil/?param=cloak-probe-9d4e
+2026-03-28 15:45:10 [Baseline] https://api.army.mil/docs — status=200 len=40060±0 fp=6d686307b15a6a70
+2026-03-28 15:45:10 Waiting for 3 JS analysis threads to complete...
+2026-03-28 15:45:15 JS analysis: 1 findings in https://api.army.mil/docs/asset/swagger-ui-standalone-preset.js?v=3b7a17addbbd652446d4d05c2d0ef4fb
+2026-03-28 15:45:19 JS analysis: 3 findings in https://api.army.mil/docs/asset/swagger-ui-bundle.js?v=28cd9f32abf597b8d69c34ed877404d4
+2026-03-28 15:45:20 JS analysis: 2 findings in https://api.army.mil/assets/js/swagger-workaround.js
+2026-03-28 15:45:20 Probing 3 JS-discovered endpoints unauthenticated...
+
+================================================================
+  !! MEDIUM ALERT: JS ENDPOINT — SENSITIVE DATA EXPOSED !!
+  Target     : https://api.army.mil/docs?api-docs.json
+  Detail     : Unauthenticated GET returned 1 non-generic email address(es)
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 15:45:24
+================================================================
+
+2026-03-28 15:45:24  JS endpoint exposes email(s) (1 non-generic): https://api.army.mil/docs?api-docs.json
+2026-03-28 15:45:35 JS endpoint probe complete — 3 probed.
+2026-03-28 15:45:35 Done! Crawled 1 pages.
+[NuScrape] Scan completed cleanly (exit 0) for https://api.army.mil/.
+
+============================================================
+[NuScrape] Starting scan → https://ig.army.mil/  @ 2026-03-28 15:47:34.204494
+============================================================
+[*] Stealth profile: GHOST
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 15:47:34 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 15:47:34 Skipping 54 URLs crawled in the last 14 days.
+2026-03-28 15:47:34 Starting NuScrape → https://ig.army.mil/
+2026-03-28 15:47:34 robots.txt: ignored (--ignore-robots)
+2026-03-28 15:47:34 Fetching sitemap...
+2026-03-28 15:47:39 No sitemap.xml for https://ig.army.mil
+2026-03-28 15:47:40 [SSRF] OOB client registered: 3c3c3726d09371b5eab4.interact.sh
+2026-03-28 15:47:40 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 15:47:45 HTTP 403 https://ig.army.mil/
+2026-03-28 15:47:47 Done! Crawled 0 pages.
+[NuScrape] Scan completed cleanly (exit 0) for https://ig.army.mil/.

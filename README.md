@@ -91,6 +91,7 @@ python3 main.py -D <url> [options]
 | `--no-skip-google-tracking` | off | Crawl Google tracking, Maps, and Fonts CDN URLs (skipped by default) |
 | `--stealth` | `LOUD` | Stealth profile: `LOUD` (fast), `NORMAL` (moderate delays), `GHOST` (slow, rotated UAs, randomised) |
 | `--bug-bounty-header` | — | Injects `X-Bug-Bounty: <value>` into all requests — required by some bug bounty programs |
+| `--scope` | — | Path to a HackerOne scope CSV file (`asset_identifier`, `asset_type`, `instruction`, `max_severity`). In-scope assets (URL/WILDCARD/DOMAIN with `instruction != exclude`) are treated as valid crawl targets alongside the primary domain. Excluded assets are skipped entirely regardless of other scope settings. |
 | `--active-probes` | off | Enable payload-injecting checks: path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT), WebSocket security probes (origin validation, auth, scheme), XXE injection (XML/SOAP entity expansion), prototype pollution (server-side body/query probes + client-side JS sink detection), and HTTP request smuggling (CL.TE, TE.CL, TE.TE via raw sockets). **Only use against targets you are authorised to test.** |
 
 **Examples:**
@@ -113,11 +114,27 @@ python3 main.py -D https://example.com --stealth GHOST --bug-bounty-header "Hack
 
 # Full active scan with payload-injecting checks (authorised targets only)
 python3 main.py -D https://example.com --active-probes
+
+# Scan constrained to a HackerOne program's declared scope
+python3 main.py -D https://example.com --scope scope.csv --bug-bounty-header "HackerOne-username"
 ```
+
+#### HackerOne scope CSV format
+
+Export the scope from a HackerOne program's Assets page. The expected columns are:
+
+| Column | Description |
+|---|---|
+| `asset_identifier` | Domain, wildcard (`*.example.com`), or URL |
+| `asset_type` | `URL`, `WILDCARD`, or `DOMAIN` (other types are ignored) |
+| `instruction` | `exclude` to skip, anything else is treated as in-scope |
+| `max_severity` | Informational only — not used by NuScrape |
+
+Wildcard entries (`*.example.com`) match the apex domain and all subdomains. Non-wildcard entries match only the exact hostname. Excluded assets are skipped by every check in NuScrape regardless of `--same-domain-only`.
 
 ### Web UI
 
-Start `app.py` and open `http://localhost:5000`. The control panel sidebar lets you configure all scan options including stealth profile, bug bounty header, social media filter, Google tracking/CDN filter, and active probes. All views update live as the crawler runs.
+Start `app.py` and open `http://localhost:5000`. The control panel sidebar lets you configure all scan options including stealth profile, bug bounty header, scope CSV upload, social media filter, Google tracking/CDN filter, and active probes. All views update live as the crawler runs.
 
 **Views available in the UI:**
 

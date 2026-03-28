@@ -186,6 +186,12 @@ ACTIVE_PROBES    = False   # overridden by --active-probes CLI arg; gates payloa
 BASELINE_ENABLED = True    # overridden by --no-baseline CLI arg; disables per-endpoint baseline profiling
 TUTORIAL_MODE    = False   # overridden by --tutorial CLI arg; appends HOW TO VERIFY guidance to findings
 
+# HackerOne scope patterns — populated by load_hackerone_scope() when --scope is used.
+# HO_INCLUDE_PATTERNS: compiled regexes for in-scope assets (instruction != 'exclude')
+# HO_EXCLUDE_PATTERNS: compiled regexes for out-of-scope assets (instruction == 'exclude')
+HO_INCLUDE_PATTERNS: list = []
+HO_EXCLUDE_PATTERNS: list = []
+
 # ─────────────────────────────────────────────
 # Third-party CDN / external service exclusion
 # ─────────────────────────────────────────────
@@ -6080,13 +6086,97 @@ def parse_anchors_from_html(html_content):
     except Exception:
         return []
 
+def load_hackerone_scope(csv_path: str) -> tuple:
+    """
+    Parse a HackerOne scope CSV and return (includes, excludes) as lists of
+    compiled hostname-matching regex patterns.
+
+    Expected columns: asset_identifier, asset_type, instruction, max_severity
+    Only rows with asset_type URL, WILDCARD, or DOMAIN are processed.
+
+    Pattern construction:
+      *.example.com  →  ^(?:.+\\.)?example\\.com$   (matches example.com and all subdomains)
+      example.com    →  ^example\\.com$              (exact hostname match)
+    """
+    import csv as _csv
+    includes: list = []
+    excludes: list = []
+    try:
+        with open(csv_path, newline="", encoding="utf-8-sig") as f:
+            reader = _csv.DictReader(f)
+            for row in reader:
+                asset_type  = (row.get("asset_type") or "").strip().upper()
+                if asset_type not in ("URL", "WILDCARD", "DOMAIN"):
+                    continue
+                identifier  = (row.get("asset_identifier") or "").strip()
+                instruction = (row.get("instruction") or "").strip().lower()
+                if not identifier:
+                    continue
+                # Extract hostname from URL-type assets
+                if asset_type == "URL":
+                    if "://" not in identifier:
+                        identifier = "https://" + identifier
+                    host = urlparse(identifier).netloc or identifier
+                else:
+                    host = identifier
+                # Build regex: wildcard prefix → match domain and all subdomains
+                if host.startswith("*."):
+                    bare    = re.escape(host[2:])
+                    pattern = re.compile(r'^(?:.+\.)?' + bare + r'$', re.IGNORECASE)
+                else:
+                    host    = host.lstrip("*.")
+                    bare    = re.escape(host)
+                    pattern = re.compile(r'^' + bare + r'$', re.IGNORECASE)
+                if instruction == "exclude":
+                    excludes.append(pattern)
+                else:
+                    includes.append(pattern)
+        print(f"[scope] Loaded {len(includes)} in-scope and {len(excludes)} excluded "
+              f"pattern(s) from {csv_path}")
+    except Exception as exc:
+        print(f"[scope] Failed to load scope file '{csv_path}': {exc}")
+    return includes, excludes
+
+
 def is_in_scope(url):
-    """Return True if url is on the same domain as the scan target when SAME_DOMAIN_ONLY is set."""
+    """
+    Return True if url is within the current scan scope.
+
+    Priority order:
+      1. HackerOne exclude patterns (--scope) always win — returns False.
+      2. If HackerOne include patterns are loaded, the URL must match the start
+         domain or one of the include patterns — returns False otherwise.
+      3. If --same-domain-only is set, the URL must be on the start domain.
+      4. Default: all URLs are in scope.
+    """
+    try:
+        url_host = urlparse(url).netloc.lstrip("www.")
+    except Exception:
+        return False
+
+    # 1. Excludes always win
+    for pat in HO_EXCLUDE_PATTERNS:
+        if pat.match(url_host):
+            return False
+
+    # 2. If include patterns are loaded, restrict to start domain + includes
+    if HO_INCLUDE_PATTERNS:
+        try:
+            target_host = urlparse(START_URL).netloc.lstrip("www.")
+        except Exception:
+            target_host = ""
+        if target_host and (url_host == target_host or url_host.endswith("." + target_host)):
+            return True
+        for pat in HO_INCLUDE_PATTERNS:
+            if pat.match(url_host):
+                return True
+        return False
+
+    # 3. Default same-domain-only check
     if not SAME_DOMAIN_ONLY:
         return True
     try:
         target_host = urlparse(START_URL).netloc.lstrip("www.")
-        url_host    = urlparse(url).netloc.lstrip("www.")
         return url_host == target_host or url_host.endswith("." + target_host)
     except Exception:
         return False
@@ -15745,8 +15835,15 @@ if __name__ == "__main__":
                              "(alternative to -D for multi-domain scanning)")
     parser.add_argument("--parallel", action="store_true",
                         help="Run up to 3 domain scans concurrently (requires --domains)")
+    parser.add_argument("--scope", metavar="FILE",
+                        help="Path to a HackerOne scope CSV file "
+                             "(columns: asset_identifier, asset_type, instruction, max_severity). "
+                             "In-scope assets expand crawl scope; excluded assets are skipped entirely.")
 
     args = parser.parse_args()
+
+    if args.scope:
+        HO_INCLUDE_PATTERNS, HO_EXCLUDE_PATTERNS = load_hackerone_scope(args.scope)
 
     STEALTH_PROFILE = args.stealth
     if STEALTH_PROFILE != "LOUD":
@@ -15867,6 +15964,8 @@ if __name__ == "__main__":
         print("  --stealth LOUD|NORMAL|GHOST  Stealth profile (default: LOUD)")
         print("  --domains FILE          Scan multiple domains from a text file (one per line)")
         print("  --parallel              Run up to 3 domain scans concurrently (requires --domains)")
+        print("  --scope FILE            HackerOne scope CSV — restricts crawl to in-scope assets,")
+        print("                          skips excluded assets entirely")
         print("  --no-baseline           Disable per-endpoint baseline profiling (faster, less accurate)")
         print("  --tutorial              Append HOW TO VERIFY guidance to each finding\n")
 

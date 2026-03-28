@@ -153,6 +153,13 @@ def api_start():
     active_probes   = bool(data.get("active_probes", False))
     no_baseline     = bool(data.get("no_baseline", False))
     tutorial_mode   = bool(data.get("tutorial_mode", False))
+    scope_file      = data.get("scope_file", "").strip()
+    # Validate that the path refers to a temp file we created — never allow
+    # arbitrary filesystem paths supplied by the client.
+    if scope_file and not (
+        scope_file.startswith(BASE_DIR) and os.path.isfile(scope_file)
+    ):
+        scope_file = ""
 
     # Multi-domain: optional list of domains from the UI textarea
     domains_list = data.get("domains_list", [])
@@ -219,6 +226,8 @@ def api_start():
             cmd.append("--no-baseline")
         if tutorial_mode:
             cmd.append("--tutorial")
+        if scope_file:
+            cmd.extend(["--scope", scope_file])
 
         with log_lock:
             log_buffer.clear()
@@ -232,6 +241,25 @@ def api_start():
         _launch_crawler(first_domain, cmd)
 
     return jsonify({"ok": True})
+
+@app.route("/api/upload-scope", methods=["POST"])
+def api_upload_scope():
+    """Accept a HackerOne scope CSV upload and save it to a temp file.
+    Returns {"ok": True, "path": "<absolute path>"} on success."""
+    import tempfile
+    f = request.files.get("scope_file")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "error": "No file provided"}), 400
+    if not f.filename.lower().endswith(".csv"):
+        return jsonify({"ok": False, "error": "File must be a .csv"}), 400
+    tf = tempfile.NamedTemporaryFile(
+        mode="wb", suffix=".csv", delete=False, dir=BASE_DIR,
+        prefix="nuscrape_scope_",
+    )
+    f.save(tf.name)
+    tf.close()
+    return jsonify({"ok": True, "path": tf.name})
+
 
 @app.route("/api/stop", methods=["POST"])
 def api_stop():
@@ -811,6 +839,13 @@ td a:hover{text-decoration:underline}
           style="width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.35rem .5rem;border-radius:4px;outline:none;transition:border-color .15s,color .15s">
         <div style="font-size:.62rem;color:var(--dim);margin-top:.25rem;font-family:var(--mono)">Injects X-Bug-Bounty header into all requests — required by some bug bounty programs</div>
       </div>
+      <div style="margin-bottom:.7rem">
+        <label style="font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:.4rem">HackerOne Scope CSV</label>
+        <input type="file" id="scopeFile" accept=".csv"
+          style="width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .5rem;border-radius:4px;outline:none">
+        <div style="font-size:.62rem;color:var(--dim);margin-top:.25rem;font-family:var(--mono)">Optional — restricts scan to in-scope assets and skips excluded assets</div>
+        <div id="scopeStatus" style="font-size:.62rem;color:var(--dim);margin-top:.2rem;font-family:var(--mono);display:none"></div>
+      </div>
       <button class="btn btn-start" id="btnStart" onclick="startCrawler()">▶ Start Crawler</button>
       <button class="btn btn-stop"  id="btnStop"  onclick="stopCrawler()" disabled>■ Stop Crawler</button>
       <div class="run-info" id="runInfo" style="display:none">
@@ -1325,6 +1360,23 @@ async function startCrawler(){
 
   if(domainsList.length===0 && !singleDomain){alert('Enter a target domain');return}
 
+  // Upload scope CSV first if one is selected
+  let scopeFilePath='';
+  const scopeInput=document.getElementById('scopeFile');
+  if(scopeInput&&scopeInput.files&&scopeInput.files.length>0){
+    const scopeStatus=document.getElementById('scopeStatus');
+    scopeStatus.style.display='block';
+    scopeStatus.textContent='Uploading scope file…';
+    const fd=new FormData();
+    fd.append('scope_file',scopeInput.files[0]);
+    try{
+      const ur=await fetch('/api/upload-scope',{method:'POST',body:fd});
+      const ud=await ur.json();
+      if(ud.ok){scopeFilePath=ud.path;scopeStatus.textContent='Scope loaded ✓';}
+      else{scopeStatus.textContent='Scope upload failed: '+ud.error;}
+    }catch(e){scopeStatus.textContent='Scope upload error: '+e;}
+  }
+
   const payload={
     domain: domainsList.length>0 ? domainsList[0] : singleDomain,
     rate_min:parseFloat(document.getElementById('rateMin').value)||1,
@@ -1343,6 +1395,7 @@ async function startCrawler(){
     ...(document.getElementById('bugBountyToggle').checked && document.getElementById('bugBountyValue').value.trim()
       ? {bug_bounty_header: document.getElementById('bugBountyValue').value.trim()}
       : {}),
+    ...(scopeFilePath ? {scope_file: scopeFilePath} : {}),
   };
   if(domainsList.length>1){
     payload.domains_list=domainsList;
