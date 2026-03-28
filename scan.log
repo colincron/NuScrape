@@ -372,3 +372,158 @@ AttributeError: module 'websockets.exceptions' has no attribute 'RejectHandshake
 2026-03-28 12:52:06 CMDi probe: https://www.cookiebot.com/en/what-is-behind-powered-by-cookiebot/ param=utm_medium
 2026-03-28 12:52:27 [Context] CMDi param=utm_content in js_string context — using context-specific payloads
 2026-03-28 12:52:27 CMDi probe: https://www.cookiebot.com/en/what-is-behind-powered-by-cookiebot/ param=utm_content
+
+============================================================
+[NuScrape] Starting scan → https://tahoechamber.org/  @ 2026-03-28 12:55:09.373470
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Tutorial mode enabled — HOW TO VERIFY guidance will be appended to findings
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 12:55:09 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 12:55:09 Skipping 3 URLs crawled in the last 14 days.
+2026-03-28 12:55:09 Starting NuScrape → https://tahoechamber.org/
+2026-03-28 12:55:09 robots.txt: ignored (--ignore-robots)
+2026-03-28 12:55:09 Fetching sitemap...
+2026-03-28 12:55:11 Sitemap found 5 URLs for https://tahoechamber.org
+2026-03-28 12:55:11 Batch 3 [workers=3] | crawled=0 queue=3
+2026-03-28 12:55:13 ERROR: Async fetch failed for https://tahoechamber.org/page-sitemap.xml: 400, message='Can not decode content-encoding: brotli (br). Please install `Brotli`', url='https://tahoechamber.org/page-sitemap.xml'
+2026-03-28 12:55:13 ERROR: Async fetch failed for https://tahoechamber.org/: 400, message='Can not decode content-encoding: brotli (br). Please install `Brotli`', url='https://tahoechamber.org/'
+2026-03-28 12:55:14 ERROR: Async fetch failed for https://tahoechamber.org/post-sitemap.xml: 400, message='Can not decode content-encoding: brotli (br). Please install `Brotli`', url='https://tahoechamber.org/post-sitemap.xml'
+2026-03-28 12:55:17 Batch 3 [workers=3] | crawled=0 queue=0
+2026-03-28 12:55:18 HTTP 200 https://tahoechamber.org/author-sitemap.xml
+2026-03-28 12:55:19 HTTP 200 https://tahoechamber.org/post_tag-sitemap.xml
+2026-03-28 12:55:19 HTTP 200 https://tahoechamber.org/category-sitemap.xml
+2026-03-28 12:55:21 ERROR: probe_js_endpoints: DB query failed: no such table: JSFindings
+2026-03-28 12:55:21 Done! Crawled 0 pages.
+[NuScrape] Scan completed cleanly (exit 0) for https://tahoechamber.org/.
+
+============================================================
+[NuScrape] Starting scan → https://tahoechamber.org/  @ 2026-03-28 13:13:29.849000
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Tutorial mode enabled — HOW TO VERIFY guidance will be appended to findings
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 13:13:30 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 13:13:30 Starting NuScrape → https://tahoechamber.org/
+2026-03-28 13:13:30 robots.txt: ignored (--ignore-robots)
+2026-03-28 13:13:30 Fetching sitemap...
+2026-03-28 13:13:32 Sitemap found 0 URLs for https://tahoechamber.org
+2026-03-28 13:13:32 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 13:13:33 ERROR: Async fetch failed for https://tahoechamber.org/: 400, message='Can not decode content-encoding: brotli (br). Please install `Brotli`', url='https://tahoechamber.org/'
+2026-03-28 13:13:34 ERROR: probe_js_endpoints: DB query failed: no such table: JSFindings
+2026-03-28 13:13:34 Done! Crawled 0 pages.
+[NuScrape] Scan completed cleanly (exit 0) for https://tahoechamber.org/.
+
+============================================================
+[NuScrape] Starting scan → https://tahoechamber.org/  @ 2026-03-28 13:16:22.864428
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Tutorial mode enabled — HOW TO VERIFY guidance will be appended to findings
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 13:16:23 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 13:16:23 Starting NuScrape → https://tahoechamber.org/
+2026-03-28 13:16:23 robots.txt: ignored (--ignore-robots)
+2026-03-28 13:16:23 Fetching sitemap...
+2026-03-28 13:16:25 Sitemap found 5 URLs for https://tahoechamber.org
+2026-03-28 13:16:25 Batch 3 [workers=3] | crawled=0 queue=3
+2026-03-28 13:16:26 ERROR: Async fetch failed for https://tahoechamber.org/: 400, message='Can not decode content-encoding: brotli (br). Please install `Brotli`', url='https://tahoechamber.org/'
+2026-03-28 13:16:26 HTTP 200 https://tahoechamber.org/page-sitemap.xml
+2026-03-28 13:16:27 ERROR: Async fetch failed for https://tahoechamber.org/post-sitemap.xml: 400, message='Can not decode content-encoding: brotli (br). Please install `Brotli`', url='https://tahoechamber.org/post-sitemap.xml'
+2026-03-28 13:16:29 Batch 3 [workers=3] | crawled=0 queue=0
+2026-03-28 13:16:30 HTTP 200 https://tahoechamber.org/category-sitemap.xml
+2026-03-28 13:16:30 HTTP 200 https://tahoechamber.org/author-sitemap.xml
+2026-03-28 13:16:31 ERROR: Async fetch failed for https://tahoechamber.org/post_tag-sitemap.xml: 400, message='Can not decode content-encoding: brotli (br). Please install `Brotli`', url='https://tahoechamber.org/post_tag-sitemap.xml'
+2026-03-28 13:16:33 ERROR: probe_js_endpoints: DB query failed: no such table: JSFindings
+2026-03-28 13:16:33 Done! Crawled 0 pages.
+[NuScrape] Scan completed cleanly (exit 0) for https://tahoechamber.org/.
+
+============================================================
+[NuScrape] Starting scan → https://tahoechamber.org/  @ 2026-03-28 13:18:29.784976
+============================================================
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Tutorial mode enabled — HOW TO VERIFY guidance will be appended to findings
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+2026-03-28 13:18:30 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 13:18:30 Skipping 3 URLs crawled in the last 14 days.
+2026-03-28 13:18:30 Starting NuScrape → https://tahoechamber.org/
+2026-03-28 13:18:30 robots.txt: ignored (--ignore-robots)
+2026-03-28 13:18:30 Fetching sitemap...
+2026-03-28 13:18:32 Sitemap found 5 URLs for https://tahoechamber.org
+2026-03-28 13:18:32 Batch 3 [workers=3] | crawled=0 queue=0
+2026-03-28 13:18:33 HTTP 200 https://tahoechamber.org/post-sitemap.xml
+2026-03-28 13:18:33 HTTP 200 https://tahoechamber.org/
+2026-03-28 13:18:34 HTTP 200 https://tahoechamber.org/post_tag-sitemap.xml
+2026-03-28 13:18:36 JS-heavy page detected, switching to Playwright: https://tahoechamber.org/
+2026-03-28 13:18:36 Playwright rendering: https://tahoechamber.org/
+2026-03-28 13:18:37 XHR: POST https://tahoechamber.org/cdn-cgi/challenge-platform/h/g/jsd/oneshot/ea2d291c0fdc/0.36707159097325237:1774424211:9_pSV23kWGmNtldQToc5YDBzJFUfKD8QS_h75YB-Zx0/9e384b8708ae4bc9
+2026-03-28 13:18:38 XHR: POST https://analytics.google.com/g/collect?v=2&tid=G-NWCVTJRRZ4&gtm=45je63p1v9108858612za20g&_p=1774718317624&_gaz=1&gcd=13l3l3l3l1l1&npa=0&dma=0&cid=1466211956.1774718318&ul=en-us&sr=1280x720&ir=1&uaa=x86&uab=64&uafvl=Not%253AA-Brand%3B99.0.0.0%7CHeadlessChrome%3B145.0.7632.6%7CChromium%3B145.0.7632.6&uamb=0&uam=&uap=macOS&uapv=10_15_7&uaw=0&are=1&frm=0&pscdl=noapi&_eu=EAAIAGA&_s=1&tag_exp=0~115938465~115938468~117484252~117884344&sid=1774718318&sct=1&seg=0&dl=https%3A%2F%2Ftahoechamber.org%2F&dt=Tahoe%20Chamber%20-%20Lake%20Tahoe%20South%20Shore%20Chamber%20of%20Commerce&en=page_view&_fv=1&_ss=1&tfd=1980
+2026-03-28 13:18:38 XHR: POST https://tahoechamber.org/?ob=open-bridge/events
+2026-03-28 13:18:38 XHR: GET https://listgrowth.ctctcdn.com/v1/9ed795a35b83317777ea7375c53d4468.json
+2026-03-28 13:18:39 XHR: POST https://www.google.com/recaptcha/api2/reload?k=6LeosTsiAAAAAId_0wnUWcY7C6K4IUz6vLhoyT59
+2026-03-28 13:18:39 XHR: POST https://www.google.com/recaptcha/api2/clr?k=6LeosTsiAAAAAId_0wnUWcY7C6K4IUz6vLhoyT59
+2026-03-28 13:18:39 XHR: POST https://www.google.com/recaptcha/api2/reload?k=6LfHrSkUAAAAAPnKk5cT6JuKlKPzbwyTYuO8--Vr
+2026-03-28 13:18:40 XHR: POST https://m.stripe.com/6
+2026-03-28 13:18:43 XHR: POST https://analytics.google.com/g/collect?v=2&tid=G-NWCVTJRRZ4&gtm=45je63p1v9108858612za20g&_p=1774718317624&gcd=13l3l3l3l1l1&npa=0&dma=0&cid=1466211956.1774718318&ul=en-us&sr=1280x720&ir=1&uaa=x86&uab=64&uafvl=Not%253AA-Brand%3B99.0.0.0%7CHeadlessChrome%3B145.0.7632.6%7CChromium%3B145.0.7632.6&uamb=0&uam=&uap=macOS&uapv=10_15_7&uaw=0&are=1&frm=0&pscdl=noapi&_eu=kAAIAGQ&_s=2&tag_exp=0~115938465~115938468~117484252~117884344&sid=1774718318&sct=1&seg=0&dl=https%3A%2F%2Ftahoechamber.org%2F&dt=Tahoe%20Chamber%20-%20Lake%20Tahoe%20South%20Shore%20Chamber%20of%20Commerce&_tu=wAQ&en=error&ep.event_category=pws-2&ep.event_label=tahoechamber&_et=24&tfd=7004
+2026-03-28 13:18:43 Playwright got 336230 bytes from https://tahoechamber.org/
+2026-03-28 13:18:43 Playwright content richer — using rendered HTML
+2026-03-28 13:18:43 Parsed: https://tahoechamber.org/
+2026-03-28 13:18:43 SSRF candidates queued on tahoechamber.org: url
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://tahoechamber.org/
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://tahoechamber.org/ | Entropy: 5.09 | Class: base64 | Context: 'wyTYuO8--Vr&amp;bft=0dAFcWeA4mGLMOTK8WwXBID7ztMRndy7wWBTIqABTV9Fa8hZrBaDRbfHh0aC-NrMOF_d3KxcFxSCeSB7'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:18:43
+================================================================
+
+2026-03-28 13:18:43 [!] Entropy: high entropy string (entropy=5.09) at https://tahoechamber.org/
+2026-03-28 13:18:46 [SSRF] interact.sh registration failed (HTTPSConnectionPool(host='interact.sh', port=443): Max retries exceeded with url) — blind fallback active
+2026-03-28 13:18:46 SSRF OOB probe: https://tahoechamber.org/ param=url
+
+================================================================
+  !! MEDIUM ALERT: SSRF CANDIDATE (OOB UNAVAILABLE) !!
+  Target     : https://tahoechamber.org/
+  Detail     : Parameter 'url' on https://tahoechamber.org/ accepts URLs. OOB detection unavailable — interact.sh registration failed at startup. Manual verification required.
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:18:46
+================================================================
+
+2026-03-28 13:18:48 Path traversal probe: https://tahoechamber.org/wp-json/oembed/1.0/embed param=url
+2026-03-28 13:18:48 [Baseline] https://tahoechamber.org/wp-json/oembed/1.0/embed — status=200 len=2412±0 fp=7ed728eecb5d544f
