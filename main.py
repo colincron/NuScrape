@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import argparse
-import sqlite3, re, random, sys, socket, ssl, time, json, os, heapq, itertools, signal
+import sqlite3, re, random, sys, socket, ssl, time, json, os, heapq, itertools, signal, base64, secrets
 from collections import defaultdict
 import asyncio
 import aiohttp
@@ -8641,19 +8641,19 @@ def flag_ssrf_candidates(page_url, html_content):
 
 
 # ─────────────────────────────────────────────
-# SSRF OOB confirmation (interactsh)
+# SSRF OOB confirmation (interact.sh HTTP API)
 # ─────────────────────────────────────────────
 
-# Optional dependency — graceful fallback if not installed
-try:
-    from interactsh.client import InteractshClient as _InteractshClient
-    _INTERACTSH_AVAILABLE = True
-except ImportError:
-    _INTERACTSH_AVAILABLE = False
+_INTERACTSH_SERVER = "https://interact.sh"
+# Set True once HTTP registration with interact.sh succeeds at startup
+_INTERACTSH_AVAILABLE = False
 
-# Session-scoped OOB client (one instance per process, shared across domains)
+# Session-scoped OOB state (one instance per process, shared across domains)
+# When registered: dict with correlation_id, secret_key, private_key
+# Before registration / on failure: None
 _ssrf_oob_client: object = None
 _ssrf_oob_base_url: str  = ""
+_ssrf_oob_tried: bool    = False   # prevents repeated registration attempts
 
 # Per-domain dedup — (base_url, param) pairs already OOB-probed
 _ssrf_tested: set = set()
@@ -8678,48 +8678,112 @@ _SSRF_CLOUD_PROBES: list = [
 
 def _ssrf_setup_oob() -> tuple:
     """
-    Lazily initialise the interactsh OOB client for the current scan session.
-    Returns (client, oob_url) on success, or (None, "") if the package is not
-    installed or registration fails.
+    Register a session with the interact.sh HTTP API for OOB SSRF detection.
+    Returns (session_dict, oob_domain) on success, or (None, "") on failure.
+    The OOB domain is built as <correlation-id>.interact.sh.
+    Only attempts registration once per process; returns cached result thereafter.
     """
-    global _ssrf_oob_client, _ssrf_oob_base_url
+    global _ssrf_oob_client, _ssrf_oob_base_url, _INTERACTSH_AVAILABLE, _ssrf_oob_tried
     if _ssrf_oob_client is not None:
         return _ssrf_oob_client, _ssrf_oob_base_url
-    if not _INTERACTSH_AVAILABLE:
+    if _ssrf_oob_tried:
         return None, ""
+    _ssrf_oob_tried = True
     try:
-        client = _InteractshClient(
-            server="interact.sh",
-            token="",
-            disable_http_fallback=False,
+        from cryptography.hazmat.primitives.asymmetric import rsa as _rsa
+        from cryptography.hazmat.primitives import serialization as _serial
+        # Generate RSA-2048 key pair — interact.sh uses it to encrypt the AES key
+        # that protects poll responses.
+        private_key = _rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_der = private_key.public_key().public_bytes(
+            encoding=_serial.Encoding.DER,
+            format=_serial.PublicFormat.SubjectPublicKeyInfo,
         )
-        url = getattr(client, "interactsh_url", None) or ""
-        if not url:
+        corr_id    = secrets.token_hex(10)       # 20-char hex correlation-id
+        secret_key = secrets.token_urlsafe(16)
+        resp = requests.post(
+            f"{_INTERACTSH_SERVER}/api/v1/register",
+            json={
+                "public-key":     base64.b64encode(pub_der).decode(),
+                "secret-key":     secret_key,
+                "correlation-id": corr_id,
+            },
+            timeout=10,
+        )
+        if resp.status_code not in (200, 201):
+            print(timestamp() + f" [SSRF] interact.sh registration failed: "
+                  f"HTTP {resp.status_code} — blind fallback active")
             return None, ""
-        _ssrf_oob_client   = client
-        _ssrf_oob_base_url = url
-        print(timestamp() + f" [SSRF] OOB client registered: {url}")
-        return client, url
+        oob_domain = f"{corr_id}.interact.sh"
+        session = {
+            "correlation_id": corr_id,
+            "secret_key":     secret_key,
+            "private_key":    private_key,
+        }
+        _ssrf_oob_client   = session
+        _ssrf_oob_base_url = oob_domain
+        _INTERACTSH_AVAILABLE = True
+        print(timestamp() + f" [SSRF] OOB client registered: {oob_domain}")
+        return session, oob_domain
     except Exception as exc:
-        print(timestamp() + f" [SSRF] interactsh-client init failed "
+        print(timestamp() + f" [SSRF] interact.sh registration failed "
               f"({str(exc)[:80]}) — blind fallback active")
         return None, ""
 
 
 def _ssrf_poll_interactions(client, timeout_s: int = 10) -> list:
     """
-    Poll the interactsh client for up to *timeout_s* seconds, checking every
-    second.  Returns a list of interaction dicts (may be empty on timeout).
-    Each dict contains at least: protocol, remote-address (varies by version).
+    Poll interact.sh GET /api/v1/poll for up to *timeout_s* seconds, checking
+    every second.  Returns a list of interaction dicts (may be empty on timeout).
+    Each dict contains at least: protocol, remote-address.
+
+    interact.sh encrypts poll responses: the AES key is RSA-OAEP encrypted with
+    the client's public key; each interaction item is AES-CFB(IV||ciphertext).
     """
     if client is None:
         return []
+    from cryptography.hazmat.primitives.asymmetric import padding as _pad
+    from cryptography.hazmat.primitives import hashes as _hashes
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+    corr_id     = client["correlation_id"]
+    secret_key  = client["secret_key"]
+    private_key = client["private_key"]
+
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         try:
-            data = client.get_interactions()
-            if data:
-                return data if isinstance(data, list) else (data.get("data") or [])
+            resp = requests.get(
+                f"{_INTERACTSH_SERVER}/api/v1/poll",
+                params={"id": corr_id, "secret": secret_key},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                body        = resp.json()
+                raw_items   = body.get("data") or []
+                aes_key_b64 = body.get("aes_key", "")
+                if raw_items and aes_key_b64:
+                    # Decrypt the per-session AES key with our RSA private key
+                    aes_key = private_key.decrypt(
+                        base64.b64decode(aes_key_b64),
+                        _pad.OAEP(
+                            mgf=_pad.MGF1(algorithm=_hashes.SHA256()),
+                            algorithm=_hashes.SHA256(),
+                            label=None,
+                        ),
+                    )
+                    interactions = []
+                    for item in raw_items:
+                        try:
+                            raw = base64.b64decode(item)
+                            iv, ciphertext = raw[:16], raw[16:]
+                            dec = Cipher(algorithms.AES(aes_key), modes.CFB(iv)).decryptor()
+                            plain = dec.update(ciphertext) + dec.finalize()
+                            interactions.append(json.loads(plain))
+                        except Exception:
+                            pass
+                    if interactions:
+                        return interactions
         except Exception:
             pass
         time.sleep(1)
@@ -8810,7 +8874,7 @@ def _ssrf_check_cloud_metadata(
 
 def check_ssrf_oob(page_url: str, html_content) -> None:
     """
-    OOB-confirmed SSRF detection using interactsh.
+    OOB-confirmed SSRF detection using the interact.sh HTTP API.
 
     Reads candidates stored by flag_ssrf_candidates (which runs unconditionally
     earlier in the crawl loop) and runs OOB confirmation for each one.  This
@@ -8824,7 +8888,7 @@ def check_ssrf_oob(page_url: str, html_content) -> None:
                needs manual verification).
       MEDIUM — WAF detected: OOB interaction may have been blocked; noted
                in detail.
-      MEDIUM — interactsh-client not installed (blind fallback — manual
+      MEDIUM — interact.sh registration failed (blind fallback — manual
                verification required).
 
     OOB-confirmed endpoints are additionally probed for cloud metadata
@@ -8905,9 +8969,8 @@ def check_ssrf_oob(page_url: str, html_content) -> None:
                 "MEDIUM",
                 base,
                 f"Parameter '{param}' on {base} accepts URLs. "
-                f"OOB detection unavailable — install interactsh-client "
-                f"(pip install interactsh-client) for automated confirmation. "
-                f"Manual verification required.{waf_note}",
+                f"OOB detection unavailable — interact.sh registration failed "
+                f"at startup. Manual verification required.{waf_note}",
             )
             continue
 
