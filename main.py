@@ -14907,31 +14907,79 @@ def _idor_response_fingerprint(resp):
 
 def _idor_requires_auth(url):
     """
-    Fetch URL without any session cookies. If we get a redirect to login
-    or a 401/403, the endpoint is auth-gated — worth IDOR testing.
-    Returns (requires_auth: bool, response_fingerprint)
+    Determine whether *url* is auth-gated using several independent signals.
+    Returns (requires_auth: bool, no_cookie_fingerprint).
+
+    Signals checked (any one is sufficient):
+      1. HTTP 401 or 403 on the no-cookie probe.
+      2. Redirect to a login/auth/SSO URL on the no-cookie probe.
+      3. Response body contains login-form markers.
+      4. URL path contains a segment from _IDOR_AUTH_PATH_RE (/account/,
+         /admin/, /api/user/, /my/, etc.).
+      5. The no-cookie response sets a new session cookie (Set-Cookie contains
+         a typical session/token name), indicating the server is issuing a new
+         unauthenticated session — the endpoint enforces a session boundary.
+      6. Response body size differs significantly (>20 % relative delta) between
+         the no-cookie probe and the crawler's current session — evidence that
+         authenticated users see different (more) content.
     """
     try:
-        # Use a clean session with no cookies
         stealth_delay(urlparse(url).netloc)
-        resp = _get_session().get(
-            url,
-            headers=create_request_header(),
-            cookies={},
-            timeout=6,
-            allow_redirects=True,
+
+        # Signal 4: path-based auth hint — check before making any request
+        if _IDOR_AUTH_PATH_RE.search(urlparse(url).path):
+            # Still fetch for the fingerprint; auth is already signalled by path
+            resp_nc = _get_session().get(
+                url, headers=create_request_header(),
+                cookies={}, timeout=6, allow_redirects=True,
+            )
+            return True, _idor_response_fingerprint(resp_nc)
+
+        # No-cookie probe
+        resp_nc = _get_session().get(
+            url, headers=create_request_header(),
+            cookies={}, timeout=6, allow_redirects=True,
         )
-        fp = _idor_response_fingerprint(resp)
-        if resp.status_code in (401, 403):
-            return True, fp
-        # Redirected to login page
-        if any(kw in resp.url for kw in ("login", "signin", "sign-in", "auth", "sso")):
-            return True, fp
-        # Response contains login form markers
-        if any(kw in resp.text.lower() for kw in
+        fp_nc = _idor_response_fingerprint(resp_nc)
+
+        # Signal 1: 401 / 403
+        if resp_nc.status_code in (401, 403):
+            return True, fp_nc
+
+        # Signal 2: redirect to login
+        if any(kw in resp_nc.url for kw in ("login", "signin", "sign-in", "auth", "sso")):
+            return True, fp_nc
+
+        # Signal 3: login form markers in body
+        nc_text_lower = resp_nc.text.lower() if resp_nc.text else ""
+        if any(kw in nc_text_lower for kw in
                ("login-form", "sign in", "please log in", "you must be logged")):
-            return True, fp
-        return False, fp
+            return True, fp_nc
+
+        # Signal 5: Set-Cookie with a session/token name in the no-cookie response
+        set_cookie = resp_nc.headers.get("set-cookie", "").lower()
+        _session_cookie_names = (
+            "session", "sess", "token", "auth", "jwt", "sid", "csrftoken",
+        )
+        if any(name in set_cookie for name in _session_cookie_names):
+            return True, fp_nc
+
+        # Signal 6: content size differs >20 % with vs without the crawler session
+        try:
+            resp_auth = _get_session().get(
+                url, headers=create_request_header(),
+                timeout=6, allow_redirects=True,
+            )
+            nc_size   = len(resp_nc.content)
+            auth_size = len(resp_auth.content)
+            if nc_size > 0 and auth_size > 0:
+                delta = abs(auth_size - nc_size) / max(nc_size, auth_size)
+                if delta > 0.20:
+                    return True, fp_nc
+        except Exception:
+            pass
+
+        return False, fp_nc
     except Exception:
         return False, None
 
@@ -14971,44 +15019,45 @@ def _idor_substitute_id(url, param, original_id, kind):
 
 def verify_idor_candidate(base_url, endpoint, param, value, kind):
     """
-    Full 5-stage IDOR verification pipeline:
+    Full IDOR verification pipeline.
 
-    1. Path blocklist  — skip CSS/JS/assets/public-content paths
-    2. Extension check — skip static file extensions
-    3. Auth-gate check — skip endpoints accessible without a session
-    4. ID substitution — fetch ID±1, compare response fingerprints
-    5. Response diff   — only alert if different IDs return meaningfully
-                         different responses (proving per-object data)
+    Stages:
+      1. Path blocklist  — skip CSS/JS/assets/public-content paths
+      2. Extension check — skip static file extensions
+      3. Auth-gate check — detect whether the endpoint enforces authentication
+      4. ID substitution — fetch ID±1 variants
+      5. Response diff   — require meaningfully different responses per ID
 
-    Returns True if confirmed worth alerting, False otherwise.
+    Returns:
+      "HIGH"  — auth-gated endpoint with per-object data differences (real IDOR)
+      "LOW"   — NOT auth-gated, but responses differ per object (public enumerable
+                endpoint — informational only, not exploitable)
+      None    — blocklisted, no variants, sparse ID space, or responses identical
     """
     parsed = urlparse(endpoint)
     path   = parsed.path
 
     # ── Stage 1: Path blocklist ───────────────────────────────
     if IDOR_PATH_BLOCKLIST.search(path):
-        return False
+        return None
 
     # ── Stage 2: Extension blocklist ─────────────────────────
     if IDOR_EXT_BLOCKLIST.search(path + "?" + parsed.query):
-        return False
+        return None
 
     # ── Stage 3: Auth-gate check ──────────────────────────────
-    # Build the real URL with the original ID value
     if kind == "query_param":
         real_url = endpoint + "?" + param + "=" + value
     else:
         real_url = re.sub(r'\{id\}', value, endpoint)
 
     requires_auth, real_fp = _idor_requires_auth(real_url)
-    if not requires_auth:
-        return False   # Public endpoint — not interesting
 
-    # ── Stage 4 & 5: ID substitution + response diff ─────────
+    # ── Stage 4: ID substitution ──────────────────────────────
     variants = _idor_substitute_id(real_url, param, value, kind)
     if not variants:
-        # Can't generate variants (UUID or non-numeric) — log as unverified candidate
-        return True  # Still worth human review if auth-gated
+        # UUID or non-numeric ID — can't enumerate; only worth flagging if auth-gated
+        return "HIGH" if requires_auth else None
 
     fingerprints = []
     for label, test_url in variants:
@@ -15026,35 +15075,44 @@ def verify_idor_candidate(base_url, endpoint, param, value, kind):
             continue
 
     if not fingerprints:
-        return False
+        return None
 
-    # Compare real response to variants using text similarity.
-    # If responses are >85% similar across all variants, the endpoint returns
-    # the same content regardless of ID — not per-object data (not IDOR).
-    # If responses differ meaningfully (similarity <85%) — likely real IDOR.
+    # ── Stage 5: Response diff ────────────────────────────────
+    # If all adjacent IDs return 404, the ID space is sparse — low exploitability
+    # regardless of auth.
     import difflib as _difflib
-    real_status, _, _, real_body = real_fp
+    real_status, _, _, real_body = real_fp if real_fp else (None, None, None, "")
     all_404 = all(fp[0] == 404 for _, fp in fingerprints if fp)
     if all_404:
-        return False   # Adjacent IDs don't exist — sparse ID space, low risk
+        return None
 
     similarities = []
     for _, fp in fingerprints:
         if not fp:
             continue
-        variant_body = fp[3]
-        ratio = _difflib.SequenceMatcher(None, real_body, variant_body).quick_ratio()
+        ratio = _difflib.SequenceMatcher(None, real_body, fp[3]).quick_ratio()
         similarities.append(ratio)
 
     if not similarities:
-        return False
+        return None
 
-    # All variants are >85% similar to the real response — same template, no per-object data
+    # All variants >85 % similar → same template, no per-object data → not IDOR
     if all(r > 0.85 for r in similarities):
-        return False
+        return None
 
-    return True   # Responses differ meaningfully per ID on auth-gated endpoint — real candidate
+    # Responses differ meaningfully per ID
+    return "HIGH" if requires_auth else "LOW"
 
+
+# URL path segments that strongly suggest an authenticated resource.
+# If any of these appear in the endpoint path, treat the endpoint as auth-gated
+# even when the no-cookie probe returns 200 (e.g. broken auth enforcement).
+_IDOR_AUTH_PATH_RE = re.compile(
+    r'/(?:account|profile|admin|manage|manage[_-]?ment|'
+    r'api/user|api/users|api/me|my|dashboard|settings|'
+    r'orders|invoices|tickets|messages|notifications)(?:/|$)',
+    re.IGNORECASE,
+)
 
 # Social media platforms use public numeric/UUID identifiers by design.
 # IDOR checks on these domains produce only noise.
@@ -15140,22 +15198,35 @@ def check_idor_candidates(page_url, html_content):
         _idor_tested.add(test_key)
 
         print(timestamp() + f" IDOR verify: {endpoint} param={param} value={value}")
-        confirmed = verify_idor_candidate(endpoint, endpoint, param, value, kind)
+        severity = verify_idor_candidate(endpoint, endpoint, param, value, kind)
 
-        if confirmed:
+        if severity == "HIGH":
             _idor_reported.add(report_key)
-            detail = f"[{kind}] Verified auth-gated endpoint with per-object data. " \
-                     f"Param '{param}' = '{value}'. Modify ID to access other users' records."
+            detail = (f"[{kind}] Verified auth-gated endpoint with per-object data. "
+                      f"Param '{param}' = '{value}'. Modify ID to access other users' records.")
             write_to_js_database(page_url, endpoint, "idor_candidate", detail)
             alert(
                 "IDOR CANDIDATE — VERIFIED",
                 "HIGH",
                 endpoint,
-                detail + f" Source: {page_url}"
+                detail + f" Source: {page_url}",
             )
             print(timestamp() + f" [!!] IDOR verified: {endpoint} param={param}")
+        elif severity == "LOW":
+            _idor_reported.add(report_key)
+            detail = (f"[{kind}] Enumerable public endpoint — responses differ per ID "
+                      f"but no auth gate detected. Param '{param}' = '{value}'. "
+                      f"Manual review only; not directly exploitable.")
+            write_to_js_database(page_url, endpoint, "idor_public_enumerable", detail)
+            alert(
+                "ENUMERABLE PUBLIC ENDPOINT",
+                "LOW",
+                endpoint,
+                detail + f" Source: {page_url}",
+            )
+            print(timestamp() + f" [i] Enumerable (no auth gate): {endpoint} param={param}")
         else:
-            print(timestamp() + f" IDOR dismissed (not auth-gated or no per-object diff): {endpoint}")
+            print(timestamp() + f" IDOR dismissed (no per-object diff or blocklisted): {endpoint}")
 
 
 

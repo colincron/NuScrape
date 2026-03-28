@@ -5801,3 +5801,925 @@ https://engineering.rei.com       38      0      0      0     13     0m32s
 2026-03-28 18:51:54 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/124890/satou-sabally
 2026-03-28 18:51:54 IDOR verify: https://www.wnba.com/draft/{id}/prospects/124839/mikiah-herbert harrigan param=path_id value=2020
 2026-03-28 18:51:54 HTTP 200 https://wings.wnba.com/news/wings-2019-training-camp-report-day-6
+2026-03-28 18:51:56 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/124839/mikiah-herbert harrigan
+2026-03-28 18:51:56 IDOR verify: https://www.wnba.com/draft/{id}/prospects/124852/jazmine-jones param=path_id value=2020
+2026-03-28 18:51:56 Parsed: https://wings.wnba.com/news/wings-2019-training-camp-report-day-6
+2026-03-28 18:51:56 Batch 1 [workers=1] | crawled=470 queue=139
+2026-03-28 18:51:57 HTTP 200 https://wings.wnba.com/news/wings-2019-training-camp-report-day-3
+2026-03-28 18:51:58 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/124852/jazmine-jones
+2026-03-28 18:51:58 IDOR verify: https://www.wnba.com/draft/{id}/prospects/124913/chennedy-carter param=path_id value=2020
+2026-03-28 18:51:59 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/124913/chennedy-carter
+2026-03-28 18:51:59 IDOR verify: https://www.wnba.com/draft/{id}/prospects/124856/kitija-laksa param=path_id value=2020
+2026-03-28 18:51:59 Parsed: https://wings.wnba.com/news/wings-2019-training-camp-report-day-3
+2026-03-28 18:51:59 Batch 1 [workers=1] | crawled=471 queue=139
+2026-03-28 18:52:00 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/124856/kitija-laksa
+2026-03-28 18:52:00 IDOR verify: https://www.wnba.com/draft/{id}/prospects/124837/ruthy-hebard param=path_id value=2020
+2026-03-28 18:52:01 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/124837/ruthy-hebard
+2026-03-28 18:52:01 IDOR verify: https://www.wnba.com/draft/{id}/prospects/124846/sabrina-ionescu param=path_id value=2020
+2026-03-28 18:52:02 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/124846/sabrina-ionescu
+2026-03-28 18:52:02 IDOR verify: https://www.wnba.com/draft/{id}/prospects/124835/tyasha-harris param=path_id value=2020
+2026-03-28 18:52:04 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/124835/tyasha-harris
+2026-03-28 18:52:04 IDOR verify: https://www.wnba.com/draft/{id}/prospects/124783/bella-alarie param=path_id value=2020
+2026-03-28 18:52:04 ERROR: Timeout fetching: https://wings.wnba.com/news/wings-2019-training-camp-report-day-2
+2026-03-28 18:52:05 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/124783/bella-alarie
+2026-03-28 18:52:05 IDOR verify: https://www.wnba.com/draft/{id}/prospects/124800/lauren-cox param=path_id value=2020
+2026-03-28 18:52:07 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/124800/lauren-cox
+2026-03-28 18:52:07 IDOR verify: https://www.wnba.com/draft/{id}/prospects/125089/megan-walker param=path_id value=2020
+2026-03-28 18:52:07 Batch 1 [workers=1] | crawled=471 queue=138
+2026-03-28 18:52:07 HTTP 200 https://wings.wnba.com/news/wings-2019-training-camp-report-day-13
+2026-03-28 18:52:08 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/125089/megan-walker
+2026-03-28 18:52:08 Parsed: https://www.wnba.com/draft/2019/board
+2026-03-28 18:52:08 IDOR verify: https://www.wnba.com/draft/{id}/prospects/105085/teaira-mccowan param=path_id value=2019
+2026-03-28 18:52:10 Parsed: https://wings.wnba.com/news/wings-2019-training-camp-report-day-13
+2026-03-28 18:52:10 Batch 1 [workers=1] | crawled=472 queue=137
+2026-03-28 18:52:11 HTTP 200 https://wings.wnba.com/news/wings-take-on-sky-in-chicago
+2026-03-28 18:52:11 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/105085/teaira-mccowan
+2026-03-28 18:52:11 IDOR verify: https://www.wnba.com/draft/{id}/prospects/105103/kiara-leslie param=path_id value=2019
+2026-03-28 18:52:13 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/105103/kiara-leslie
+2026-03-28 18:52:13 IDOR verify: https://www.wnba.com/draft/{id}/prospects/105083/asia-durr param=path_id value=2019
+2026-03-28 18:52:14 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/105083/asia-durr
+2026-03-28 18:52:14 IDOR verify: https://www.wnba.com/draft/{id}/prospects/105046/alanna-smith param=path_id value=2019
+2026-03-28 18:52:16 Parsed: https://wings.wnba.com/news/wings-take-on-sky-in-chicago
+2026-03-28 18:52:16 Batch 1 [workers=1] | crawled=473 queue=138
+2026-03-28 18:52:17 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/105046/alanna-smith
+2026-03-28 18:52:17 IDOR verify: https://www.wnba.com/draft/{id}/prospects/105090/ezi-magbegor param=path_id value=2019
+2026-03-28 18:52:17 HTTP 200 https://wings.wnba.com/news/wings-take-on-liberty-in-new-york-on-friday
+2026-03-28 18:52:18 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/105090/ezi-magbegor
+2026-03-28 18:52:18 IDOR verify: https://www.wnba.com/draft/{id}/prospects/105069/arike-ogunbowale param=path_id value=2019
+2026-03-28 18:52:19 Parsed: https://wings.wnba.com/news/wings-take-on-liberty-in-new-york-on-friday
+2026-03-28 18:52:19 Batch 1 [workers=1] | crawled=474 queue=137
+2026-03-28 18:52:19 HTTP 200 https://wings.wnba.com/news/wings-trade-diggins-smith-acquire-astou-ndour
+2026-03-28 18:52:19 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/105069/arike-ogunbowale
+2026-03-28 18:52:19 IDOR verify: https://www.wnba.com/draft/{id}/prospects/105052/napheesa-collier param=path_id value=2019
+2026-03-28 18:52:21 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/105052/napheesa-collier
+2026-03-28 18:52:21 IDOR verify: https://www.wnba.com/draft/{id}/prospects/105037/brianna-turner param=path_id value=2019
+2026-03-28 18:52:22 Parsed: https://wings.wnba.com/news/wings-trade-diggins-smith-acquire-astou-ndour
+2026-03-28 18:52:22 State saved — 138 in queue, 475 crawled.
+2026-03-28 18:52:22 Batch 1 [workers=1] | crawled=475 queue=137
+2026-03-28 18:52:22 HTTP 200 https://wings.wnba.com/news/wings-overseas-roundup-jan-28
+2026-03-28 18:52:22 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/105037/brianna-turner
+2026-03-28 18:52:22 IDOR verify: https://www.wnba.com/draft/{id}/prospects/105055/katie-lou samuelson param=path_id value=2019
+2026-03-28 18:52:25 Parsed: https://wings.wnba.com/news/wings-overseas-roundup-jan-28
+2026-03-28 18:52:25 Batch 1 [workers=1] | crawled=476 queue=136
+2026-03-28 18:52:26 HTTP 200 https://wings.wnba.com/news/wings-overseas-roundup-nov-29
+2026-03-28 18:52:26 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/105055/katie-lou samuelson
+2026-03-28 18:52:26 IDOR verify: https://www.wnba.com/draft/{id}/prospects/105003/kristine-anigwe param=path_id value=2019
+2026-03-28 18:52:28 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/105003/kristine-anigwe
+2026-03-28 18:52:28 IDOR verify: https://www.wnba.com/draft/{id}/prospects/105017/jackie-young param=path_id value=2019
+2026-03-28 18:52:28 Parsed: https://wings.wnba.com/news/wings-overseas-roundup-nov-29
+2026-03-28 18:52:29 Batch 1 [workers=1] | crawled=477 queue=135
+2026-03-28 18:52:29 HTTP 200 https://wings.wnba.com/news/wings-overseas-roundup-nov-12
+2026-03-28 18:52:30 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/105017/jackie-young
+2026-03-28 18:52:30 IDOR verify: https://www.wnba.com/draft/{id}/prospects/105016/kalani-brown param=path_id value=2019
+2026-03-28 18:52:31 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/105016/kalani-brown
+2026-03-28 18:52:31 Batch 3 [workers=3] | crawled=153 queue=195
+2026-03-28 18:52:32 HTTP 200 https://www.wnba.com/draft/2016/board
+2026-03-28 18:52:32 HTTP 200 https://www.wnba.com/draft/2017/board
+2026-03-28 18:52:32 HTTP 200 https://www.wnba.com/draft/2018/board
+2026-03-28 18:52:34 Parsed: https://www.wnba.com/draft/2018/board
+2026-03-28 18:52:34 IDOR verify: https://www.wnba.com/draft/{id}/prospects/75924/lexie-brown param=path_id value=2018
+2026-03-28 18:52:36 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/75924/lexie-brown
+2026-03-28 18:52:36 IDOR verify: https://www.wnba.com/draft/{id}/prospects/75939/diamond-deshields param=path_id value=2018
+2026-03-28 18:52:37 Parsed: https://wings.wnba.com/news/wings-overseas-roundup-nov-12
+2026-03-28 18:52:37 Batch 1 [workers=1] | crawled=478 queue=134
+2026-03-28 18:52:37 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/75939/diamond-deshields
+2026-03-28 18:52:37 IDOR verify: https://www.wnba.com/draft/{id}/prospects/75995/kia-nurse param=path_id value=2018
+2026-03-28 18:52:37 HTTP 200 https://wings.wnba.com/news/wings-continue-east-coast-trip-washington
+2026-03-28 18:52:39 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/75995/kia-nurse
+2026-03-28 18:52:39 IDOR verify: https://www.wnba.com/draft/{id}/prospects/76005/azura-stevens param=path_id value=2018
+2026-03-28 18:52:41 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/76005/azura-stevens
+2026-03-28 18:52:41 IDOR verify: https://www.wnba.com/draft/{id}/prospects/76015/victoria-vivians param=path_id value=2018
+2026-03-28 18:52:41 Parsed: https://wings.wnba.com/news/wings-continue-east-coast-trip-washington
+2026-03-28 18:52:41 Batch 1 [workers=1] | crawled=479 queue=134
+2026-03-28 18:52:42 HTTP 200 https://wings.wnba.com/news/wings-return-star-break-host-indiana-fever
+2026-03-28 18:52:43 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/76015/victoria-vivians
+2026-03-28 18:52:43 IDOR verify: https://www.wnba.com/draft/{id}/prospects/75977/kelsey-mitchell param=path_id value=2018
+2026-03-28 18:52:44 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/75977/kelsey-mitchell
+2026-03-28 18:52:44 IDOR verify: https://www.wnba.com/draft/{id}/prospects/76014/maria alekseyevna-vadeeva param=path_id value=2018
+2026-03-28 18:52:45 Parsed: https://wings.wnba.com/news/wings-return-star-break-host-indiana-fever
+2026-03-28 18:52:45 Batch 1 [workers=1] | crawled=480 queue=134
+2026-03-28 18:52:46 HTTP 200 https://wings.wnba.com/news/wings-head-to-the-windy-city-to-face-the-sky
+2026-03-28 18:52:46 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/76014/maria alekseyevna-vadeeva
+2026-03-28 18:52:46 IDOR verify: https://www.wnba.com/draft/{id}/prospects/76023/gabby-williams param=path_id value=2018
+2026-03-28 18:52:47 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/76023/gabby-williams
+2026-03-28 18:52:47 IDOR verify: https://www.wnba.com/draft/{id}/prospects/75949/marie-gulich param=path_id value=2018
+2026-03-28 18:52:49 Parsed: https://wings.wnba.com/news/wings-head-to-the-windy-city-to-face-the-sky
+2026-03-28 18:52:49 Batch 1 [workers=1] | crawled=481 queue=133
+2026-03-28 18:52:49 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/75949/marie-gulich
+2026-03-28 18:52:49 IDOR verify: https://www.wnba.com/draft/{id}/prospects/75933/jordin-canada param=path_id value=2018
+2026-03-28 18:52:50 HTTP 200 https://wings.wnba.com/news/wings-seek-win-chicago-sky
+2026-03-28 18:52:50 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/75933/jordin-canada
+2026-03-28 18:52:50 IDOR verify: https://www.wnba.com/draft/{id}/prospects/76026/a'ja-wilson param=path_id value=2018
+2026-03-28 18:52:52 Parsed: https://wings.wnba.com/news/wings-seek-win-chicago-sky
+2026-03-28 18:52:52 Batch 1 [workers=1] | crawled=482 queue=133
+2026-03-28 18:52:52 HTTP 200 https://wings.wnba.com/news/wings-head-east-face-atlanta-dream
+2026-03-28 18:52:53 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/76026/a'ja-wilson
+2026-03-28 18:52:53 IDOR verify: https://www.wnba.com/draft/{id}/prospects/75914/ariel-atkins param=path_id value=2018
+2026-03-28 18:52:54 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/75914/ariel-atkins
+2026-03-28 18:52:54 Parsed: https://www.wnba.com/draft/2017/board
+2026-03-28 18:52:54 IDOR verify: https://www.wnba.com/draft/{id}/prospects/50344/allisha-gray param=path_id value=2017
+2026-03-28 18:52:55 Parsed: https://wings.wnba.com/news/wings-head-east-face-atlanta-dream
+2026-03-28 18:52:56 Batch 1 [workers=1] | crawled=483 queue=133
+2026-03-28 18:52:56 HTTP 200 https://wings.wnba.com/news/dallas-wings-face-connecticut-sun
+2026-03-28 18:52:56 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/50344/allisha-gray
+2026-03-28 18:52:56 IDOR verify: https://www.wnba.com/draft/{id}/prospects/50091/sydney-wiese param=path_id value=2017
+2026-03-28 18:52:57 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/50091/sydney-wiese
+2026-03-28 18:52:57 IDOR verify: https://www.wnba.com/draft/{id}/prospects/50198/tori-jankoska param=path_id value=2017
+2026-03-28 18:52:58 Parsed: https://wings.wnba.com/news/dallas-wings-face-connecticut-sun
+2026-03-28 18:52:58 Batch 1 [workers=1] | crawled=484 queue=133
+2026-03-28 18:52:58 HTTP 200 https://wings.wnba.com/news/wings-eliminated-mystics-first-round
+2026-03-28 18:52:59 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/50198/tori-jankoska
+2026-03-28 18:52:59 IDOR verify: https://www.wnba.com/draft/{id}/prospects/50340/kaela-davis param=path_id value=2017
+2026-03-28 18:53:00 Parsed: https://wings.wnba.com/news/wings-eliminated-mystics-first-round
+2026-03-28 18:53:00 Batch 1 [workers=1] | crawled=485 queue=134
+2026-03-28 18:53:01 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/50340/kaela-davis
+2026-03-28 18:53:01 IDOR verify: https://www.wnba.com/draft/{id}/prospects/50085/shatori-walker-kimbrough param=path_id value=2017
+2026-03-28 18:53:01 HTTP 200 https://wings.wnba.com/news/johnsons-double-double-couldnt-hold-sun
+2026-03-28 18:53:02 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/50085/shatori-walker-kimbrough
+2026-03-28 18:53:02 IDOR verify: https://www.wnba.com/draft/{id}/prospects/50123/nia-coffey param=path_id value=2017
+2026-03-28 18:53:02 Parsed: https://wings.wnba.com/news/johnsons-double-double-couldnt-hold-sun
+2026-03-28 18:53:02 Batch 1 [workers=1] | crawled=486 queue=137
+2026-03-28 18:53:03 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/50123/nia-coffey
+2026-03-28 18:53:03 IDOR verify: https://www.wnba.com/draft/{id}/prospects/50224/kelsey-plum param=path_id value=2017
+2026-03-28 18:53:03 HTTP 200 https://wings.wnba.com/news/4th-quarter-surge-propels-wings-victory-fever
+2026-03-28 18:53:04 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/50224/kelsey-plum
+2026-03-28 18:53:04 IDOR verify: https://www.wnba.com/draft/{id}/prospects/50076/evelyn-akhator param=path_id value=2017
+2026-03-28 18:53:06 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/50076/evelyn-akhator
+2026-03-28 18:53:06 IDOR verify: https://www.wnba.com/draft/{id}/prospects/50205/alexis-jones param=path_id value=2017
+2026-03-28 18:53:06 Parsed: https://wings.wnba.com/news/4th-quarter-surge-propels-wings-victory-fever
+2026-03-28 18:53:06 Batch 1 [workers=1] | crawled=487 queue=138
+2026-03-28 18:53:07 HTTP 200 https://wings.wnba.com/news/johnsons-double-double-leads-wings-victory
+2026-03-28 18:53:07 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/50205/alexis-jones
+2026-03-28 18:53:07 IDOR verify: https://www.wnba.com/draft/{id}/prospects/50359/brittney-sykes param=path_id value=2017
+2026-03-28 18:53:08 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/50359/brittney-sykes
+2026-03-28 18:53:08 IDOR verify: https://www.wnba.com/draft/{id}/prospects/50122/alaina-coates param=path_id value=2017
+2026-03-28 18:53:09 Parsed: https://wings.wnba.com/news/johnsons-double-double-leads-wings-victory
+2026-03-28 18:53:09 Batch 1 [workers=1] | crawled=488 queue=138
+2026-03-28 18:53:10 HTTP 200 https://wings.wnba.com/news/wings-soar-high-mystics-83-78
+2026-03-28 18:53:10 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/50122/alaina-coates
+2026-03-28 18:53:10 IDOR verify: https://www.wnba.com/draft/{id}/prospects/50207/brionna-jones param=path_id value=2017
+2026-03-28 18:53:12 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/draft/{id}/prospects/50207/brionna-jones
+2026-03-28 18:53:12 Parsed: https://www.wnba.com/draft/2016/board
+2026-03-28 18:53:12 IDOR verify: https://www.wnba.com/draft/{id}/prospects/20564/aerial-powers param=path_id value=2016
+2026-03-28 18:53:14 Parsed: https://wings.wnba.com/news/wings-soar-high-mystics-83-78
+2026-03-28 18:53:15 Batch 1 [workers=1] | crawled=489 queue=140
+2026-03-28 18:53:15 HTTP 200 https://wings.wnba.com/news/wings-end-home-series-falling-lynx
+
+================================================================
+  !! HIGH ALERT: IDOR CANDIDATE — VERIFIED !!
+  Target     : https://www.wnba.com/draft/{id}/prospects/20564/aerial-powers
+  Detail     : [rest_path] Verified auth-gated endpoint with per-object data. Param 'path_id' = '2016'. Modify ID to access other users' records. Source: https://www.wnba.com/draft/2016/board
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:53:16
+================================================================
+
+2026-03-28 18:53:16 [!!] IDOR verified: https://www.wnba.com/draft/{id}/prospects/20564/aerial-powers param=path_id
+2026-03-28 18:53:16 IDOR verify: https://www.wnba.com/draft/{id}/prospects/20267/jonquel-jones param=path_id value=2016
+2026-03-28 18:53:17 Parsed: https://wings.wnba.com/news/wings-end-home-series-falling-lynx
+2026-03-28 18:53:17 Batch 1 [workers=1] | crawled=490 queue=139
+
+================================================================
+  !! HIGH ALERT: IDOR CANDIDATE — VERIFIED !!
+  Target     : https://www.wnba.com/draft/{id}/prospects/20267/jonquel-jones
+  Detail     : [rest_path] Verified auth-gated endpoint with per-object data. Param 'path_id' = '2016'. Modify ID to access other users' records. Source: https://www.wnba.com/draft/2016/board
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:53:17
+================================================================
+
+2026-03-28 18:53:17 [!!] IDOR verified: https://www.wnba.com/draft/{id}/prospects/20267/jonquel-jones param=path_id
+2026-03-28 18:53:17 IDOR verify: https://www.wnba.com/draft/{id}/prospects/20485/kahleah-copper param=path_id value=2016
+2026-03-28 18:53:18 HTTP 200 https://wings.wnba.com/news/wings-end-back-back-road-series-indy
+
+================================================================
+  !! HIGH ALERT: IDOR CANDIDATE — VERIFIED !!
+  Target     : https://www.wnba.com/draft/{id}/prospects/20485/kahleah-copper
+  Detail     : [rest_path] Verified auth-gated endpoint with per-object data. Param 'path_id' = '2016'. Modify ID to access other users' records. Source: https://www.wnba.com/draft/2016/board
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:53:19
+================================================================
+
+2026-03-28 18:53:19 [!!] IDOR verified: https://www.wnba.com/draft/{id}/prospects/20485/kahleah-copper param=path_id
+2026-03-28 18:53:19 IDOR verify: https://www.wnba.com/draft/{id}/prospects/20328/tiffany-mitchell param=path_id value=2016
+2026-03-28 18:53:20 Parsed: https://wings.wnba.com/news/wings-end-back-back-road-series-indy
+2026-03-28 18:53:20 Batch 1 [workers=1] | crawled=491 queue=138
+
+================================================================
+  !! HIGH ALERT: IDOR CANDIDATE — VERIFIED !!
+  Target     : https://www.wnba.com/draft/{id}/prospects/20328/tiffany-mitchell
+  Detail     : [rest_path] Verified auth-gated endpoint with per-object data. Param 'path_id' = '2016'. Modify ID to access other users' records. Source: https://www.wnba.com/draft/2016/board
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:53:20
+================================================================
+
+2026-03-28 18:53:20 [!!] IDOR verified: https://www.wnba.com/draft/{id}/prospects/20328/tiffany-mitchell param=path_id
+2026-03-28 18:53:20 IDOR verify: https://www.wnba.com/draft/{id}/prospects/20263/moriah-jefferson param=path_id value=2016
+2026-03-28 18:53:20 HTTP 200 https://wings.wnba.com/news/recap-wings-fall-home-dream-102-93
+2026-03-28 18:53:23 Parsed: https://wings.wnba.com/news/recap-wings-fall-home-dream-102-93
+2026-03-28 18:53:23 Batch 1 [workers=1] | crawled=492 queue=140
+2026-03-28 18:53:23 HTTP 200 https://wings.wnba.com/news/wings-fall-short-sky
+
+================================================================
+  !! HIGH ALERT: IDOR CANDIDATE — VERIFIED !!
+  Target     : https://www.wnba.com/draft/{id}/prospects/20263/moriah-jefferson
+  Detail     : [rest_path] Verified auth-gated endpoint with per-object data. Param 'path_id' = '2016'. Modify ID to access other users' records. Source: https://www.wnba.com/draft/2016/board
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:53:25
+================================================================
+
+2026-03-28 18:53:25 [!!] IDOR verified: https://www.wnba.com/draft/{id}/prospects/20263/moriah-jefferson param=path_id
+2026-03-28 18:53:25 IDOR verify: https://www.wnba.com/draft/{id}/prospects/20377/bria-holmes param=path_id value=2016
+
+================================================================
+  !! HIGH ALERT: IDOR CANDIDATE — VERIFIED !!
+  Target     : https://www.wnba.com/draft/{id}/prospects/20377/bria-holmes
+  Detail     : [rest_path] Verified auth-gated endpoint with per-object data. Param 'path_id' = '2016'. Modify ID to access other users' records. Source: https://www.wnba.com/draft/2016/board
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:53:27
+================================================================
+
+2026-03-28 18:53:27 [!!] IDOR verified: https://www.wnba.com/draft/{id}/prospects/20377/bria-holmes param=path_id
+2026-03-28 18:53:27 IDOR verify: https://www.wnba.com/draft/{id}/prospects/20351/courtney-williams param=path_id value=2016
+
+================================================================
+  !! HIGH ALERT: IDOR CANDIDATE — VERIFIED !!
+  Target     : https://www.wnba.com/draft/{id}/prospects/20351/courtney-williams
+  Detail     : [rest_path] Verified auth-gated endpoint with per-object data. Param 'path_id' = '2016'. Modify ID to access other users' records. Source: https://www.wnba.com/draft/2016/board
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:53:29
+================================================================
+
+2026-03-28 18:53:29 [!!] IDOR verified: https://www.wnba.com/draft/{id}/prospects/20351/courtney-williams param=path_id
+2026-03-28 18:53:29 IDOR verify: https://www.wnba.com/draft/{id}/prospects/20482/adut-bulgak param=path_id value=2016
+2026-03-28 18:53:29 Parsed: https://wings.wnba.com/news/wings-fall-short-sky
+2026-03-28 18:53:29 Batch 1 [workers=1] | crawled=493 queue=139
+
+================================================================
+  !! HIGH ALERT: IDOR CANDIDATE — VERIFIED !!
+  Target     : https://www.wnba.com/draft/{id}/prospects/20482/adut-bulgak
+  Detail     : [rest_path] Verified auth-gated endpoint with per-object data. Param 'path_id' = '2016'. Modify ID to access other users' records. Source: https://www.wnba.com/draft/2016/board
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:53:30
+================================================================
+
+2026-03-28 18:53:30 [!!] IDOR verified: https://www.wnba.com/draft/{id}/prospects/20482/adut-bulgak param=path_id
+2026-03-28 18:53:30 IDOR verify: https://www.wnba.com/draft/{id}/prospects/20348/morgan-tuck param=path_id value=2016
+2026-03-28 18:53:30 HTTP 200 https://wings.wnba.com/news/1333
+
+================================================================
+  !! HIGH ALERT: IDOR CANDIDATE — VERIFIED !!
+  Target     : https://www.wnba.com/draft/{id}/prospects/20348/morgan-tuck
+  Detail     : [rest_path] Verified auth-gated endpoint with per-object data. Param 'path_id' = '2016'. Modify ID to access other users' records. Source: https://www.wnba.com/draft/2016/board
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:53:31
+================================================================
+
+2026-03-28 18:53:31 [!!] IDOR verified: https://www.wnba.com/draft/{id}/prospects/20348/morgan-tuck param=path_id
+2026-03-28 18:53:31 IDOR verify: https://www.wnba.com/draft/{id}/prospects/20474/rachel-banham param=path_id value=2016
+2026-03-28 18:53:33 Parsed: https://wings.wnba.com/news/1333
+
+================================================================
+  !! HIGH ALERT: IDOR CANDIDATE — VERIFIED !!
+  Target     : https://www.wnba.com/draft/{id}/prospects/20474/rachel-banham
+  Detail     : [rest_path] Verified auth-gated endpoint with per-object data. Param 'path_id' = '2016'. Modify ID to access other users' records. Source: https://www.wnba.com/draft/2016/board
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:53:33
+================================================================
+
+2026-03-28 18:53:33 [!!] IDOR verified: https://www.wnba.com/draft/{id}/prospects/20474/rachel-banham param=path_id
+2026-03-28 18:53:33 IDOR verify: https://www.wnba.com/draft/{id}/prospects/20330/breanna-stewart param=path_id value=2016
+2026-03-28 18:53:33 Batch 1 [workers=1] | crawled=494 queue=141
+2026-03-28 18:53:34 HTTP 200 https://wings.wnba.com/news/wings-lose-tough-battle-against-mercury
+
+================================================================
+  !! HIGH ALERT: IDOR CANDIDATE — VERIFIED !!
+  Target     : https://www.wnba.com/draft/{id}/prospects/20330/breanna-stewart
+  Detail     : [rest_path] Verified auth-gated endpoint with per-object data. Param 'path_id' = '2016'. Modify ID to access other users' records. Source: https://www.wnba.com/draft/2016/board
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:53:34
+================================================================
+
+2026-03-28 18:53:34 [!!] IDOR verified: https://www.wnba.com/draft/{id}/prospects/20330/breanna-stewart param=path_id
+2026-03-28 18:53:34 IDOR verify: https://www.wnba.com/draft/{id}/prospects/20480/imani-boyette param=path_id value=2016
+2026-03-28 18:53:34 [ASN] AS16509 (AS16509 Amazon.com, Inc.) — 20260 prefixes: 165.140.171.0/24, 2600:9000:259b::/48, 2a05:d015:800::/38, 52.222.246.0/24, 121.91.100.0/22, 103.168.156.0/24 (+20254 more)
+
+================================================================
+  !! INFO ALERT: ASN PREFIX ENUMERATION !!
+  Target     : AS16509
+  Detail     : RIPE NCC reports 20260 announced prefix(es) for AS16509 (AS16509 Amazon.com, Inc.): 165.140.171.0/24, 2600:9000:259b::/48, 2a05:d015:800::/38, 52.222.246.0/24, 121.91.100.0/22, 103.168.156.0/24 (+20254 more)
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:53:34
+================================================================
+
+2026-03-28 18:53:34 DNS ablink.email.wnba.com → 3.166.192.69
+2026-03-28 18:53:34 ERROR: MX lookup failed for ablink.email.wnba.com: The DNS response does not contain an answer to the question: ablink.email.wnba.com. IN MX
+2026-03-28 18:53:34 DNS ablink.email.wnba.com → 3.166.192.126
+2026-03-28 18:53:34 DNS ablink.email.wnba.com → 3.166.192.32
+2026-03-28 18:53:34 DNS ablink.email.wnba.com → 3.166.192.51
+2026-03-28 18:53:34 TLS config analysis: ablink.email.wnba.com:443 [sslyze]
+2026-03-28 18:53:34 Open port 80 on ablink.email.wnba.com
+2026-03-28 18:53:34 Open port 8080 on ablink.email.wnba.com
+2026-03-28 18:53:34 Open port 53 on ablink.email.wnba.com
+2026-03-28 18:53:34 Open port 443 on ablink.email.wnba.com
+2026-03-28 18:53:34 SSL ablink.email.wnba.com expires Oct  8 23:59:59 2026 GMT
+2026-03-28 18:53:34 SSL SANs (6): ablink.hello.email.nba.com, ablink.nbaemail.nba.com, ablink.wnbaemail.wnba.com, ablink.email.wnba.com, ablink.email.nba.com, ablink.hello.email.wnba.com
+2026-03-28 18:53:35 WHOIS ablink.email.wnba.com registrar=GoDaddy Corporate Domains, LLC
+
+================================================================
+  !! HIGH ALERT: IDOR CANDIDATE — VERIFIED !!
+  Target     : https://www.wnba.com/draft/{id}/prospects/20480/imani-boyette
+  Detail     : [rest_path] Verified auth-gated endpoint with per-object data. Param 'path_id' = '2016'. Modify ID to access other users' records. Source: https://www.wnba.com/draft/2016/board
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:53:35
+================================================================
+
+2026-03-28 18:53:35 [!!] IDOR verified: https://www.wnba.com/draft/{id}/prospects/20480/imani-boyette param=path_id
+2026-03-28 18:53:35 Batch 3 [workers=3] | crawled=156 queue=192
+2026-03-28 18:53:36 HTTP 200 https://www.wnba.com/draft/2015/draftboard
+2026-03-28 18:53:36 HTTP 200 https://www.wnba.com/draft/2014
+2026-03-28 18:53:36 Parsed: https://wings.wnba.com/news/wings-lose-tough-battle-against-mercury
+2026-03-28 18:53:36 Batch 1 [workers=1] | crawled=495 queue=144
+2026-03-28 18:53:37 HTTP 200 https://www.wnba.com/draft/2013
+2026-03-28 18:53:38 HTTP 200 https://wings.wnba.com/news/wings-unable-stop-lynx-2
+2026-03-28 18:53:39 Parsed: https://www.wnba.com/draft/2015/draftboard
+2026-03-28 18:53:39 Parsed: https://www.wnba.com/draft/2014
+2026-03-28 18:53:39 Parsed: https://www.wnba.com/draft/2013
+2026-03-28 18:53:39 Batch 3 [workers=3] | crawled=159 queue=191
+2026-03-28 18:53:40 Parsed: https://wings.wnba.com/news/wings-unable-stop-lynx-2
+2026-03-28 18:53:40 Batch 1 [workers=1] | crawled=496 queue=143
+2026-03-28 18:53:41 HTTP 200 https://wings.wnba.com/news/glory-johnson-scores-22-wings-fall-short-fever
+2026-03-28 18:53:43 HTTP 200 https://www.wnba.com/draft/2011
+2026-03-28 18:53:43 HTTP 200 https://www.wnba.com/draft/2010
+2026-03-28 18:53:43 HTTP 200 https://www.wnba.com/draft/2012
+2026-03-28 18:53:43 Parsed: https://wings.wnba.com/news/glory-johnson-scores-22-wings-fall-short-fever
+2026-03-28 18:53:44 Batch 1 [workers=1] | crawled=497 queue=142
+2026-03-28 18:53:44 HTTP 200 https://wings.wnba.com/news/game-preview-wings-liberty
+2026-03-28 18:53:46 Parsed: https://wings.wnba.com/news/game-preview-wings-liberty
+2026-03-28 18:53:46 Batch 1 [workers=1] | crawled=498 queue=145
+2026-03-28 18:53:46 Parsed: https://www.wnba.com/draft/2012
+2026-03-28 18:53:46 Parsed: https://www.wnba.com/draft/2011
+2026-03-28 18:53:46 Parsed: https://www.wnba.com/draft/2010
+2026-03-28 18:53:46 Batch 3 [workers=3] | crawled=162 queue=191
+2026-03-28 18:53:46 HTTP 200 https://wings.wnba.com/news/dallas-wings-players-earn-associated-press-honors
+2026-03-28 18:53:49 Parsed: https://wings.wnba.com/news/dallas-wings-players-earn-associated-press-honors
+2026-03-28 18:53:49 Batch 1 [workers=1] | crawled=499 queue=144
+2026-03-28 18:53:49 HTTP 200 https://wings.wnba.com/news/fred-williams-more-than-a-coach
+2026-03-28 18:53:51 HTTP 200 https://www.wnba.com/draft/2008
+2026-03-28 18:53:51 HTTP 200 https://www.wnba.com/draft/2007
+2026-03-28 18:53:51 HTTP 200 https://www.wnba.com/draft/2009
+2026-03-28 18:53:52 Parsed: https://wings.wnba.com/news/fred-williams-more-than-a-coach
+2026-03-28 18:53:52 State saved — 144 in queue, 500 crawled.
+2026-03-28 18:53:52 Batch 1 [workers=1] | crawled=500 queue=143
+2026-03-28 18:53:53 Parsed: https://www.wnba.com/draft/2009
+2026-03-28 18:53:53 HTTP 200 https://wings.wnba.com/news/leaders-pack-karima-christmas-kelly
+2026-03-28 18:53:53 Parsed: https://www.wnba.com/draft/2008
+2026-03-28 18:53:53 Parsed: https://www.wnba.com/draft/2007
+2026-03-28 18:53:53 Batch 3 [workers=3] | crawled=165 queue=190
+2026-03-28 18:53:53 HTTP 200 https://www.wnba.com/draft/2005
+2026-03-28 18:53:53 HTTP 200 https://www.wnba.com/draft/2004
+2026-03-28 18:53:53 HTTP 200 https://www.wnba.com/draft/2006
+2026-03-28 18:53:54 Parsed: https://wings.wnba.com/news/leaders-pack-karima-christmas-kelly
+2026-03-28 18:53:54 Batch 1 [workers=1] | crawled=501 queue=142
+2026-03-28 18:53:55 HTTP 200 https://wings.wnba.com/news/qa-dallas-wings-general-manager-greg-bibb
+2026-03-28 18:53:56 Parsed: https://www.wnba.com/draft/2006
+2026-03-28 18:53:56 Parsed: https://www.wnba.com/draft/2005
+2026-03-28 18:53:56 Parsed: https://www.wnba.com/draft/2004
+2026-03-28 18:53:56 Batch 3 [workers=3] | crawled=168 queue=187
+2026-03-28 18:53:57 HTTP 200 https://www.wnba.com/draft/2001
+2026-03-28 18:53:58 Parsed: https://wings.wnba.com/news/qa-dallas-wings-general-manager-greg-bibb
+2026-03-28 18:53:58 Batch 1 [workers=1] | crawled=502 queue=141
+2026-03-28 18:53:58 HTTP 200 https://wings.wnba.com/news/training-camp-central-dallas-wings-start-preparing-2016-season
+2026-03-28 18:53:58 HTTP 200 https://www.wnba.com/draft/2003
+2026-03-28 18:53:58 HTTP 200 https://www.wnba.com/draft/2002
+2026-03-28 18:54:00 Parsed: https://wings.wnba.com/news/training-camp-central-dallas-wings-start-preparing-2016-season
+2026-03-28 18:54:00 Batch 1 [workers=1] | crawled=503 queue=141
+2026-03-28 18:54:01 HTTP 200 https://wings.wnba.com/news/wings-tip-off-2018-season-in-front-of-fans
+2026-03-28 18:54:01 Parsed: https://www.wnba.com/draft/2003
+2026-03-28 18:54:01 Parsed: https://www.wnba.com/draft/2002
+2026-03-28 18:54:01 [AdaptiveConcurrency] 3→2 workers (avg=2.04s err=0%)
+2026-03-28 18:54:01 Parsed: https://www.wnba.com/draft/2001
+2026-03-28 18:54:01 Batch 2 [workers=2] | crawled=171 queue=185
+2026-03-28 18:54:02 HTTP 200 https://www.wnba.com/draft/2000
+2026-03-28 18:54:02 HTTP 200 https://www.wnba.com/draft/1999
+2026-03-28 18:54:03 Parsed: https://wings.wnba.com/news/wings-tip-off-2018-season-in-front-of-fans
+2026-03-28 18:54:03 Batch 1 [workers=1] | crawled=504 queue=140
+2026-03-28 18:54:04 HTTP 200 https://wings.wnba.com/news/wings-take-on-indiana-in-preseason-finale
+2026-03-28 18:54:05 [AdaptiveConcurrency] 2→1 workers (avg=2.03s err=0%)
+2026-03-28 18:54:05 Parsed: https://www.wnba.com/draft/2000
+2026-03-28 18:54:05 Parsed: https://www.wnba.com/draft/1999
+2026-03-28 18:54:05 Batch 1 [workers=1] | crawled=173 queue=184
+2026-03-28 18:54:05 HTTP 200 https://www.wnba.com/draft/1998
+2026-03-28 18:54:07 Parsed: https://wings.wnba.com/news/wings-take-on-indiana-in-preseason-finale
+2026-03-28 18:54:07 Batch 1 [workers=1] | crawled=505 queue=139
+2026-03-28 18:54:07 Parsed: https://www.wnba.com/draft/1998
+2026-03-28 18:54:07 Batch 1 [workers=1] | crawled=174 queue=183
+2026-03-28 18:54:07 HTTP 200 https://wings.wnba.com/news/wings-head-east-to-face-the-fever
+2026-03-28 18:54:07 HTTP 200 https://www.wnba.com/draft/1997
+2026-03-28 18:54:09 Parsed: https://www.wnba.com/draft/1997
+2026-03-28 18:54:09 State saved — 183 in queue, 175 crawled.
+2026-03-28 18:54:09 Batch 1 [workers=1] | crawled=175 queue=182
+2026-03-28 18:54:10 Parsed: https://wings.wnba.com/news/wings-head-east-to-face-the-fever
+2026-03-28 18:54:10 Batch 1 [workers=1] | crawled=506 queue=138
+2026-03-28 18:54:10 HTTP 200 https://www.wnba.com/news/golden-state-valkyries-expansion-draft
+2026-03-28 18:54:10 HTTP 200 https://wings.wnba.com/news/dallas-wings-back-home-to-take-on-seattle-storm
+2026-03-28 18:54:12 Parsed: https://wings.wnba.com/news/dallas-wings-back-home-to-take-on-seattle-storm
+2026-03-28 18:54:12 Batch 1 [workers=1] | crawled=507 queue=138
+2026-03-28 18:54:13 HTTP 200 https://wings.wnba.com/news/dallas-wings-look-to-finish-road-trip-strong-in-new-york
+2026-03-28 18:54:13 Parsed: https://www.wnba.com/news/golden-state-valkyries-expansion-draft
+2026-03-28 18:54:13 Batch 1 [workers=1] | crawled=176 queue=183
+2026-03-28 18:54:13 HTTP 200 https://www.wnba.com/news/state-street-wnba-partnership
+2026-03-28 18:54:14 Parsed: https://wings.wnba.com/news/dallas-wings-look-to-finish-road-trip-strong-in-new-york
+2026-03-28 18:54:14 Batch 1 [workers=1] | crawled=508 queue=137
+2026-03-28 18:54:15 Parsed: https://www.wnba.com/news/state-street-wnba-partnership
+2026-03-28 18:54:15 Batch 1 [workers=1] | crawled=177 queue=183
+2026-03-28 18:54:16 HTTP 200 https://wings.wnba.com/news/watch-the-wings-live-tonight-on-fssw-plus-tip-off-at-7-p-m
+2026-03-28 18:54:16 HTTP 200 https://www.wnba.com/news/versant-wnba-media-rights-agreement
+2026-03-28 18:54:18 Parsed: https://wings.wnba.com/news/watch-the-wings-live-tonight-on-fssw-plus-tip-off-at-7-p-m
+2026-03-28 18:54:18 Batch 1 [workers=1] | crawled=509 queue=137
+2026-03-28 18:54:18 HTTP 200 https://wings.wnba.com/news/dallas-wings-announce-opening-day-roster
+2026-03-28 18:54:19 Parsed: https://www.wnba.com/news/versant-wnba-media-rights-agreement
+2026-03-28 18:54:19 Batch 1 [workers=1] | crawled=178 queue=185
+2026-03-28 18:54:20 HTTP 200 https://www.wnba.com/news/naismith-basketball-hall-of-fame-2026-finalists
+2026-03-28 18:54:20 Parsed: https://wings.wnba.com/news/dallas-wings-announce-opening-day-roster
+2026-03-28 18:54:20 Batch 1 [workers=1] | crawled=510 queue=136
+2026-03-28 18:54:21 HTTP 200 https://wings.wnba.com/news/dallas-wings-waive-veronica-burton
+2026-03-28 18:54:21 Parsed: https://www.wnba.com/news/naismith-basketball-hall-of-fame-2026-finalists
+2026-03-28 18:54:22 IDOR verify: https://www.wnba.com/news/player/{id}/jennifer-azzi param=path_id value=100382
+2026-03-28 18:54:22 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/jennifer-azzi
+2026-03-28 18:54:22 IDOR verify: https://www.wnba.com/news/player/{id}/candace-parker param=path_id value=201496
+2026-03-28 18:54:22 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/candace-parker
+2026-03-28 18:54:22 IDOR verify: https://www.wnba.com/news/player/{id}/elena-delle-donne param=path_id value=203399
+2026-03-28 18:54:22 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/elena-delle-donne
+2026-03-28 18:54:22 IDOR verify: https://www.wnba.com/news/player/{id}/chamique-holdsclaw param=path_id value=100356
+2026-03-28 18:54:22 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/chamique-holdsclaw
+2026-03-28 18:54:22 Batch 1 [workers=1] | crawled=179 queue=187
+2026-03-28 18:54:22 HTTP 200 https://www.wnba.com/news/chicago-sky-name-teresa-weatherspoon-as-head-coach
+2026-03-28 18:54:22 Parsed: https://wings.wnba.com/news/dallas-wings-waive-veronica-burton
+2026-03-28 18:54:22 Batch 1 [workers=1] | crawled=511 queue=135
+2026-03-28 18:54:23 HTTP 200 https://wings.wnba.com/news/2017-wings-draft-class
+2026-03-28 18:54:24 Parsed: https://www.wnba.com/news/chicago-sky-name-teresa-weatherspoon-as-head-coach
+2026-03-28 18:54:24 IDOR verify: https://www.wnba.com/news/team/{id}/chicago-sky param=path_id value=1611661329
+2026-03-28 18:54:24 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/team/{id}/chicago-sky
+2026-03-28 18:54:24 Batch 1 [workers=1] | crawled=180 queue=189
+2026-03-28 18:54:25 HTTP 200 https://www.wnba.com/news/naismith-basketball-hall-of-fame-2025-finalists
+2026-03-28 18:54:25 Parsed: https://wings.wnba.com/news/2017-wings-draft-class
+2026-03-28 18:54:25 Batch 1 [workers=1] | crawled=512 queue=135
+2026-03-28 18:54:26 HTTP 200 https://wings.wnba.com/news/dallas-wings-statement-2
+2026-03-28 18:54:27 Parsed: https://wings.wnba.com/news/dallas-wings-statement-2
+2026-03-28 18:54:27 Batch 1 [workers=1] | crawled=513 queue=135
+2026-03-28 18:54:27 Parsed: https://www.wnba.com/news/naismith-basketball-hall-of-fame-2025-finalists
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://www.wnba.com/news/naismith-basketball-hall-of-fame-2025-finalists
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://www.wnba.com/news/naismith-basketball-hall-of-fame-2025-finalists | Entropy: 5.19 | Class: base64 | Context: 'LFkmHLd45I6YmTbKakj_fuWJ0hnO5nBlQ4WnI2hFpmb7PTIUZFxV2s1e89Mhm1L6sNSjwbAlswc$" data-outlook-id="'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:54:27
+================================================================
+
+2026-03-28 18:54:27 [!] Entropy: high entropy string (entropy=5.19) at https://www.wnba.com/news/naismith-basketball-hall-of-fame-2025-finalists
+2026-03-28 18:54:28 Batch 1 [workers=1] | crawled=181 queue=190
+2026-03-28 18:54:28 HTTP 200 https://wings.wnba.com/news/trade-amanda-zahui-b-new-york-liberty
+2026-03-28 18:54:28 HTTP 200 https://www.wnba.com/news/indiana-fever-hire-stephanie-white-as-head-coach
+2026-03-28 18:54:30 Parsed: https://wings.wnba.com/news/trade-amanda-zahui-b-new-york-liberty
+2026-03-28 18:54:30 Batch 1 [workers=1] | crawled=514 queue=134
+2026-03-28 18:54:31 HTTP 200 https://wings.wnba.com/news/wings-win-third-straight-mercury
+2026-03-28 18:54:31 Parsed: https://www.wnba.com/news/indiana-fever-hire-stephanie-white-as-head-coach
+2026-03-28 18:54:31 Batch 1 [workers=1] | crawled=182 queue=193
+2026-03-28 18:54:31 HTTP 200 https://www.wnba.com/news/nakase-2025-coty
+2026-03-28 18:54:32 No WAF detected on ablink.email.wnba.com
+2026-03-28 18:54:32 Parsed: https://wings.wnba.com/news/wings-win-third-straight-mercury
+2026-03-28 18:54:32 Batch 1 [workers=1] | crawled=515 queue=134
+2026-03-28 18:54:32 /.well-known/apple-app-site-association found on ablink.email.wnba.com
+2026-03-28 18:54:32 HTTP 200 https://wings.wnba.com/news/game-preview-wings-vs-stars
+2026-03-28 18:54:32 Parsed: https://www.wnba.com/news/nakase-2025-coty
+2026-03-28 18:54:33 IDOR verify: https://www.wnba.com/news/team/{id}/golden-state-valkyries param=path_id value=1611661331
+2026-03-28 18:54:33 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/team/{id}/golden-state-valkyries
+2026-03-28 18:54:33 Batch 1 [workers=1] | crawled=183 queue=194
+2026-03-28 18:54:33 Actuator shutdown exists (protected): https://ablink.email.wnba.com/actuator/shutdown [403]
+2026-03-28 18:54:33 HTTP 200 https://www.wnba.com/news/2024-kia-rookie-of-the-year
+2026-03-28 18:54:35 SPF OK for wnba.com: v=spf1 include:%{ir}.%{v}.%{d}.spf.has.pphosted.com include:mktomail.com include
+2026-03-28 18:54:35 Parsed: https://wings.wnba.com/news/game-preview-wings-vs-stars
+2026-03-28 18:54:35 Batch 1 [workers=1] | crawled=516 queue=135
+2026-03-28 18:54:35 Parsed: https://www.wnba.com/news/2024-kia-rookie-of-the-year
+2026-03-28 18:54:35 Batch 1 [workers=1] | crawled=184 queue=197
+2026-03-28 18:54:35 DMARC OK for wnba.com (p=reject — full enforcement)
+2026-03-28 18:54:36 HTTP 200 https://wings.wnba.com/news/dallas-wings-win-triple-overtime
+2026-03-28 18:54:36 HTTP 200 https://www.wnba.com/news/allison-barber-president-coo-catchings-named-basketball-operations
+2026-03-28 18:54:37 DKIM selectors found for wnba.com: selector1, selector2
+2026-03-28 18:54:37 S3 permutation scan: 15 candidates for 'wnba' (ablink.email.wnba.com)
+2026-03-28 18:54:37 Parsed: https://wings.wnba.com/news/dallas-wings-win-triple-overtime
+2026-03-28 18:54:37 Batch 1 [workers=1] | crawled=517 queue=134
+2026-03-28 18:54:38 HTTP 200 https://wings.wnba.com/news/game-preview-wings-mercury
+2026-03-28 18:54:39 Parsed: https://www.wnba.com/news/allison-barber-president-coo-catchings-named-basketball-operations
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://www.wnba.com/news/allison-barber-president-coo-catchings-named-basketball-operations
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://www.wnba.com/news/allison-barber-president-coo-catchings-named-basketball-operations | Entropy: 4.90 | Class: base64 | Context: '7cSOCqw5XVxmQ&amp;m=kPxmQOD5qUymhffOiZVFLMszSr0bADLkvWRHinfRrv4&amp;s=DB8wYcSd2MwmZ'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:54:39
+================================================================
+
+2026-03-28 18:54:39 [!] Entropy: high entropy string (entropy=4.90) at https://www.wnba.com/news/allison-barber-president-coo-catchings-named-basketball-operations
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://www.wnba.com/news/allison-barber-president-coo-catchings-named-basketball-operations
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://www.wnba.com/news/allison-barber-president-coo-catchings-named-basketball-operations | Entropy: 4.81 | Class: base64 | Context: '88598330696-26sdata-3D1AffBdkELceDSWlJq0qNq1etwjNS0viSdFoZ32Kq62Y-253D-26reserved-3D0'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:54:39
+================================================================
+
+2026-03-28 18:54:39 [!] Entropy: high entropy string (entropy=4.81) at https://www.wnba.com/news/allison-barber-president-coo-catchings-named-basketball-operations
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://www.wnba.com/news/allison-barber-president-coo-catchings-named-basketball-operations
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://www.wnba.com/news/allison-barber-president-coo-catchings-named-basketball-operations | Entropy: 4.90 | Class: base64 | Context: 'LkvWRHinfRrv4&amp;s=iJf06aeBN02r7H3zgDQxvH8GNXGDXVkiYq2TPvNOM5g&amp;e="><em>https:/'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:54:39
+================================================================
+
+2026-03-28 18:54:39 [!] Entropy: high entropy string (entropy=4.90) at https://www.wnba.com/news/allison-barber-president-coo-catchings-named-basketball-operations
+2026-03-28 18:54:39 Batch 1 [workers=1] | crawled=185 queue=198
+2026-03-28 18:54:39 HTTP 200 https://www.wnba.com/news/tamika-catchings-pse-director-of-player-programs-and-franchise-development
+2026-03-28 18:54:40 Parsed: https://wings.wnba.com/news/game-preview-wings-mercury
+2026-03-28 18:54:40 Batch 1 [workers=1] | crawled=518 queue=134
+2026-03-28 18:54:41 HTTP 200 https://wings.wnba.com/news/dallas-wings-re-sign-karima-christmas-kelly
+2026-03-28 18:54:42 Parsed: https://www.wnba.com/news/tamika-catchings-pse-director-of-player-programs-and-franchise-development
+2026-03-28 18:54:42 Parsed: https://wings.wnba.com/news/dallas-wings-re-sign-karima-christmas-kelly
+2026-03-28 18:54:42 Batch 1 [workers=1] | crawled=186 queue=200
+2026-03-28 18:54:42 Batch 1 [workers=1] | crawled=519 queue=136
+2026-03-28 18:54:43 HTTP 200 https://www.wnba.com/news/pacers-name-kelly-krauskopf-assistant-general-manager-2
+2026-03-28 18:54:43 HTTP 200 https://wings.wnba.com/news/3049
+2026-03-28 18:54:44 Parsed: https://wings.wnba.com/news/3049
+2026-03-28 18:54:45 Batch 1 [workers=1] | crawled=520 queue=135
+2026-03-28 18:54:45 HTTP 200 https://wings.wnba.com/news/wings-go-up-against-the-sun
+2026-03-28 18:54:45 Parsed: https://www.wnba.com/news/pacers-name-kelly-krauskopf-assistant-general-manager-2
+2026-03-28 18:54:45 Batch 1 [workers=1] | crawled=187 queue=200
+2026-03-28 18:54:46 HTTP 200 https://www.wnba.com/news/wnba-announces-broadcast-and-streaming-schedule-for-leagues-25th-regular-season
+2026-03-28 18:54:47 Parsed: https://www.wnba.com/news/wnba-announces-broadcast-and-streaming-schedule-for-leagues-25th-regular-season
+2026-03-28 18:54:48 IDOR verify: https://www.wnba.com/news/player/{id}/sabrina-ionescu param=path_id value=1629477
+2026-03-28 18:54:48 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/sabrina-ionescu
+2026-03-28 18:54:48 IDOR verify: https://www.wnba.com/news/team/{id}/phoenix-mercury param=path_id value=1611661317
+2026-03-28 18:54:48 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/team/{id}/phoenix-mercury
+2026-03-28 18:54:48 IDOR verify: https://www.wnba.com/news/player/{id}/sue-bird param=path_id value=100720
+2026-03-28 18:54:48 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/sue-bird
+2026-03-28 18:54:48 IDOR verify: https://www.wnba.com/news/player/{id}/nneka-ogwumike param=path_id value=203014
+2026-03-28 18:54:48 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/nneka-ogwumike
+2026-03-28 18:54:48 IDOR verify: https://www.wnba.com/news/team/{id}/los-angeles-sparks param=path_id value=1611661320
+2026-03-28 18:54:48 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/team/{id}/los-angeles-sparks
+2026-03-28 18:54:48 IDOR verify: https://www.wnba.com/news/player/{id}/a’ja-wilson param=path_id value=1628932
+2026-03-28 18:54:48 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/a’ja-wilson
+2026-03-28 18:54:48 IDOR verify: https://www.wnba.com/news/team/{id}/minnesota-lynx param=path_id value=1611661324
+2026-03-28 18:54:48 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/team/{id}/minnesota-lynx
+2026-03-28 18:54:48 IDOR verify: https://www.wnba.com/news/player/{id}/diana-taurasi param=path_id value=100940
+2026-03-28 18:54:48 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/diana-taurasi
+2026-03-28 18:54:48 Batch 1 [workers=1] | crawled=188 queue=203
+2026-03-28 18:54:48 Parsed: https://wings.wnba.com/news/wings-go-up-against-the-sun
+2026-03-28 18:54:48 Batch 1 [workers=1] | crawled=521 queue=136
+2026-03-28 18:54:48 Saved domain: https://ablink.email.wnba.com
+2026-03-28 18:54:48 HTTP 200 https://www.wnba.com/news/wnba-announces-2022-broadcast-and-streaming-schedule-for-cbs-nba-tv-prime-video-and-facebook-watch
+2026-03-28 18:54:48 HTTP 200 https://wings.wnba.com/news/dallas-wings-close-out-commissioners-cup-with-setback-to-seattle-storm
+2026-03-28 18:54:50 Parsed: https://www.wnba.com/news/wnba-announces-2022-broadcast-and-streaming-schedule-for-cbs-nba-tv-prime-video-and-facebook-watch
+2026-03-28 18:54:50 IDOR verify: https://www.wnba.com/news/team/{id}/atlanta-dream param=path_id value=1611661330
+2026-03-28 18:54:50 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/team/{id}/atlanta-dream
+2026-03-28 18:54:50 Batch 1 [workers=1] | crawled=189 queue=202
+2026-03-28 18:54:50 HTTP 200 https://www.wnba.com/news/2024-regular-season-schedule-release
+2026-03-28 18:54:51 Parsed: https://wings.wnba.com/news/dallas-wings-close-out-commissioners-cup-with-setback-to-seattle-storm
+2026-03-28 18:54:51 Batch 1 [workers=1] | crawled=522 queue=136
+2026-03-28 18:54:51 HTTP 200 https://wings.wnba.com/news/comeback-bid-comes-up-short-for-dallas-wings-at-chicago-sky
+2026-03-28 18:54:52 Parsed: https://www.wnba.com/news/2024-regular-season-schedule-release
+2026-03-28 18:54:52 Batch 1 [workers=1] | crawled=190 queue=202
+2026-03-28 18:54:52 CT subdomain live: ablink.wnbaemail.wnba.com -> 3.166.192.51
+2026-03-28 18:54:53 HTTP 200 https://www.wnba.com/news/collegiate-spotlight-south-carolina
+2026-03-28 18:54:54 Parsed: https://wings.wnba.com/news/comeback-bid-comes-up-short-for-dallas-wings-at-chicago-sky
+2026-03-28 18:54:54 Batch 1 [workers=1] | crawled=523 queue=136
+2026-03-28 18:54:55 ASN 3.166.192.32 -> AS16509 Amazon.com, Inc. [CDN: CloudFront]
+2026-03-28 18:54:55 [PTR] 3.166.192.32 → server-3-166-192-32.phl51.r.cloudfront.net
+
+================================================================
+  !! INFO ALERT: REVERSE DNS DISCOVERY !!
+  Target     : 3.166.192.32
+  Detail     : PTR lookup found 1 hostname(s): server-3-166-192-32.phl51.r.cloudfront.net
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:54:55
+================================================================
+
+2026-03-28 18:54:55 DNS ablink.wnbaemail.wnba.com → 3.166.192.69
+2026-03-28 18:54:55 DNS ablink.wnbaemail.wnba.com → 3.166.192.32
+2026-03-28 18:54:55 DNS ablink.wnbaemail.wnba.com → 3.166.192.51
+2026-03-28 18:54:55 DNS ablink.wnbaemail.wnba.com → 3.166.192.126
+2026-03-28 18:54:55 TLS config analysis: ablink.wnbaemail.wnba.com:443 [sslyze]
+2026-03-28 18:54:55 Open port 53 on ablink.wnbaemail.wnba.com
+2026-03-28 18:54:55 Open port 8080 on ablink.wnbaemail.wnba.com
+2026-03-28 18:54:55 Open port 80 on ablink.wnbaemail.wnba.com
+2026-03-28 18:54:55 Open port 443 on ablink.wnbaemail.wnba.com
+2026-03-28 18:54:55 ERROR: MX lookup failed for ablink.wnbaemail.wnba.com: The DNS response does not contain an answer to the question: ablink.wnbaemail.wnba.com. IN MX
+2026-03-28 18:54:55 HTTP 200 https://wings.wnba.com/news/behind-satou-sabally-triple-double-wings-fly-by-washington
+2026-03-28 18:54:55 SSL ablink.wnbaemail.wnba.com expires Oct  8 23:59:59 2026 GMT
+2026-03-28 18:54:55 SSL SANs (6): ablink.hello.email.nba.com, ablink.nbaemail.nba.com, ablink.wnbaemail.wnba.com, ablink.email.wnba.com, ablink.email.nba.com, ablink.hello.email.wnba.com
+2026-03-28 18:54:56 Parsed: https://www.wnba.com/news/collegiate-spotlight-south-carolina
+2026-03-28 18:54:56 IDOR verify: https://www.wnba.com/news/player/{id}/aliyah-boston param=path_id value=1641648
+2026-03-28 18:54:56 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/aliyah-boston
+2026-03-28 18:54:56 Batch 1 [workers=1] | crawled=191 queue=203
+2026-03-28 18:54:56 WHOIS ablink.wnbaemail.wnba.com registrar=GoDaddy Corporate Domains, LLC
+2026-03-28 18:54:57 Parsed: https://wings.wnba.com/news/behind-satou-sabally-triple-double-wings-fly-by-washington
+2026-03-28 18:54:57 HTTP 200 https://www.wnba.com/news/25-things-that-happened-in-2025-offseason
+2026-03-28 18:54:57 Batch 1 [workers=1] | crawled=524 queue=135
+2026-03-28 18:54:57 HTTP 200 https://wings.wnba.com/news/aces-use-strong-second-half-to-defeat-wings
+2026-03-28 18:54:59 Parsed: https://www.wnba.com/news/25-things-that-happened-in-2025-offseason
+2026-03-28 18:54:59 Batch 1 [workers=1] | crawled=192 queue=231
+2026-03-28 18:55:00 Parsed: https://wings.wnba.com/news/aces-use-strong-second-half-to-defeat-wings
+2026-03-28 18:55:00 State saved — 135 in queue, 525 crawled.
+2026-03-28 18:55:00 Batch 1 [workers=1] | crawled=525 queue=134
+2026-03-28 18:55:01 HTTP 200 https://wings.wnba.com/news/dallas-wings-fall-to-connecticut-sun-85-67
+2026-03-28 18:55:03 HTTP 200 https://www.wnba.com/news/senior-watch-2019-ncaa-tournament-albany-region
+2026-03-28 18:55:04 Parsed: https://wings.wnba.com/news/dallas-wings-fall-to-connecticut-sun-85-67
+2026-03-28 18:55:04 Batch 1 [workers=1] | crawled=526 queue=133
+2026-03-28 18:55:04 Parsed: https://www.wnba.com/news/senior-watch-2019-ncaa-tournament-albany-region
+2026-03-28 18:55:04 Batch 1 [workers=1] | crawled=193 queue=233
+2026-03-28 18:55:04 HTTP 200 https://wings.wnba.com/news/ogunbowale-sets-assists-mark-but-wings-fall-at-mercury
+2026-03-28 18:55:05 HTTP 200 https://www.wnba.com/news/wnba-and-wnbpa-reach-tentative-agreement-on-groundbreaking-eight-year-collective-bargaining-agreement
+2026-03-28 18:55:06 Parsed: https://www.wnba.com/news/wnba-and-wnbpa-reach-tentative-agreement-on-groundbreaking-eight-year-collective-bargaining-agreement
+2026-03-28 18:55:07 Batch 1 [workers=1] | crawled=194 queue=235
+2026-03-28 18:55:07 HTTP 200 https://www.wnba.com/news/2025-free-agency-decoded
+2026-03-28 18:55:07 Parsed: https://wings.wnba.com/news/ogunbowale-sets-assists-mark-but-wings-fall-at-mercury
+2026-03-28 18:55:07 IDOR verify: https://wings.wnba.com/news/player/{id}/teaira-mccowan param=path_id value=1629479
+2026-03-28 18:55:07 IDOR dismissed (not auth-gated or no per-object diff): https://wings.wnba.com/news/player/{id}/teaira-mccowan
+2026-03-28 18:55:07 Batch 1 [workers=1] | crawled=527 queue=133
+2026-03-28 18:55:08 HTTP 200 https://wings.wnba.com/news/dallas-wings-drop-double-overtime-heartbreaker-to-phoenix-mercury
+2026-03-28 18:55:09 Parsed: https://wings.wnba.com/news/dallas-wings-drop-double-overtime-heartbreaker-to-phoenix-mercury
+2026-03-28 18:55:09 Batch 1 [workers=1] | crawled=528 queue=132
+2026-03-28 18:55:09 HTTP 200 https://wings.wnba.com/news/dallas-wings-defeat-storm-clinch-fourth-seed-and-home-playoff-series-in-round-1
+2026-03-28 18:55:10 Parsed: https://www.wnba.com/news/2025-free-agency-decoded
+2026-03-28 18:55:10 Batch 1 [workers=1] | crawled=195 queue=237
+2026-03-28 18:55:10 HTTP 200 https://www.wnba.com/news/wnba-free-agency-decoded
+2026-03-28 18:55:12 Parsed: https://wings.wnba.com/news/dallas-wings-defeat-storm-clinch-fourth-seed-and-home-playoff-series-in-round-1
+2026-03-28 18:55:12 Batch 1 [workers=1] | crawled=529 queue=131
+2026-03-28 18:55:13 Parsed: https://www.wnba.com/news/wnba-free-agency-decoded
+2026-03-28 18:55:13 IDOR verify: https://www.wnba.com/news/player/{id}/natasha-cloud param=path_id value=204333
+2026-03-28 18:55:13 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/natasha-cloud
+2026-03-28 18:55:13 IDOR verify: https://www.wnba.com/news/player/{id}/satou-sabally param=path_id value=1630149
+2026-03-28 18:55:13 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/satou-sabally
+2026-03-28 18:55:13 Batch 1 [workers=1] | crawled=196 queue=236
+2026-03-28 18:55:13 HTTP 200 https://wings.wnba.com/news/shorthanded-wings-fall-at-atlanta
+2026-03-28 18:55:13 HTTP 200 https://www.wnba.com/news/media-rights-deal-disney-prime-nbc
+2026-03-28 18:55:14 Parsed: https://wings.wnba.com/news/shorthanded-wings-fall-at-atlanta
+2026-03-28 18:55:15 Batch 1 [workers=1] | crawled=530 queue=130
+2026-03-28 18:55:15 HTTP 200 https://wings.wnba.com/news/wings-clinch-playoff-berth-with-win-over-fever
+2026-03-28 18:55:16 Parsed: https://www.wnba.com/news/media-rights-deal-disney-prime-nbc
+2026-03-28 18:55:16 Batch 1 [workers=1] | crawled=197 queue=239
+2026-03-28 18:55:16 HTTP 200 https://www.wnba.com/news/social-justice-comm-cup-2024
+2026-03-28 18:55:18 Parsed: https://wings.wnba.com/news/wings-clinch-playoff-berth-with-win-over-fever
+2026-03-28 18:55:18 Batch 1 [workers=1] | crawled=531 queue=129
+2026-03-28 18:55:18 HTTP 200 https://wings.wnba.com/news/dallas-wings-setback-by-connecticut-sun
+2026-03-28 18:55:19 Parsed: https://www.wnba.com/news/social-justice-comm-cup-2024
+2026-03-28 18:55:19 IDOR verify: https://www.wnba.com/news/player/{id}/layshia-clarendon param=path_id value=203406
+2026-03-28 18:55:19 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/layshia-clarendon
+2026-03-28 18:55:19 Batch 1 [workers=1] | crawled=198 queue=245
+2026-03-28 18:55:19 HTTP 200 https://www.wnba.com/news/queens-rio-shares-journey-friendship-sue-bird-tina-charles
+2026-03-28 18:55:19 Parsed: https://wings.wnba.com/news/dallas-wings-setback-by-connecticut-sun
+2026-03-28 18:55:19 Batch 1 [workers=1] | crawled=532 queue=129
+2026-03-28 18:55:20 HTTP 200 https://wings.wnba.com/news/reigning-wnba-rookie-year-gives-advice-years-2018-rookie-class
+2026-03-28 18:55:21 Parsed: https://wings.wnba.com/news/reigning-wnba-rookie-year-gives-advice-years-2018-rookie-class
+2026-03-28 18:55:21 Batch 1 [workers=1] | crawled=533 queue=129
+2026-03-28 18:55:22 Parsed: https://www.wnba.com/news/queens-rio-shares-journey-friendship-sue-bird-tina-charles
+2026-03-28 18:55:22 IDOR verify: https://www.wnba.com/news/player/{id}/tina-charles param=path_id value=202250
+2026-03-28 18:55:22 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/tina-charles
+2026-03-28 18:55:22 Batch 1 [workers=1] | crawled=199 queue=247
+2026-03-28 18:55:22 HTTP 200 https://wings.wnba.com/news/5088
+2026-03-28 18:55:23 HTTP 200 https://www.wnba.com/news/att-wnba-all-star-2022-honoring-legends-and-eyeing-the-future
+2026-03-28 18:55:25 Parsed: https://wings.wnba.com/news/5088
+2026-03-28 18:55:25 Batch 1 [workers=1] | crawled=534 queue=130
+2026-03-28 18:55:25 Parsed: https://www.wnba.com/news/att-wnba-all-star-2022-honoring-legends-and-eyeing-the-future
+2026-03-28 18:55:26 IDOR verify: https://www.wnba.com/news/player/{id}/jewell-loyd param=path_id value=204319
+2026-03-28 18:55:26 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/jewell-loyd
+2026-03-28 18:55:26 IDOR verify: https://www.wnba.com/news/player/{id}/sylvia-fowles param=path_id value=201480
+2026-03-28 18:55:26 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/news/player/{id}/sylvia-fowles
+2026-03-28 18:55:26 State saved — 250 in queue, 200 crawled.
+2026-03-28 18:55:26 Batch 1 [workers=1] | crawled=200 queue=249
+2026-03-28 18:55:26 HTTP 200 https://wings.wnba.com/news/review-wings-overseas
+2026-03-28 18:55:26 HTTP 200 https://www.wnba.com/news/portrait-of-a-powerful-family
+2026-03-28 18:55:28 Parsed: https://wings.wnba.com/news/review-wings-overseas
+2026-03-28 18:55:28 Parsed: https://www.wnba.com/news/portrait-of-a-powerful-family
+2026-03-28 18:55:28 Batch 1 [workers=1] | crawled=535 queue=133
+2026-03-28 18:55:28 Batch 1 [workers=1] | crawled=201 queue=252
+2026-03-28 18:55:31 HTTP 200 https://wings.wnba.com/news/wings-sign-grace-berger-to-seven-day-hardship-contract
+2026-03-28 18:55:33 ERROR: Timeout fetching: https://www.wnba.com/news/wnba-lottery-2025-statefarm
+2026-03-28 18:55:33 Parsed: https://wings.wnba.com/news/wings-sign-grace-berger-to-seven-day-hardship-contract
+2026-03-28 18:55:33 Batch 1 [workers=1] | crawled=536 queue=134
+2026-03-28 18:55:35 HTTP 200 https://wings.wnba.com/news/dallas-wings-sign-liatu-king
+2026-03-28 18:55:35 Batch 1 [workers=1] | crawled=201 queue=251
+2026-03-28 18:55:35 HTTP 200 https://www.wnba.com/news/wnba-draft-lottery-2026-results
+2026-03-28 18:55:36 No WAF detected on ablink.wnbaemail.wnba.com
+2026-03-28 18:55:36 /.well-known/apple-app-site-association found on ablink.wnbaemail.wnba.com
+2026-03-28 18:55:37 Actuator shutdown exists (protected): https://ablink.wnbaemail.wnba.com/actuator/shutdown [403]
+2026-03-28 18:55:37 Parsed: https://www.wnba.com/news/wnba-draft-lottery-2026-results
+2026-03-28 18:55:37 Batch 1 [workers=1] | crawled=202 queue=252
+2026-03-28 18:55:37 Parsed: https://wings.wnba.com/news/dallas-wings-sign-liatu-king
+2026-03-28 18:55:38 IDOR verify: https://wings.wnba.com/news/player/{id}/liatu-king param=path_id value=1642820
+2026-03-28 18:55:38 IDOR dismissed (not auth-gated or no per-object diff): https://wings.wnba.com/news/player/{id}/liatu-king
+2026-03-28 18:55:38 Batch 1 [workers=1] | crawled=537 queue=134
+2026-03-28 18:55:38 HTTP 200 https://www.wnba.com/news/senior-watch-2019-ncaa-tournament-chicago-region
+2026-03-28 18:55:38 HTTP 200 https://wings.wnba.com/news/dallas-wings-center-teaira-mccowan-has-been-named-the-wnba-western-conference-player-of-the-month
+2026-03-28 18:55:39 S3 permutation scan: 15 candidates for 'wnba' (ablink.wnbaemail.wnba.com)
+2026-03-28 18:55:39 Parsed: https://www.wnba.com/news/senior-watch-2019-ncaa-tournament-chicago-region
+2026-03-28 18:55:39 Batch 1 [workers=1] | crawled=203 queue=251
+2026-03-28 18:55:40 HTTP 200 https://www.wnba.com/news/seattle-selects-jewell-loyd-with-no-1-pick
+2026-03-28 18:55:41 Parsed: https://wings.wnba.com/news/dallas-wings-center-teaira-mccowan-has-been-named-the-wnba-western-conference-player-of-the-month
+2026-03-28 18:55:41 Batch 1 [workers=1] | crawled=538 queue=133
+2026-03-28 18:55:41 Parsed: https://www.wnba.com/news/seattle-selects-jewell-loyd-with-no-1-pick
+2026-03-28 18:55:41 IDOR verify: http://www.wnba.com/draft/{id}/draft_board.html param=path_id value=2015
+2026-03-28 18:55:42 IDOR dismissed (not auth-gated or no per-object diff): http://www.wnba.com/draft/{id}/draft_board.html
+2026-03-28 18:55:42 Batch 1 [workers=1] | crawled=204 queue=255
+2026-03-28 18:55:42 ERROR: Async fetch failed for http://www.wnba.com/all-time-wnba-champions/: Server disconnected
+2026-03-28 18:55:42 HTTP 200 https://wings.wnba.com/news/27129
+2026-03-28 18:55:43 Batch 1 [workers=1] | crawled=204 queue=254
+2026-03-28 18:55:43 Parsed: https://wings.wnba.com/news/27129
+2026-03-28 18:55:43 Batch 1 [workers=1] | crawled=539 queue=132
+2026-03-28 18:55:44 HTTP 200 https://www.wnba.com/playoffs/2025/
+2026-03-28 18:55:44 HTTP 200 https://wings.wnba.com/news/dallas-wings-name-coaching-staff
+2026-03-28 18:55:45 Parsed: https://www.wnba.com/playoffs/2025/
+2026-03-28 18:55:45 Batch 1 [workers=1] | crawled=205 queue=253
+2026-03-28 18:55:45 HTTP 200 https://www.wnba.com/playoffs/2024
+2026-03-28 18:55:46 Parsed: https://wings.wnba.com/news/dallas-wings-name-coaching-staff
+2026-03-28 18:55:46 Batch 1 [workers=1] | crawled=540 queue=131
+2026-03-28 18:55:46 Saved domain: https://ablink.wnbaemail.wnba.com
+2026-03-28 18:55:47 HTTP 200 https://wings.wnba.com/news/mothers-day-balancing-basketball-and-being-a-mom
+2026-03-28 18:55:48 Parsed: https://www.wnba.com/playoffs/2024
+2026-03-28 18:55:48 Batch 1 [workers=1] | crawled=206 queue=254
+2026-03-28 18:55:48 HTTP 200 https://www.wnba.com/playoffs/2023
+2026-03-28 18:55:49 Parsed: https://wings.wnba.com/news/mothers-day-balancing-basketball-and-being-a-mom
+2026-03-28 18:55:49 Batch 1 [workers=1] | crawled=541 queue=131
+2026-03-28 18:55:49 HTTP 200 https://wings.wnba.com/news/1066
+2026-03-28 18:55:50 Parsed: https://www.wnba.com/playoffs/2023
+2026-03-28 18:55:50 Batch 1 [workers=1] | crawled=207 queue=255
+2026-03-28 18:55:50 HTTP 503 https://www.wnba.com/playoffs/2022/
+2026-03-28 18:55:52 Batch 1 [workers=1] | crawled=207 queue=254
+2026-03-28 18:55:52 Parsed: https://wings.wnba.com/news/1066
+2026-03-28 18:55:52 Batch 1 [workers=1] | crawled=542 queue=130
+2026-03-28 18:55:53 HTTP 200 https://wings.wnba.com/news/dallas-wings-win-inaugural-home-opener-san-antonio-stars-82-77
+2026-03-28 18:55:53 HTTP 200 https://www.wnba.com/playoffs/2021/
+2026-03-28 18:55:54 CT subdomain live: aud-qai.wnba.com -> 157.166.245.104
+2026-03-28 18:55:55 Parsed: https://wings.wnba.com/news/dallas-wings-win-inaugural-home-opener-san-antonio-stars-82-77
+2026-03-28 18:55:55 Batch 1 [workers=1] | crawled=543 queue=130
+2026-03-28 18:55:56 Parsed: https://www.wnba.com/playoffs/2021/
+2026-03-28 18:55:56 IDOR verify: https://www.wnba.com/game/{id}/NYLPHO/ param=path_id value=20210923
+2026-03-28 18:55:56 HTTP 200 https://wings.wnba.com/news/tbt-qa-vet-plenette-pierson
+2026-03-28 18:55:58 Parsed: https://wings.wnba.com/news/tbt-qa-vet-plenette-pierson
+2026-03-28 18:55:58 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/game/{id}/NYLPHO/
+2026-03-28 18:55:58 IDOR verify: https://www.wnba.com/game/{id}/PHOCHI/ param=path_id value=20211015
+2026-03-28 18:55:58 Batch 1 [workers=1] | crawled=544 queue=129
+2026-03-28 18:55:59 HTTP 200 https://wings.wnba.com/news/leaders-of-the-pack-allisha-gray
+2026-03-28 18:56:00 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/game/{id}/PHOCHI/
+2026-03-28 18:56:00 IDOR verify: https://www.wnba.com/game/{id}/CHIMIN/ param=path_id value=20210926
+2026-03-28 18:56:01 Parsed: https://wings.wnba.com/news/leaders-of-the-pack-allisha-gray
+2026-03-28 18:56:01 Batch 1 [workers=1] | crawled=545 queue=128
+2026-03-28 18:56:02 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/game/{id}/CHIMIN/
+2026-03-28 18:56:02 IDOR verify: https://www.wnba.com/game/{id}/PHOSEA/ param=path_id value=20210926
+2026-03-28 18:56:02 HTTP 200 https://wings.wnba.com/news/wings-2019-draft-class-qa-megan-gustafson
+2026-03-28 18:56:03 Parsed: https://wings.wnba.com/news/wings-2019-draft-class-qa-megan-gustafson
+2026-03-28 18:56:03 Batch 1 [workers=1] | crawled=546 queue=127
+2026-03-28 18:56:03 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/game/{id}/PHOSEA/
+2026-03-28 18:56:03 IDOR verify: https://www.wnba.com/game/{id}/CHIPHO/ param=path_id value=20211010
+2026-03-28 18:56:05 HTTP 200 https://wings.wnba.com/news/wings-2019-draft-class-qa-morgan-bertsch
+2026-03-28 18:56:05 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/game/{id}/CHIPHO/
+2026-03-28 18:56:05 IDOR verify: https://www.wnba.com/game/{id}/DALCHI/ param=path_id value=20210923
+2026-03-28 18:56:06 Parsed: https://wings.wnba.com/news/wings-2019-draft-class-qa-morgan-bertsch
+2026-03-28 18:56:07 Batch 1 [workers=1] | crawled=547 queue=129
+2026-03-28 18:56:07 HTTP 200 https://wings.wnba.com/news/leaders-of-the-pack-skylar-diggins-smith
+2026-03-28 18:56:07 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/game/{id}/DALCHI/
+2026-03-28 18:56:07 IDOR verify: https://www.wnba.com/game/{id}/ param=path_id value=20211017
+2026-03-28 18:56:09 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/game/{id}/
+2026-03-28 18:56:09 IDOR verify: https://www.wnba.com/game/{id}/CHICON/ param=path_id value=20210928
+2026-03-28 18:56:10 Parsed: https://wings.wnba.com/news/leaders-of-the-pack-skylar-diggins-smith
+2026-03-28 18:56:10 Batch 1 [workers=1] | crawled=548 queue=128
+2026-03-28 18:56:10 HTTP 200 https://wings.wnba.com/news/inside-usa-basketball-training-camp-skylar-diggins-smith
+2026-03-28 18:56:11 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/game/{id}/CHICON/
+2026-03-28 18:56:11 IDOR verify: https://www.wnba.com/game/{id}/CONCHI/ param=path_id value=20211006
+2026-03-28 18:56:12 Parsed: https://wings.wnba.com/news/inside-usa-basketball-training-camp-skylar-diggins-smith
+2026-03-28 18:56:12 Batch 1 [workers=1] | crawled=549 queue=127
+2026-03-28 18:56:13 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/game/{id}/CONCHI/
+2026-03-28 18:56:13 IDOR verify: https://www.wnba.com/game/{id}/PHOLVA/ param=path_id value=20210930
+2026-03-28 18:56:13 HTTP 200 https://wings.wnba.com/news/dallas-wings-partner-with-legacy-construction-solutions-inc-establish-fellowship-program
+2026-03-28 18:56:14 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/game/{id}/PHOLVA/
+2026-03-28 18:56:14 IDOR verify: https://www.wnba.com/game/{id}/LVAPHO/ param=path_id value=20211006
+2026-03-28 18:56:16 ASN 157.166.245.104 -> AS5662 Turner Broadcasting System, Inc.
+2026-03-28 18:56:16 Parsed: https://wings.wnba.com/news/dallas-wings-partner-with-legacy-construction-solutions-inc-establish-fellowship-program
+2026-03-28 18:56:16 State saved — 127 in queue, 550 crawled.
+2026-03-28 18:56:16 Batch 1 [workers=1] | crawled=550 queue=126
+2026-03-28 18:56:16 [PTR] 157.166.245.104 → aud-qai.wnba.com
+
+================================================================
+  !! INFO ALERT: REVERSE DNS DISCOVERY !!
+  Target     : 157.166.245.104
+  Detail     : PTR lookup found 1 hostname(s): aud-qai.wnba.com
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:56:16
+================================================================
+
+2026-03-28 18:56:16 [ASN] AS5662 (AS5662 Turner Broadcasting System, Inc.) — 22 prefixes: 157.166.224.0/19, 157.166.144.0/23, 168.161.14.0/23, 157.166.154.0/23, 157.166.124.0/23, 198.81.230.0/24 (+16 more)
+
+================================================================
+  !! INFO ALERT: ASN PREFIX ENUMERATION !!
+  Target     : AS5662
+  Detail     : RIPE NCC reports 22 announced prefix(es) for AS5662 (AS5662 Turner Broadcasting System, Inc.): 157.166.224.0/19, 157.166.144.0/23, 168.161.14.0/23, 157.166.154.0/23, 157.166.124.0/23, 198.81.230.0/24 (+16 more)
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:56:16
+================================================================
+
+2026-03-28 18:56:16 DNS aud-qai.wnba.com → 157.166.245.104
+2026-03-28 18:56:16 TLS config analysis: aud-qai.wnba.com:443 [sslyze]
+2026-03-28 18:56:16 Open port 80 on aud-qai.wnba.com2026-03-28 18:56:16 Open port 443 on aud-qai.wnba.com
+2026-03-28 18:56:16 Open port 53 on aud-qai.wnba.com
+
+2026-03-28 18:56:16 Open port 8080 on aud-qai.wnba.com
+2026-03-28 18:56:16 ERROR: MX lookup failed for aud-qai.wnba.com: The DNS response does not contain an answer to the question: aud-qai.wnba.com. IN MX
+2026-03-28 18:56:16 HTTP 200 https://wings.wnba.com/news/wnba-announces-recipients-of-team-business-awards-for-2019-season
+2026-03-28 18:56:16 IDOR dismissed (not auth-gated or no per-object diff): https://www.wnba.com/game/{id}/LVAPHO/
+2026-03-28 18:56:16 Batch 1 [workers=1] | crawled=208 queue=342
+2026-03-28 18:56:17 WHOIS aud-qai.wnba.com registrar=GoDaddy Corporate Domains, LLC
+2026-03-28 18:56:17 HTTP 404 https://www.wnba.com/playoffs/2020/
+2026-03-28 18:56:18 Parsed: https://wings.wnba.com/news/wnba-announces-recipients-of-team-business-awards-for-2019-season
+2026-03-28 18:56:18 Batch 1 [workers=1] | crawled=551 queue=125
+2026-03-28 18:56:18 Batch 1 [workers=1] | crawled=208 queue=341
+2026-03-28 18:56:19 HTTP 200 https://wings.wnba.com/news/fourth-quarter-run-lifts-storm-over-wings
+2026-03-28 18:56:19 HTTP 404 https://www.wnba.com/playoffs/2019/
+2026-03-28 18:56:21 Parsed: https://wings.wnba.com/news/fourth-quarter-run-lifts-storm-over-wings
+2026-03-28 18:56:21 Batch 1 [workers=1] | crawled=552 queue=126
+2026-03-28 18:56:21 Batch 1 [workers=1] | crawled=208 queue=340
+2026-03-28 18:56:21 ERROR: SSL failed for aud-qai.wnba.com: _ssl.c:1063: The handshake operation timed out
+2026-03-28 18:56:21 ERROR: Async fetch failed for http://www.wnba.com/playoffs/2018/: Server disconnected
+2026-03-28 18:56:21 HTTP 200 https://wings.wnba.com/news/dallas-wings-waive-evelyn-akhator-and-ruth-hamblin
+2026-03-28 18:56:23 Parsed: https://wings.wnba.com/news/dallas-wings-waive-evelyn-akhator-and-ruth-hamblin
+2026-03-28 18:56:23 Batch 1 [workers=1] | crawled=553 queue=127
+2026-03-28 18:56:23 Batch 1 [workers=1] | crawled=208 queue=339
+2026-03-28 18:56:23 ERROR: Async fetch failed for http://www.wnba.com/playoffs/2017/: Server disconnected
+2026-03-28 18:56:24 HTTP 200 https://wings.wnba.com/news/dallas-wings-waive-loryn-goodwin-and-natalie-butler
+2026-03-28 18:56:25 Batch 1 [workers=1] | crawled=208 queue=338
+2026-03-28 18:56:25 ERROR: Async fetch failed for http://www.wnba.com/playoffs/2016/: Server disconnected
+2026-03-28 18:56:26 Parsed: https://wings.wnba.com/news/dallas-wings-waive-loryn-goodwin-and-natalie-butler
+2026-03-28 18:56:26 Batch 1 [workers=1] | crawled=554 queue=126
+2026-03-28 18:56:27 HTTP 200 https://wings.wnba.com/news/cigna-scores-official-sponsorship-dallas-wings
+2026-03-28 18:56:27 Batch 1 [workers=1] | crawled=208 queue=337
+2026-03-28 18:56:27 ERROR: Async fetch failed for http://www.wnba.com/playoffs/2015/: Server disconnected
+2026-03-28 18:56:28 Parsed: https://wings.wnba.com/news/cigna-scores-official-sponsorship-dallas-wings
+2026-03-28 18:56:28 Batch 1 [workers=1] | crawled=208 queue=336
+2026-03-28 18:56:28 Batch 1 [workers=1] | crawled=555 queue=125
+2026-03-28 18:56:29 ERROR: Async fetch failed for http://www.wnba.com/playoffs/2014: Server disconnected
+2026-03-28 18:56:29 HTTP 200 https://wings.wnba.com/news/diggins-smith-earns-dawn-staley-community-leadership-award
+2026-03-28 18:56:30 Batch 1 [workers=1] | crawled=208 queue=335
+2026-03-28 18:56:30 Parsed: https://wings.wnba.com/news/diggins-smith-earns-dawn-staley-community-leadership-award
+2026-03-28 18:56:30 Batch 1 [workers=1] | crawled=556 queue=125
+2026-03-28 18:56:31 HTTP 200 https://wings.wnba.com/news/wings-take-on-mystics-in-playoff-rematch
+2026-03-28 18:56:34 Parsed: https://wings.wnba.com/news/wings-take-on-mystics-in-playoff-rematch
+2026-03-28 18:56:34 Batch 1 [workers=1] | crawled=557 queue=124
+2026-03-28 18:56:35 HTTP 200 https://wings.wnba.com/news/liz-cambage-named-wnba-western-conference-player-of-the-week
+2026-03-28 18:56:35 ERROR: Timeout fetching: http://www.wnba.com/playoffs/2013
+2026-03-28 18:56:37 Parsed: https://wings.wnba.com/news/liz-cambage-named-wnba-western-conference-player-of-the-week
+2026-03-28 18:56:37 Batch 1 [workers=1] | crawled=558 queue=124
+2026-03-28 18:56:38 HTTP 200 https://wings.wnba.com/news/skylar-diggin-smith-named-2017-wnba-first-team
+2026-03-28 18:56:38 Batch 1 [workers=1] | crawled=208 queue=334
+2026-03-28 18:56:41 Parsed: https://wings.wnba.com/news/skylar-diggin-smith-named-2017-wnba-first-team
+2026-03-28 18:56:41 Batch 1 [workers=1] | crawled=559 queue=123
+2026-03-28 18:56:41 HTTP 200 https://wings.wnba.com/news/glory-johnson-named-wnba-player-week
+2026-03-28 18:56:43 ERROR: Timeout fetching: http://www.wnba.com/playoffs/2012
+2026-03-28 18:56:43 Parsed: https://wings.wnba.com/news/glory-johnson-named-wnba-player-week
+2026-03-28 18:56:43 Batch 1 [workers=1] | crawled=560 queue=123
+2026-03-28 18:56:44 HTTP 200 https://wings.wnba.com/news/resilient-wings-soar-to-victory
+2026-03-28 18:56:45 Batch 1 [workers=1] | crawled=208 queue=333
+2026-03-28 18:56:47 Parsed: https://wings.wnba.com/news/resilient-wings-soar-to-victory
+2026-03-28 18:56:47 Batch 1 [workers=1] | crawled=561 queue=123
+2026-03-28 18:56:47 HTTP 200 https://wings.wnba.com/news/dominant-fourth-quarter-lifts-wings-over-mercury
+2026-03-28 18:56:49 Parsed: https://wings.wnba.com/news/dominant-fourth-quarter-lifts-wings-over-mercury
+2026-03-28 18:56:49 Batch 1 [workers=1] | crawled=562 queue=122
+2026-03-28 18:56:50 HTTP 502 https://wings.wnba.com/news/wings-fall-to-mystics
+2026-03-28 18:56:50 ERROR: Timeout fetching: http://www.wnba.com/playoffs/2011
+2026-03-28 18:56:52 Batch 1 [workers=1] | crawled=208 queue=332
+2026-03-28 18:56:52 Batch 1 [workers=1] | crawled=562 queue=121
+2026-03-28 18:56:53 HTTP 200 https://wings.wnba.com/news/kalani-brown-re-signs-with-dallas-wings
+2026-03-28 18:56:56 Parsed: https://wings.wnba.com/news/kalani-brown-re-signs-with-dallas-wings
+2026-03-28 18:56:56 Batch 1 [workers=1] | crawled=563 queue=122
+2026-03-28 18:56:56 HTTP 200 https://wings.wnba.com/news/wings-use-defense-to-defeat-dream
+2026-03-28 18:56:57 ERROR: Timeout fetching: http://www.wnba.com/playoffs/2010
+2026-03-28 18:56:58 Parsed: https://wings.wnba.com/news/wings-use-defense-to-defeat-dream
+2026-03-28 18:56:58 Batch 1 [workers=1] | crawled=564 queue=125
+2026-03-28 18:56:58 HTTP 200 https://wings.wnba.com/news/wings-look-to-double-down-on-mercury
+2026-03-28 18:56:59 Batch 1 [workers=1] | crawled=208 queue=331
+2026-03-28 18:56:59 ERROR: Async fetch failed for http://www.wnba.com/playoffs/2009: Cannot connect to host www.wnba.com:443 ssl:default [[SSL: RECORD_LAYER_FAILURE] record layer failure (_ssl.c:1081)]
+2026-03-28 18:57:01 Parsed: https://wings.wnba.com/news/wings-look-to-double-down-on-mercury
+2026-03-28 18:57:01 Batch 1 [workers=1] | crawled=565 queue=125
+2026-03-28 18:57:01 Batch 1 [workers=1] | crawled=208 queue=330
+2026-03-28 18:57:01 HTTP 200 https://wings.wnba.com/news/wings-drop-game-to-fever
+2026-03-28 18:57:04 Parsed: https://wings.wnba.com/news/wings-drop-game-to-fever
+2026-03-28 18:57:04 Batch 1 [workers=1] | crawled=566 queue=124
+2026-03-28 18:57:04 HTTP 200 https://wings.wnba.com/news/sabally-siegrist-and-brown-scheduled-to-return-to-dallas-wings-lineup
+2026-03-28 18:57:06 Parsed: https://wings.wnba.com/news/sabally-siegrist-and-brown-scheduled-to-return-to-dallas-wings-lineup
+2026-03-28 18:57:06 Batch 1 [workers=1] | crawled=567 queue=125
+2026-03-28 18:57:06 ERROR: Timeout fetching: http://www.wnba.com/playoffs/2008
+2026-03-28 18:57:06 HTTP 200 https://wings.wnba.com/news/maddy-siegrist-suffers-broken-finger
+2026-03-28 18:57:08 Batch 1 [workers=1] | crawled=208 queue=329
+2026-03-28 18:57:09 Parsed: https://wings.wnba.com/news/maddy-siegrist-suffers-broken-finger
+2026-03-28 18:57:09 Batch 1 [workers=1] | crawled=568 queue=124
+2026-03-28 18:57:09 HTTP 200 https://wings.wnba.com/news/saballys-historic-performance-leads-germany-to-olympic-quarterfinal-berth
