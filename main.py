@@ -885,6 +885,9 @@ def analyze_security_headers(domain, headers):
                                 domain,
                                 f"X-Powered-By: {val} — PHP {major}.x is end-of-life and unpatched"
                             )
+                        _full_ver_m = re.search(r'([\d]+\.[\d]+[\.\d]*)', str(val))
+                        if _full_ver_m:
+                            _check_cve_and_alert("PHP", _full_ver_m.group(1), domain)
                     except Exception:
                         pass
 
@@ -3265,6 +3268,10 @@ def check_security_headers(base_url, domain):
                 detail = detail_tmpl.format(value=value)
                 alert("INFORMATION DISCLOSURE — HEADER", severity, base_url, detail)
                 print(timestamp() + f"  Revealing header [{severity}] on {domain}: {hdr_name}: {value}")
+                # CVE correlation: extract product and version from the header value
+                _ver_m = re.search(r'([\w]+)/([\d]+\.[\d]+[\.\d]*)', value, re.I)
+                if _ver_m:
+                    _check_cve_and_alert(_ver_m.group(1), _ver_m.group(2), base_url)
 
     except Exception as e:
         print_error(f"check_security_headers failed for {domain}: {e}")
@@ -6324,6 +6331,11 @@ def create_db(conn, table_name):
                                 prefix          TEXT NOT NULL,
                                 found_at        TEXT NOT NULL
                              )''',
+        "NVDCache":        '''CREATE TABLE IF NOT EXISTS NVDCache (
+                                cache_key   TEXT PRIMARY KEY,
+                                result_json TEXT NOT NULL,
+                                cached_at   TEXT NOT NULL
+                             )''',
     }
     if table_name in table_creation_map:
         try:
@@ -6497,6 +6509,153 @@ def write_to_subdomains_database(root_domain, subdomain, ip, status_code):
         print_error("write_to_subdomains_database: " + str(e))
     finally:
         conn.close()
+
+# ─────────────────────────────────────────────
+# NVD CVE correlation for version fingerprinting
+# ─────────────────────────────────────────────
+
+_NVD_API_URL  = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+_NVD_CACHE_TTL = 86400   # 24 hours in seconds
+_nvd_lock = threading.Lock()
+
+
+def fetch_nvd_cves(product: str, version: str) -> list:
+    """
+    Query the NIST NVD CVE API for known vulnerabilities in *product* at *version*.
+
+    Results are cached in the NVDCache SQLite table for 24 hours to avoid
+    hammering the API.  Returns a list of dicts:
+        [{"id": "CVE-…", "score": 9.8, "severity": "CRITICAL", "summary": "…"}, …]
+
+    Returns [] on API failure, rate-limiting, or no matching CVEs.  All
+    network / parse errors are swallowed — this function must never interrupt
+    the scan.
+    """
+    cache_key = f"{product.lower()}:{version}"
+    now_ts    = time.time()
+
+    # ── Check cache ───────────────────────────────────────────────────────────
+    with _nvd_lock:
+        try:
+            conn = sqlite3.connect("ScrapeDB", isolation_level=None)
+            create_db(conn, "NVDCache")
+            row = conn.execute(
+                "SELECT result_json, cached_at FROM NVDCache WHERE cache_key=?",
+                (cache_key,),
+            ).fetchone()
+            conn.close()
+            if row:
+                cached_at = float(row[1])
+                if now_ts - cached_at < _NVD_CACHE_TTL:
+                    return json.loads(row[0])
+        except Exception:
+            pass
+
+    # ── Query NVD API ─────────────────────────────────────────────────────────
+    cves: list = []
+    try:
+        resp = requests.get(
+            _NVD_API_URL,
+            params={
+                "keywordSearch":  product,
+                "versionStart":   version,
+                "versionEnd":     version,
+                "resultsPerPage": 5,
+            },
+            headers={"User-Agent": "NuScrape-CVE-Lookup/1.0"},
+            timeout=10,
+        )
+        if resp.status_code == 429:
+            print(timestamp() + f" [NVD] Rate limited — CVE lookup skipped for {product} {version}")
+            return []
+        if resp.status_code != 200:
+            print(timestamp() + f" [NVD] API returned HTTP {resp.status_code} for {product} {version}")
+            return []
+
+        data = resp.json()
+        for item in (data.get("vulnerabilities") or []):
+            cve_obj  = item.get("cve", {})
+            cve_id   = cve_obj.get("id", "")
+            # Extract highest available CVSS score (prefer v3, fall back to v2)
+            score, severity = 0.0, "UNKNOWN"
+            metrics = cve_obj.get("metrics", {})
+            for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+                entries = metrics.get(key, [])
+                if entries:
+                    cvss_data = entries[0].get("cvssData", {})
+                    score     = float(cvss_data.get("baseScore", 0))
+                    severity  = cvss_data.get("baseSeverity", "UNKNOWN").upper()
+                    break
+            # Summary — first English description
+            summary = ""
+            for desc in cve_obj.get("descriptions", []):
+                if desc.get("lang") == "en":
+                    summary = desc.get("value", "")[:200]
+                    break
+            if cve_id:
+                cves.append({"id": cve_id, "score": score, "severity": severity,
+                             "summary": summary})
+    except Exception as exc:
+        print(timestamp() + f" [NVD] Lookup failed for {product} {version}: {str(exc)[:80]}")
+        return []
+
+    # ── Write to cache ────────────────────────────────────────────────────────
+    with _nvd_lock:
+        try:
+            conn = sqlite3.connect("ScrapeDB", isolation_level=None)
+            create_db(conn, "NVDCache")
+            conn.execute(
+                "INSERT OR REPLACE INTO NVDCache (cache_key, result_json, cached_at) "
+                "VALUES (?, ?, ?)",
+                (cache_key, json.dumps(cves), str(now_ts)),
+            )
+            conn.close()
+        except Exception:
+            pass
+
+    return cves
+
+
+def _check_cve_and_alert(product: str, version: str, url: str) -> None:
+    """
+    Look up CVEs for *product*/*version* via fetch_nvd_cves() and fire a
+    VULNERABLE COMPONENT alert if any CVE has CVSS >= 7.0.
+
+    The alert severity mirrors the highest CVSS band:
+      >= 9.0  → CRITICAL
+      >= 7.0  → HIGH
+    """
+    if not product or not version:
+        return
+    try:
+        cves = fetch_nvd_cves(product, version)
+    except Exception:
+        return
+    if not cves:
+        return
+
+    # Filter to exploitable range only
+    actionable = [c for c in cves if c.get("score", 0) >= 7.0]
+    if not actionable:
+        return
+
+    top = max(actionable, key=lambda c: c["score"])
+    sev = "CRITICAL" if top["score"] >= 9.0 else "HIGH"
+
+    cve_lines = "; ".join(
+        f"{c['id']} (CVSS {c['score']:.1f} {c['severity']}): {c['summary']}"
+        for c in sorted(actionable, key=lambda c: c["score"], reverse=True)
+    )
+    alert(
+        "VULNERABLE COMPONENT",
+        sev,
+        url,
+        f"{product} {version} has {len(actionable)} known CVE(s) with CVSS >= 7.0. "
+        f"{cve_lines}",
+    )
+    print(timestamp() + f" [!!!] Vulnerable component: {product} {version} — "
+          f"{len(actionable)} CVE(s), top CVSS {top['score']:.1f} ({top['id']})")
+
 
 # ─────────────────────────────────────────────
 # Entropy-based secret detection
@@ -8437,6 +8596,8 @@ def check_technology_specific(base_url: str, domain: str,
                 f"Django and Python versions. Set DEBUG=False in settings.py."
             )
             print(timestamp() + f" [!!] Django debug mode detected: {domain}")
+            if ver_m:
+                _check_cve_and_alert("Django", ver_m.group(1), base_url)
 
         # /admin/
         status, body, ct = _probe("/admin/")
@@ -8516,6 +8677,8 @@ def check_technology_specific(base_url: str, domain: str,
                 f"Remove this file or deny access via web server configuration."
             )
             print(timestamp() + f" [!] Drupal CHANGELOG.txt accessible: {domain}")
+            if ver_m:
+                _check_cve_and_alert("Drupal", ver_m.group(1), base_url)
 
         # /sites/default/settings.php
         status, body, ct = _probe("/sites/default/settings.php")
@@ -8596,6 +8759,8 @@ def check_technology_specific(base_url: str, domain: str,
                 f"Remove this file from production."
             )
             print(timestamp() + f" [!] Joomla README.txt accessible: {domain}")
+            if ver_m:
+                _check_cve_and_alert("Joomla", ver_m.group(1), base_url)
 
 
 # ─────────────────────────────────────────────
