@@ -548,3 +548,175 @@ AttributeError: module 'websockets.exceptions' has no attribute 'RejectHandshake
 2026-03-28 13:25:47 LDAPi probe: https://business.tahoechamber.org/events/search param=c
 2026-03-28 13:26:03 LDAPi probe: https://tahoechamber.org/ param=page_id
 2026-03-28 13:27:30 Race condition probe: https://tahoechamber.org/wp-content/uploads/2020/03/vision2025-nobleed.pdf [GET] (file upload)
+2026-03-28 13:28:31 [Race] Attempt 1/3: 10/10 requests succeeded
+2026-03-28 13:29:34 [Race] Attempt 2/3: 9/9 requests succeeded
+2026-03-28 13:30:34 [Race] Attempt 3/3: 9/9 requests succeeded
+2026-03-28 13:30:54 [Race] Running idempotency check on https://tahoechamber.org/wp-content/uploads/2020/03/vision2025-nobleed.pdf
+2026-03-28 13:31:03 [Baseline] https://tahoechamber.org/ — status=404 len=206636±12 fp=d632453bb7c6d76c
+2026-03-28 13:31:55 [Race] Endpoint is idempotent — downgrading to LOW
+
+================================================================
+  !! LOW ALERT: RACE CONDITION: IDEMPOTENT ENDPOINT !!
+  Target     : https://tahoechamber.org/wp-content/uploads/2020/03/vision2025-nobleed.pdf
+  Detail     : Race condition probe on file upload endpoint https://tahoechamber.org/wp-content/uploads/2020/03/vision2025-nobleed.pdf — sent 10 simultaneous GET requests. Status codes: 200 (10/10 succeeded). Response times: min=32004ms max=56246ms cv=18%. Responses are identical across concurrent requests — possible race condition, manual verification required. Sequential duplicate requests returned the same result — endpoint may handle duplicates correctly, but concurrent timing window may still exist.
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:31:56
+================================================================
+
+2026-03-28 13:31:56 [!] Race condition (RACE CONDITION: IDEMPOTENT ENDPOINT) at https://tahoechamber.org/wp-content/uploads/2020/03/vision2025-nobleed.pdf
+2026-03-28 13:32:11 [Baseline] https://tahoechamber.org/ — status=404 len=206625±0 fp=64a46bbf3c3dd9bb
+2026-03-28 13:32:13 HPP probe: https://visitor.r20.constantcontact.com/manage/optin param=v
+
+================================================================
+  !! HIGH ALERT: HTTP PARAMETER POLLUTION (AUTH/PRIVILEGE CHANGE) !!
+  Target     : https://visitor.r20.constantcontact.com/manage/optin
+  Detail     : HTTP Parameter Pollution on param 'v' at https://visitor.r20.constantcontact.com/manage/optin — original value: '001E34NtkFyPqfp8yXYjMJ39JNTNXq0SPG6'. Duplicating param with canary (second-value taken) introduced auth/privilege keywords absent in baseline. Values tested: '001E34NtkFyPqfp8yXYjMJ39JNTNXq0SPG6' + 'hpp-probe-6a9b'.
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:32:21
+================================================================
+
+2026-03-28 13:32:21 [!!] HPP auth change on param=v at https://visitor.r20.constantcontact.com/manage/optin
+2026-03-28 13:32:21 HPP probe: https://business.tahoechamber.org/events/search param=c
+2026-03-28 13:32:22 HPP probe: https://tahoechamber.org/ param=page_id
+
+================================================================
+  !! MEDIUM ALERT: HTTP PARAMETER POLLUTION (WAF BYPASS) !!
+  Target     : https://tahoechamber.org/
+  Detail     : HTTP Parameter Pollution on param 'page_id' at https://tahoechamber.org/ — original value: '111'. Single-param XSS payload returned 403 (blocked), but split across two duplicate params returned 200 (not blocked) — WAF may concatenate or use only one value. Split payload: '<scr' + 'ipt>'.
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:32:30
+================================================================
+
+2026-03-28 13:32:31 [!] HPP WAF bypass on param=page_id at https://tahoechamber.org/
+2026-03-28 13:32:31 WCP probe: https://tahoechamber.org/ header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 13:32:33 WCP probe: https://tahoechamber.org/ header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 13:32:35 WCP probe: https://tahoechamber.org/ header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 13:32:36 WCP probe: https://tahoechamber.org/ header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 13:32:37 WCP probe: https://tahoechamber.org/ header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 13:32:39 WCP probe: https://tahoechamber.org/ header=X-Forwarded-For: 127.0.0.1
+2026-03-28 13:32:40 WCP cloak probe: https://tahoechamber.org/?param=cloak-probe-9d4e
+2026-03-28 13:33:09 IDOR verify: https://tahoechamber.org/wp-content/uploads/{id}/12/cropped-favicon-180x180.png param=path_id value=2017
+2026-03-28 13:33:09 IDOR dismissed (not auth-gated or no per-object diff): https://tahoechamber.org/wp-content/uploads/{id}/12/cropped-favicon-180x180.png
+2026-03-28 13:33:09 IDOR verify: https://tahoechamber.org/wp-content/uploads/{id}/03/vision2025-nobleed.pdf param=path_id value=2020
+2026-03-28 13:33:09 IDOR dismissed (not auth-gated or no per-object diff): https://tahoechamber.org/wp-content/uploads/{id}/03/vision2025-nobleed.pdf
+2026-03-28 13:33:09 IDOR verify: https://tahoechamber.org/wp-content/uploads/{id}/12/cropped-favicon-32x32.png param=path_id value=2017
+2026-03-28 13:33:09 IDOR dismissed (not auth-gated or no per-object diff): https://tahoechamber.org/wp-content/uploads/{id}/12/cropped-favicon-32x32.png
+2026-03-28 13:33:09 IDOR verify: https://tahoechamber.org/wp-content/uploads/{id}/12/cropped-favicon-192x192.png param=path_id value=2017
+2026-03-28 13:33:09 IDOR dismissed (not auth-gated or no per-object diff): https://tahoechamber.org/wp-content/uploads/{id}/12/cropped-favicon-192x192.png
+2026-03-28 13:33:09 IDOR verify: https://tahoechamber.org/wp-json/wp/v2/pages/{id} param=path_id value=3963
+2026-03-28 13:33:12 IDOR dismissed (not auth-gated or no per-object diff): https://tahoechamber.org/wp-json/wp/v2/pages/{id}
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://tahoechamber.org/wp-content/plugins/gravityforms/assets/js/dist/scripts-theme.min.js?ver=4cdd00b8d55dcd30063e139991315d3e
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'gform_submission_speeds"]\',e,!0),u=(0,a.getNode)("#gform_source_page_number_".concat(r),e,!0),s=u?parseInt(u.value,10):1;if(!c){var f=document.createElement("input");return f.type="hidden",f.name="gform_submission_speeds",f.value=JSON.stringify({pages:(0,y.A)({},s,[i])}),void e.appendChild(f)}try{t='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:33:38
+================================================================
+
+2026-03-28 13:33:38 [!] PP client-side sink 'JSON.parse(…)[': https://tahoechamber.org/wp-content/plugins/gravityforms/assets/js/dist/scripts-theme.min.js?ver=4cdd00b8d55dcd30063e139991315d3e
+2026-03-28 13:33:39 JS analysis: 1 findings in https://tahoechamber.org/wp-content/plugins/gravityforms/assets/js/dist/vendor-theme.min.js?ver=4f8b3915c1c1e1a6800825abd64b03cb
+2026-03-28 13:33:39 JS analysis: 1 findings in https://tahoechamber.org/wp-includes/js/dist/vendor/wp-polyfill.min.js?ver=3.15.0
+2026-03-28 13:33:39 JS analysis: 5 findings in https://coggno.com/javascripts/pws-2.0.js
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://tahoechamber.org/wp-content/uploads/pum/pum-site-scripts.js?defer&generated=1757447279&ver=1.21.5
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'ar r=document.cookie?document.cookie.split("; "):[],s=/(%[0-9A-Z]{2})+/g,a=0;a<r.length;a++){var p=r[a].split("=");\'"\'===(l=p.slice(1).join("=")).charAt(0)&&(l=l.slice(1,-1));try{var u=p[0].replace(s,decodeURIComponent),l=d.read?d.read(l,u):d(l,u)||l.replace(s,decodeURIComponent);if(this.json)try{l='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:33:40
+================================================================
+
+2026-03-28 13:33:40 [!] PP client-side sink 'JSON.parse(…)[': https://tahoechamber.org/wp-content/uploads/pum/pum-site-scripts.js?defer&generated=1757447279&ver=1.21.5
+2026-03-28 13:33:41 JS analysis: 2 findings in https://tahoechamber.org/wp-content/plugins/revslider/sr6/assets/js/rs6.min.js?ver=6.7.38
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://js.stripe.com/v3/?ver=6.0.2
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'n must return a Promise that resolves in either {type: "accept"} or {type: "reject", errorMessage: string}.\'))}},6696:function(e,t,n){"use strict";n.d(t,{$:function(){return a}});var r=n(481),o=n(9107),a=function(e){var t=e.split("_secret_"),n=(0,r.A)(t,2),a=n[0],i=n[1],c=(0,o.D)(i),s={};if(c)try{s='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:33:43
+================================================================
+
+2026-03-28 13:33:43 [!] PP client-side sink 'JSON.parse(…)[': https://js.stripe.com/v3/?ver=6.0.2
+2026-03-28 13:33:43 JS analysis: 5 findings in https://js.stripe.com/v3/?ver=6.0.2
+2026-03-28 13:33:44 JS analysis: 2 findings in https://www.gstatic.com/recaptcha/releases/79clEdOi5xQbrrpL2L8kGmK3/recaptcha__en.js
+2026-03-28 13:33:51 [P1] High-value URL queued: http://business.tahoechamber.org/login/
+2026-03-28 13:33:51 Batch 3 [workers=3] | crawled=1 queue=60
+2026-03-28 13:33:52 HTTP 200 https://tahoechamber.org
+2026-03-28 13:33:53 HTTP 200 https://tahoechamber.org/wp-content/uploads/2020/03/vision2025-nobleed.pdf
+2026-03-28 13:33:56 ERROR: Async fetch failed for http://business.tahoechamber.org/login/: Cannot connect to host business.tahoechamber.org:443 ssl:default [[SSL: RECORD_LAYER_FAILURE] record layer failure (_ssl.c:1081)]
+2026-03-28 13:34:03 ERROR: Timeout fetching: https://tahoechamber.org/wp-content/uploads/2020/03/vision2025-nobleed.pdf
+2026-03-28 13:34:38 JS-heavy page detected, switching to Playwright: https://tahoechamber.org
+2026-03-28 13:34:39 Playwright rendering: https://tahoechamber.org
+2026-03-28 13:34:42 XHR: POST https://tahoechamber.org/cdn-cgi/challenge-platform/h/g/jsd/oneshot/ea2d291c0fdc/0.36707159097325237:1774424211:9_pSV23kWGmNtldQToc5YDBzJFUfKD8QS_h75YB-Zx0/9e38630bdab84bc0
+2026-03-28 13:34:42 XHR: GET https://listgrowth.ctctcdn.com/v1/9ed795a35b83317777ea7375c53d4468.json
+2026-03-28 13:34:42 XHR: POST https://analytics.google.com/g/collect?v=2&tid=G-NWCVTJRRZ4&gtm=45je63p1v9108858612za20g&_p=1774719281625&_gaz=1&gcd=13l3l3l3l1l1&npa=0&dma=0&cid=2102148399.1774719282&ul=en-us&sr=1280x720&ir=1&uaa=arm&uab=64&uafvl=Not%253AA-Brand%3B99.0.0.0%7CHeadlessChrome%3B145.0.7632.6%7CChromium%3B145.0.7632.6&uamb=0&uam=&uap=iOS&uapv=17_4&uaw=0&are=1&frm=0&pscdl=noapi&_eu=EAAIAGA&_s=1&tag_exp=0~115616985~115938466~115938468~117484252&sid=1774719282&sct=1&seg=0&dl=https%3A%2F%2Ftahoechamber.org%2F&dt=Tahoe%20Chamber%20-%20Lake%20Tahoe%20South%20Shore%20Chamber%20of%20Commerce&en=page_view&_fv=1&_ss=1&gap.plf=5&tfd=2608
+2026-03-28 13:34:42 XHR: POST https://www.google.com/recaptcha/api2/pat?k=6LeosTsiAAAAAId_0wnUWcY7C6K4IUz6vLhoyT59
+2026-03-28 13:34:42 XHR: POST https://www.google.com/recaptcha/api2/pat?k=6LeosTsiAAAAAId_0wnUWcY7C6K4IUz6vLhoyT59
+2026-03-28 13:34:42 XHR: POST https://tahoechamber.org/?ob=open-bridge/events
+2026-03-28 13:34:43 XHR: POST https://www.google.com/recaptcha/api2/pat?k=6LfHrSkUAAAAAPnKk5cT6JuKlKPzbwyTYuO8--Vr
+2026-03-28 13:34:43 XHR: POST https://www.google.com/recaptcha/api2/reload?k=6LeosTsiAAAAAId_0wnUWcY7C6K4IUz6vLhoyT59
+2026-03-28 13:34:43 XHR: POST https://www.google.com/recaptcha/api2/clr?k=6LeosTsiAAAAAId_0wnUWcY7C6K4IUz6vLhoyT59
+2026-03-28 13:34:43 XHR: POST https://www.google.com/recaptcha/api2/reload?k=6LfHrSkUAAAAAPnKk5cT6JuKlKPzbwyTYuO8--Vr
+2026-03-28 13:34:44 XHR: POST https://m.stripe.com/6
+2026-03-28 13:34:47 XHR: POST https://analytics.google.com/g/collect?v=2&tid=G-NWCVTJRRZ4&gtm=45je63p1v9108858612za20g&_p=1774719281625&gcd=13l3l3l3l1l1&npa=0&dma=0&cid=2102148399.1774719282&ul=en-us&sr=1280x720&ir=1&uaa=arm&uab=64&uafvl=Not%253AA-Brand%3B99.0.0.0%7CHeadlessChrome%3B145.0.7632.6%7CChromium%3B145.0.7632.6&uamb=0&uam=&uap=iOS&uapv=17_4&uaw=0&are=1&frm=0&pscdl=noapi&_eu=kAAIAGQ&_s=2&tag_exp=0~115616985~115938466~115938468~117484252&sid=1774719282&sct=1&seg=0&dl=https%3A%2F%2Ftahoechamber.org%2F&dt=Tahoe%20Chamber%20-%20Lake%20Tahoe%20South%20Shore%20Chamber%20of%20Commerce&_tu=wAQ&en=error&gap.plf=5&ep.event_category=pws-2&ep.event_label=tahoechamber&_et=24&tfd=7633
+2026-03-28 13:34:47 Playwright got 335747 bytes from https://tahoechamber.org
+2026-03-28 13:34:47 Playwright content richer — using rendered HTML
+2026-03-28 13:34:50 Parsed: https://tahoechamber.org
+
+================================================================
+  !! MEDIUM ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://tahoechamber.org
+  Detail     : High-entropy base64 string (high entropy string) detected in body of https://tahoechamber.org | Entropy: 5.17 | Class: base64 | Context: '1kRiyfggYprbLx5MPgH-tkpsm7o0vy5eC7hPs2qsctSSLDZxEmYQCfINlSKGWDaiqtS59iOBluV-uSmKYag" style="wid'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:35:20
+================================================================
+
+2026-03-28 13:35:20 [!] Entropy: high entropy string (entropy=5.17) at https://tahoechamber.org
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://tahoechamber.org
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'Set-Cookie' of https://tahoechamber.org | Entropy: 5.41 | Class: base64 | Context: 'ocTukVobGIRGtnLLu9p1Mw03v61CnesSvaSIgXbvicMvEJZ0TLIrviQuBfuC'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:35:21
+================================================================
+
+2026-03-28 13:35:21 [!] Entropy: high entropy string (entropy=5.41) at https://tahoechamber.org
+2026-03-28 13:37:20 [Baseline] https://business.tahoechamber.org/events/search — status=200 len=244234±0 fp=af354ceccb1fc811
+2026-03-28 13:39:20 [Baseline] https://tahoechamber.org/ — status=404 len=206648±0 fp=80f19dfc74dfff4e
+2026-03-28 13:39:45 WCP probe: https://tahoechamber.org header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 13:39:47 WCP probe: https://tahoechamber.org header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 13:39:49 WCP probe: https://tahoechamber.org header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 13:39:51 WCP probe: https://tahoechamber.org header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 13:39:52 WCP probe: https://tahoechamber.org header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 13:39:53 WCP probe: https://tahoechamber.org header=X-Forwarded-For: 127.0.0.1
+2026-03-28 13:39:55 WCP cloak probe: https://tahoechamber.org?param=cloak-probe-9d4e
+2026-03-28 13:41:01 Batch 3 [workers=3] | crawled=2 queue=57
+2026-03-28 13:41:02 HTTP 403 https://visitor.r20.constantcontact.com/manage/optin?v=001E34NtkFyPqfp8yXYjMJ39JNTNXq0SPG6
+2026-03-28 13:41:03 HTTP 200 https://tahoechamber.org/contact/
+2026-03-28 13:41:05 HTTP 200 https://tahoechamber.org/membership/
+2026-03-28 13:41:21 JS-heavy page detected, switching to Playwright: https://tahoechamber.org/contact/
+2026-03-28 13:41:22 Playwright rendering: https://tahoechamber.org/contact/
+2026-03-28 13:41:24 XHR: POST https://tahoechamber.org/cdn-cgi/challenge-platform/h/g/jsd/oneshot/ea2d291c0fdc/0.36707159097325237:1774424211:9_pSV23kWGmNtldQToc5YDBzJFUfKD8QS_h75YB-Zx0/9e386ce17c8a4bd8
+2026-03-28 13:41:24 XHR: POST https://analytics.google.com/g/collect?v=2&tid=G-NWCVTJRRZ4&gtm=45je63p1v9108858612za20g&_p=1774719684201&_gaz=1&gcd=13l3l3l3l1l1&npa=0&dma=0&cid=1543358659.1774719685&ul=en-us&sr=1280x720&ir=1&uaa=arm&uab=64&uafvl=Not%253AA-Brand%3B99.0.0.0%7CHeadlessChrome%3B145.0.7632.6%7CChromium%3B145.0.7632.6&uamb=0&uam=&uap=Android&uapv=14&uaw=0&are=1&frm=0&pscdl=noapi&_eu=EAAIAGA&gaf=2&_s=1&tag_exp=0~115938465~115938469~116133313~117266400~117484252&sid=1774719684&sct=1&seg=0&dl=https%3A%2F%2Ftahoechamber.org%2Fcontact%2F&dt=Contact%20the%20Chamber%20-%20Tahoe%20Chamber&en=page_view&_fv=1&_ss=1&tfd=2204
+2026-03-28 13:41:24 XHR: GET https://listgrowth.ctctcdn.com/v1/9ed795a35b83317777ea7375c53d4468.json
+2026-03-28 13:41:25 XHR: POST https://www.google.com/recaptcha/api2/reload?k=6LeosTsiAAAAAId_0wnUWcY7C6K4IUz6vLhoyT59
+2026-03-28 13:41:25 XHR: POST https://www.google.com/recaptcha/api2/clr?k=6LeosTsiAAAAAId_0wnUWcY7C6K4IUz6vLhoyT59
+2026-03-28 13:41:26 XHR: POST https://m.stripe.com/6
+2026-03-28 13:41:29 XHR: POST https://analytics.google.com/g/collect?v=2&tid=G-NWCVTJRRZ4&gtm=45je63p1v9108858612za20g&_p=1774719684201&gcd=13l3l3l3l1l1&npa=0&dma=0&cid=1543358659.1774719685&ul=en-us&sr=1280x720&ir=1&uaa=arm&uab=64&uafvl=Not%253AA-Brand%3B99.0.0.0%7CHeadlessChrome%3B145.0.7632.6%7CChromium%3B145.0.7632.6&uamb=0&uam=&uap=Android&uapv=14&uaw=0&are=1&frm=0&pscdl=noapi&_eu=kAAIAGQ&gaf=2&_s=2&tag_exp=0~115938465~115938469~116133313~117266400~117484252&sid=1774719684&sct=1&seg=0&dl=https%3A%2F%2Ftahoechamber.org%2Fcontact%2F&dt=Contact%20the%20Chamber%20-%20Tahoe%20Chamber&_tu=wAQ&en=error&ep.event_category=pws-2&ep.event_label=tahoechamber&_et=23&tfd=7227
+2026-03-28 13:41:30 Playwright got 221751 bytes from https://tahoechamber.org/contact/
+2026-03-28 13:41:30 Playwright content richer — using rendered HTML
+2026-03-28 13:41:31 Parsed: https://tahoechamber.org/contact/
+2026-03-28 13:41:38 Saved email: info@tahoechamber.org
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://tahoechamber.org/contact/
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'Set-Cookie' of https://tahoechamber.org/contact/ | Entropy: 5.12 | Class: base64 | Context: 'L59NKsfx7j26ifhtVTjQ98BuXMtOnBxNBSoCbL5pKJt6imcJFP2QrNZxFh3'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 13:41:38
+================================================================
+
+2026-03-28 13:41:39 [!] Entropy: high entropy string (entropy=5.12) at https://tahoechamber.org/contact/

@@ -7198,6 +7198,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         "access-control-allow-origin", "strict-transport-security",
         "x-content-type-options", "x-frame-options", "referrer-policy",
         "permissions-policy", "server", "via", "age", "connection",
+        # Cookie headers — values are session tokens by design, not leaked secrets.
+        "set-cookie", "cookie",
     })
     for hdr_name, hdr_val in (response_headers or {}).items():
         if hdr_name.lower() in skip_headers:
