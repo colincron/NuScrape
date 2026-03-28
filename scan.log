@@ -2215,3 +2215,100 @@ SystemExit: 0
 2026-03-28 15:47:45 HTTP 403 https://ig.army.mil/
 2026-03-28 15:47:47 Done! Crawled 0 pages.
 [NuScrape] Scan completed cleanly (exit 0) for https://ig.army.mil/.
+
+============================================================
+[NuScrape] Starting scan → https://www.rei.com  @ 2026-03-28 18:12:17.217589
+============================================================
+[scope] Loaded 0 in-scope and 0 excluded pattern(s) from /home/colin/Code/NuScrape/nuscrape_scope_mkfm2k4p.csv
+[*] Stealth profile: NORMAL
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+[*] Multi-domain mode: 4 target(s)  parallel=False
+
+============================================================
+[1/4] Scanning https://www.rei.com...
+============================================================
+2026-03-28 18:12:17 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 18:12:17 Skipping 55 URLs crawled in the last 14 days.
+2026-03-28 18:12:17 Starting NuScrape → https://www.rei.com
+2026-03-28 18:12:17 robots.txt: ignored (--ignore-robots)
+2026-03-28 18:12:17 Fetching sitemap...
+2026-03-28 18:12:27 No sitemap.xml for https://www.rei.com
+2026-03-28 18:12:28 [SSRF] OOB client registered: 4c4abfe51f28c46270c7.interact.sh
+2026-03-28 18:12:28 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 18:12:29 HTTP 200 https://www.rei.com
+2026-03-28 18:12:30 JS-heavy page detected, switching to Playwright: https://www.rei.com
+2026-03-28 18:12:31 Playwright rendering: https://www.rei.com
+2026-03-28 18:12:31 ERROR: Playwright page error on https://www.rei.com: Page.goto: net::ERR_HTTP2_PROTOCOL_ERROR at https://www.rei.com/
+Call log:
+  - navigating to "https://www.rei.com/", waiting until "domcontentloaded"
+
+2026-03-28 18:12:31 Parsed: https://www.rei.com
+2026-03-28 18:12:31 SSRF candidates queued on www.rei.com: referrer
+2026-03-28 18:12:31 SSRF OOB probe: https://www.rei.com param=referrer
+2026-03-28 18:12:35 [SSRF] Polling OOB (10s) for https://www.rei.com param=referrer ...
+2026-03-28 18:12:39 [Baseline] Skipping https://www.rei.com/gearmail/new/signup — timed out
+
+================================================================
+  !! MEDIUM ALERT: SSRF CANDIDATE (NO OOB INTERACTION) !!
+  Target     : https://www.rei.com
+  Detail     : Parameter 'referrer' on https://www.rei.com accepts URLs but no OOB interaction was received within 10s. Server may block outbound connections, use an allowlist, or DNS is not leaking. Manual verification recommended.
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:12:46
+================================================================
+
+2026-03-28 18:13:03 [Baseline] https://www.rei.com/membership/mastercard — status=403 len=393±0 fp=e7a1933ea8c0fae5
+2026-03-28 18:13:04 [Baseline] https://www.rei.com/help — status=200 len=1119616±0 fp=ff5048d4227b4284
+2026-03-28 18:13:11 [Baseline] https://www.rei.com/learn/expert-advice/the-best-hiking-boots.html — status=403 len=297670±297228 fp=c93355e7b0dfcf22
+2026-03-28 18:13:24 [Baseline] https://www.rei.com/membership/mastercard/preapproval — status=403 len=409±0 fp=1a8f8d1ee36c07e6
+2026-03-28 18:13:30 [Baseline] Skipping https://www.rei.com/help/categories — timed out
+2026-03-28 18:13:35 [Baseline] https://www.rei.com/help — status=403 len=372±0 fp=eab72493da002454
+2026-03-28 18:13:48 [Baseline] Skipping https://play.google.com/store/apps/details — timed out
+2026-03-28 18:16:19 SQLi probe: https://www.rei.com/help param=chat
+2026-03-28 18:16:35 [Timing] Baseline https://www.rei.com/help param=chat: mean=637ms σ=464ms max=1235ms
+2026-03-28 18:16:37 [Timing] Baseline: 637ms ±464ms | Probe(SLEEP 2): 264ms (threshold 4029ms) ✗ → NOT TRIGGERED
+2026-03-28 18:16:37 SQLi probe: https://www.rei.com/membership/mastercard param=trackingId
+2026-03-28 18:16:49 [Timing] Baseline https://www.rei.com/membership/mastercard param=trackingId: mean=273ms σ=25ms max=306ms
+2026-03-28 18:16:51 [Timing] Baseline: 273ms ±25ms | Probe(SLEEP 2): 267ms (threshold 2347ms) ✗ → NOT TRIGGERED
+2026-03-28 18:16:51 SQLi probe: https://www.rei.com/learn/expert-advice/the-best-hiking-boots.html param=series
+2026-03-28 18:17:05 [Timing] Baseline https://www.rei.com/learn/expert-advice/the-best-hiking-boots.html param=series: mean=267ms σ=21ms max=296ms
+2026-03-28 18:17:07 [Timing] Baseline: 267ms ±21ms | Probe(SLEEP 2): 291ms (threshold 2332ms) ✗ → NOT TRIGGERED
+2026-03-28 18:17:07 SQLi probe: https://www.rei.com/membership/mastercard/preapproval param=trackingId
+2026-03-28 18:17:32 [Timing] Baseline https://www.rei.com/membership/mastercard/preapproval param=trackingId: mean=281ms σ=46ms max=370ms
+2026-03-28 18:17:34 [Timing] Baseline: 281ms ±46ms | Probe(SLEEP 2): 277ms (threshold 2418ms) ✗ → NOT TRIGGERED
+2026-03-28 18:17:34 SQLi probe: https://www.rei.com/help/categories param=a
+2026-03-28 18:18:03 [Timing] Baseline https://www.rei.com/help/categories param=a: mean=272ms σ=14ms max=293ms
+2026-03-28 18:18:05 [Timing] Baseline: 272ms ±14ms | Probe(SLEEP 2): 275ms (threshold 2313ms) ✗ → NOT TRIGGERED
+2026-03-28 18:18:05 SQLi probe: https://www.rei.com/help/categories param=hc
+2026-03-28 18:18:16 [Timing] Baseline https://www.rei.com/help/categories param=hc: mean=272ms σ=14ms max=293ms
+2026-03-28 18:18:19 [Timing] Baseline: 272ms ±14ms | Probe(SLEEP 2): 266ms (threshold 2313ms) ✗ → NOT TRIGGERED
+2026-03-28 18:18:19 SQLi probe: https://www.rei.com/help param=a
+2026-03-28 18:18:19 [Baseline] https://www.rei.com/membership/mastercard — status=403 len=393±0 fp=3da9ad09abfaaa44
+2026-03-28 18:18:33 [Timing] Baseline https://www.rei.com/help param=a: mean=318ms σ=81ms max=476ms
+2026-03-28 18:18:36 [Timing] Baseline: 318ms ±81ms | Probe(SLEEP 2): 271ms (threshold 2561ms) ✗ → NOT TRIGGERED
+2026-03-28 18:18:36 SQLi probe: https://play.google.com/store/apps/details param=id
+2026-03-28 18:18:55 [Timing] Baseline https://play.google.com/store/apps/details param=id: mean=1636ms σ=57ms max=1684ms
+2026-03-28 18:18:56 [Timing] Baseline: 1636ms ±57ms | Probe(SLEEP 2): 176ms (threshold 3807ms) ✗ → NOT TRIGGERED
+2026-03-28 18:18:56 SQLi probe: https://play.google.com/store/apps/details param=referrer
+2026-03-28 18:19:23 [Timing] Baseline https://play.google.com/store/apps/details param=referrer: mean=1636ms σ=57ms max=1684ms
+2026-03-28 18:19:30 [Timing] Baseline: 1636ms ±57ms | Probe(SLEEP 2): 1643ms (threshold 3807ms) ✗ → NOT TRIGGERED
+2026-03-28 18:19:30 SQLi probe: https://apps.apple.com/app/apple-store/id404849387 param=pt
+2026-03-28 18:19:32 [Verify] Confirming CRITICAL SQL INJECTION (ERROR-BASED) on www.rei.com ...
+2026-03-28 18:19:35 [Verify] Confirmed — firing alert
+
+================================================================
+  !! CRITICAL ALERT: SQL INJECTION (ERROR-BASED) !!
+  Target     : www.rei.com
+  Detail     : Parameter 'pt' on https://apps.apple.com/app/apple-store/id404849387 reflects SQL error 'syntax error' with payload: "'" | Snippet: 'sole.warn("vite: loading legacy chunks, syntax error above and the same error below should be ignored");var e=document.getElementById("vite-legacy-polyfill"),n='
+  Confidence : CONFIRMED
+  Time       : 2026-03-28 18:19:35
+================================================================
+

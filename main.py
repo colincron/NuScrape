@@ -38,6 +38,13 @@ try:
 except ImportError:
     PLAYWRIGHT_STEALTH_AVAILABLE = False
 
+# tldextract is optional — used for accurate eTLD+1 extraction in domain blocklist checks
+try:
+    import tldextract as _tldextract
+    _TLDEXTRACT_AVAILABLE = True
+except ImportError:
+    _TLDEXTRACT_AVAILABLE = False
+
 # pymysql is optional — enables MySQL auth probing
 try:
     import pymysql
@@ -4993,7 +5000,7 @@ SOCIAL_MEDIA_DOMAINS = {
     # Meta
     "facebook.com", "fb.com", "instagram.com", "threads.net", "messenger.com",
     # Google
-    "youtube.com", "youtu.be",
+    "google.com", "youtube.com", "youtu.be",
     # Twitter / X
     "twitter.com", "x.com", "t.co",
     # Microsoft
@@ -5054,8 +5061,22 @@ def is_google_tracking_url(url):
     return False
 
 def is_social_media_domain(url):
-    """Return True if the URL belongs to a known social media domain."""
+    """
+    Return True if the URL belongs to a known social media / blocked domain.
+
+    When tldextract is available the eTLD+1 (registered domain) is extracted
+    and compared directly against SOCIAL_MEDIA_DOMAINS.  This correctly handles
+    any subdomain depth (play.google.com → google.com) and complex public
+    suffixes (.co.uk, .com.au, etc.) without manual www-stripping.
+
+    Falls back to a simple endswith check when tldextract is not installed.
+    """
     try:
+        if _TLDEXTRACT_AVAILABLE:
+            extracted = _tldextract.extract(url)
+            reg = (extracted.top_domain_under_public_suffix or extracted.registered_domain or "").lower()
+            return bool(reg) and reg in SOCIAL_MEDIA_DOMAINS
+        # Fallback: strip www. and check exact match or subdomain suffix
         netloc = urlparse(url).netloc.lower()
         if netloc.startswith("www."):
             netloc = netloc[4:]

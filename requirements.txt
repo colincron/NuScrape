@@ -8,6 +8,7 @@ flask
 publicsuffix2
 colorama
 websockets
+tldextract
 # Optional — JS rendering
 playwright
 # Optional — bot-detection suppression
