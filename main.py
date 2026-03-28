@@ -7313,6 +7313,8 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         "set-cookie", "cookie",
         # Reporting headers — values are endpoint URLs and group names, not secrets.
         "report-to", "reporting-endpoints",
+        # AWS CloudFront / CDN request-tracking headers — high entropy by design, never secrets.
+        "x-amz-cf-id", "x-amz-cf-pop", "x-amz-request-id", "x-cache",
     })
     for hdr_name, hdr_val in (response_headers or {}).items():
         if hdr_name.lower() in skip_headers:

@@ -2312,3 +2312,631 @@ Call log:
   Time       : 2026-03-28 18:19:35
 ================================================================
 
+2026-03-28 18:20:00 CMDi probe: https://www.rei.com/help param=chat
+2026-03-28 18:20:18 CMDi probe: https://www.rei.com/membership/mastercard param=trackingId
+2026-03-28 18:20:38 CMDi probe: https://www.rei.com/learn/expert-advice/the-best-hiking-boots.html param=series
+2026-03-28 18:20:55 CMDi probe: https://www.rei.com/membership/mastercard/preapproval param=trackingId
+2026-03-28 18:21:14 CMDi probe: https://www.rei.com/help/categories param=a
+2026-03-28 18:21:33 CMDi probe: https://www.rei.com/help/categories param=hc
+2026-03-28 18:21:50 CMDi probe: https://www.rei.com/help param=a
+2026-03-28 18:22:08 CMDi probe: https://play.google.com/store/apps/details param=id
+2026-03-28 18:22:18 [Verify] Confirming CRITICAL COMMAND INJECTION (CONFIRMED) on www.rei.com ...
+2026-03-28 18:22:22 [Verify] Confirmed — firing alert
+
+================================================================
+  !! CRITICAL ALERT: COMMAND INJECTION (CONFIRMED) !!
+  Target     : www.rei.com
+  Detail     : Parameter 'id' on https://play.google.com/store/apps/details echoed canary string with payload: '&echo probe-test-7f3a' | Snippet: 'd%3Dcom.ubermind.rei%26echo%2Bprobe-test-7f3a%26referrer%3Dutm_source%253Dreiweb%2526utm_medium%253Dweb%2'
+  Confidence : CONFIRMED
+  Time       : 2026-03-28 18:22:22
+================================================================
+
+2026-03-28 18:22:48 LDAPi probe: https://www.rei.com/help param=chat
+2026-03-28 18:23:01 LDAPi probe: https://www.rei.com/membership/mastercard param=trackingId
+2026-03-28 18:23:16 LDAPi probe: https://www.rei.com/learn/expert-advice/the-best-hiking-boots.html param=series
+2026-03-28 18:23:30 LDAPi probe: https://www.rei.com/membership/mastercard/preapproval param=trackingId
+2026-03-28 18:23:43 LDAPi probe: https://www.rei.com/help/categories param=a
+2026-03-28 18:23:57 LDAPi probe: https://www.rei.com/help/categories param=hc
+2026-03-28 18:24:10 LDAPi probe: https://www.rei.com/help param=a
+2026-03-28 18:24:22 LDAPi probe: https://play.google.com/store/apps/details param=id
+2026-03-28 18:24:33 LDAPi probe: https://play.google.com/store/apps/details param=referrer
+2026-03-28 18:25:03 LDAPi probe: https://apps.apple.com/app/apple-store/id404849387 param=pt
+2026-03-28 18:25:23 LDAPi probe: https://apps.apple.com/app/apple-store/id404849387 param=ct
+2026-03-28 18:25:44 LDAPi probe: https://apps.apple.com/app/apple-store/id404849387 param=mt
+2026-03-28 18:27:20 Race condition probe: https://www.rei.com/gearmail/new/signup [POST] (account registration)
+2026-03-28 18:27:31 [Race] Attempt 1/3: 0/1 requests succeeded
+2026-03-28 18:27:31 Race condition probe: https://www.rei.com/learn/c/cycling/t/buying-advice [GET] (payment/checkout)
+2026-03-28 18:27:33 [Race] Attempt 1/3: 0/10 requests succeeded
+2026-03-28 18:27:33 Race condition probe: https://www.rei.com/gift-card/purchase [GET] (payment/checkout)
+2026-03-28 18:27:34 [Race] Attempt 1/3: 0/10 requests succeeded
+2026-03-28 18:27:34 Race condition probe: https://www.rei.com/PurchaseTrackingLoginView [GET] (payment/checkout)
+2026-03-28 18:27:46 [Race] Attempt 1/3: 0/9 requests succeeded
+2026-03-28 18:27:46 Race condition probe: https://www.rei.com/promotions/coupons [GET] (coupon/promo redemption)
+2026-03-28 18:27:57 [Race] Attempt 1/3: 0/9 requests succeeded
+2026-03-28 18:28:24 HPP probe: https://www.rei.com/help param=chat
+2026-03-28 18:28:31 HPP probe: https://www.rei.com/membership/mastercard param=trackingId
+2026-03-28 18:28:37 HPP probe: https://www.rei.com/learn/expert-advice/the-best-hiking-boots.html param=series
+2026-03-28 18:28:43 HPP probe: https://www.rei.com/membership/mastercard/preapproval param=trackingId
+2026-03-28 18:28:48 HPP probe: https://www.rei.com/help/categories param=a
+2026-03-28 18:28:48 HPP probe: https://www.rei.com/help/categories param=hc
+2026-03-28 18:28:50 HPP probe: https://www.rei.com/help param=a
+2026-03-28 18:28:55 HPP probe: https://play.google.com/store/apps/details param=id
+2026-03-28 18:28:55 HPP probe: https://play.google.com/store/apps/details param=referrer
+2026-03-28 18:28:57 HPP probe: https://apps.apple.com/app/apple-store/id404849387 param=pt
+2026-03-28 18:28:57 HPP probe: https://apps.apple.com/app/apple-store/id404849387 param=ct
+2026-03-28 18:28:59 HPP probe: https://apps.apple.com/app/apple-store/id404849387 param=mt
+2026-03-28 18:29:00 WCP probe: https://www.rei.com header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 18:29:00 [Baseline] https://www.rei.com — status=403 len=368±0 fp=a1d38d86d16116de
+2026-03-28 18:29:00 WCP probe: https://www.rei.com header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 18:29:01 WCP probe: https://www.rei.com header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 18:29:07 WCP probe: https://www.rei.com header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 18:29:08 WCP probe: https://www.rei.com header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 18:29:09 WCP probe: https://www.rei.com header=X-Forwarded-For: 127.0.0.1
+2026-03-28 18:29:10 WCP cloak probe: https://www.rei.com?param=cloak-probe-9d4e
+2026-03-28 18:30:21 Batch 3 [workers=3] | crawled=1 queue=5
+2026-03-28 18:30:23 HTTP 403 https://www.rei.com/accessibility
+2026-03-28 18:30:23 HTTP 403 https://www.rei.com/travel
+2026-03-28 18:30:23 HTTP 200 https://rei.capitalone.com/
+2026-03-28 18:30:27 JS-heavy page detected, switching to Playwright: https://rei.capitalone.com/
+2026-03-28 18:30:27 Playwright rendering: https://rei.capitalone.com/
+2026-03-28 18:30:32 XHR: POST https://potomac-clickstream.capitalone.com/com.snowplowanalytics.snowplow/tp2
+2026-03-28 18:30:36 Playwright got 29123 bytes from https://rei.capitalone.com/
+2026-03-28 18:30:36 Parsed: https://rei.capitalone.com/
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://rei.capitalone.com/
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'x-amz-id-2' of https://rei.capitalone.com/ | Entropy: 5.20 | Class: base64 | Context: 'fIb5Xpfu6mbmfMdn3Qr4lg4EfheLmky0G0BnbgIcgJZFmf+tBqrMhSptVEjR'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:30:37
+================================================================
+
+2026-03-28 18:30:37 [!] Entropy: high entropy string (entropy=5.20) at https://rei.capitalone.com/
+2026-03-28 18:30:58 SQLi probe: https://verified.capitalone.com/auth/signin param=relationshipId
+2026-03-28 18:31:09 [Timing] Baseline https://verified.capitalone.com/auth/signin param=relationshipId: mean=269ms σ=112ms max=444ms
+2026-03-28 18:31:13 [Timing] Baseline: 269ms ±112ms | Probe(SLEEP 2): 487ms (threshold 2605ms) ✗ → NOT TRIGGERED
+2026-03-28 18:31:13 SQLi probe: https://verified.capitalone.com/enroll/pii param=originatorId
+2026-03-28 18:31:26 [Timing] Baseline https://verified.capitalone.com/enroll/pii param=originatorId: mean=257ms σ=111ms max=456ms
+2026-03-28 18:31:28 [Timing] Baseline: 257ms ±111ms | Probe(SLEEP 2): 142ms (threshold 2591ms) ✗ → NOT TRIGGERED
+2026-03-28 18:31:29 CMDi probe: https://verified.capitalone.com/auth/signin param=relationshipId
+2026-03-28 18:31:45 CMDi probe: https://verified.capitalone.com/enroll/pii param=originatorId
+2026-03-28 18:32:00 LDAPi probe: https://verified.capitalone.com/auth/signin param=relationshipId
+2026-03-28 18:32:12 LDAPi probe: https://verified.capitalone.com/enroll/pii param=originatorId
+2026-03-28 18:32:12 [Baseline] https://verified.capitalone.com/auth/signin — status=200 len=100795±0 fp=e1391e2aa78034f7
+2026-03-28 18:32:15 [Baseline] https://verified.capitalone.com/enroll/pii — status=200 len=99364±0 fp=7d1b57fe181f182f
+2026-03-28 18:32:27 HPP probe: https://verified.capitalone.com/auth/signin param=relationshipId
+2026-03-28 18:32:32 HPP probe: https://verified.capitalone.com/enroll/pii param=originatorId
+2026-03-28 18:32:38 WCP probe: https://rei.capitalone.com/ header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 18:32:39 WCP probe: https://rei.capitalone.com/ header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 18:32:41 WCP probe: https://rei.capitalone.com/ header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 18:32:43 WCP probe: https://rei.capitalone.com/ header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 18:32:44 [Baseline] https://rei.capitalone.com/ — status=200 len=41764±0 fp=7450ccd7ba57c6d7
+2026-03-28 18:32:44 WCP probe: https://rei.capitalone.com/ header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 18:32:45 WCP probe: https://rei.capitalone.com/ header=X-Forwarded-For: 127.0.0.1
+2026-03-28 18:32:47 WCP cloak probe: https://rei.capitalone.com/?param=cloak-probe-9d4e
+2026-03-28 18:32:51 [P1] High-value URL queued: https://verified.capitalone.com/auth/signin?relationshipId=161
+2026-03-28 18:32:51 [P1] High-value URL queued: https://verified.capitalone.com/signinhelp.html#/sign-in-help?client=SIC
+2026-03-28 18:32:51 Batch 3 [workers=3] | crawled=2 queue=13
+2026-03-28 18:32:52 HTTP 200 https://verified.capitalone.com/auth/signin?relationshipId=161
+2026-03-28 18:32:53 HTTP 200 https://verified.capitalone.com/signinhelp.html#/sign-in-help?client=SIC
+2026-03-28 18:32:53 JS analysis: 1 findings in https://rei.capitalone.com/_next/static/chunks/polyfills-42372ed130431b0a.js
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://rei.capitalone.com/_next/static/chunks/main-d6ce31beed5b92e9.js
+  Detail     : Sink 'Object.assign(' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'ion(){return n}}),r(14079);let n=function(e){for(var t=arguments.length,r=Array(t>1?t-1:0),n=1;n<t;n++)r[n-1]=arguments[n];return e};("function"==typeof t.default||"object"==typeof t.default&&null!==t.default)&&void 0===t.default.__esModule&&(Object.defineProperty(t.default,"__esModule",{value:!0}),'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:32:54
+================================================================
+
+2026-03-28 18:32:54 [!] PP client-side sink 'Object.assign(': https://rei.capitalone.com/_next/static/chunks/main-d6ce31beed5b92e9.js
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://rei.capitalone.com/_next/static/chunks/main-d6ce31beed5b92e9.js
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: 'n.close(),++s>25){window.location.reload();return}clearTimeout(r),r=setTimeout(t,s>5?5e3:1e3)}n&&n.close();let u=(0,o.getSocketUrl)(e.assetPrefix);(n=new window.WebSocket(""+u+e.path)).onopen=function(){s=0,window.console.log("[HMR] connected")},n.onerror=i,n.onclose=i,n.onmessage=function(e){let t='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:32:54
+================================================================
+
+2026-03-28 18:32:54 [!] PP client-side sink 'JSON.parse(…)[': https://rei.capitalone.com/_next/static/chunks/main-d6ce31beed5b92e9.js
+2026-03-28 18:32:54 JS analysis: 2 findings in https://rei.capitalone.com/_next/static/chunks/main-d6ce31beed5b92e9.js
+2026-03-28 18:32:55 JS analysis: 5 findings in https://rei.capitalone.com/_next/static/chunks/pages/_app-ee00033c17f80243.js
+2026-03-28 18:32:58 HTTP 200 https://rei.jobs/
+2026-03-28 18:33:01 JS-heavy page detected, switching to Playwright: https://verified.capitalone.com/auth/signin?relationshipId=161
+2026-03-28 18:33:02 Playwright rendering: https://verified.capitalone.com/auth/signin?relationshipId=161
+2026-03-28 18:33:03 XHR: GET https://verified.capitalone.com/auth/content/i18n/identity-experience/sign-in/snag/en_us.json
+2026-03-28 18:33:03 XHR: GET https://verified.capitalone.com/auth/content/i18n/header-footer/en_us.json
+2026-03-28 18:33:03 XHR: GET https://verified.capitalone.com/auth/content/i18n/auth/identity-webauthn/en_us.json
+2026-03-28 18:33:03 XHR: GET https://verified.capitalone.com/signincontroller-web/signincontroller/redirectLinkInfo?deepLink=null&lob=ENTERPRISE&targetPage=enterpriseSigninHelp
+2026-03-28 18:33:03 XHR: GET https://verified.capitalone.com/auth/content/i18n/identity-experience/auth/sign-in/en_us.json
+2026-03-28 18:33:03 XHR: GET https://verified.capitalone.com/auth/content/i18n/sign-in/en_us.json
+2026-03-28 18:33:04 XHR: GET https://dpm.demdex.net/id?d_visid_ver=4.5.2&d_fieldgroup=MC&d_rtbd=json&d_ver=2&d_verify=1&d_orgid=317906C354252E890A4C98BC%40AdobeOrg&d_nsid=0&ts=1774737184080
+2026-03-28 18:33:04 XHR: POST https://potomac-clickstream.capitalone.com/com.snowplowanalytics.snowplow/tp2
+2026-03-28 18:33:04 XHR: GET https://dpm.demdex.net/id/rd?d_visid_ver=4.5.2&d_fieldgroup=MC&d_rtbd=json&d_ver=2&d_verify=1&d_orgid=317906C354252E890A4C98BC%40AdobeOrg&d_nsid=0&ts=1774737184080
+2026-03-28 18:33:04 XHR: GET https://smetrics.capitalone.com/id?d_visid_ver=4.5.2&d_fieldgroup=A&mcorgid=317906C354252E890A4C98BC%40AdobeOrg&mid=29104832965375805664592053577776019588&ts=1774737184856
+2026-03-28 18:33:05 XHR: POST https://bam.nr-data.net/1/NRBR-ee8ba61b630f29eb069?a=795696191&sa=1&v=1.302.0&t=Unnamed%20Transaction&rst=2652&ck=0&s=73bcd00c4faf71ab&ref=https://verified.capitalone.com/auth/signin&ptid=46c7cb1b78edcb4e&af=err,spa,xhr,stn,ins&be=272&fe=2024&dc=632&fsh=1&perf=%7B%22timing%22:%7B%22of%22:1774737182419,%22n%22:0,%22f%22:0,%22dn%22:1,%22dne%22:2,%22c%22:2,%22s%22:46,%22ce%22:196,%22rq%22:196,%22rp%22:272,%22rpe%22:307,%22di%22:631,%22ds%22:904,%22de%22:904,%22dc%22:2295,%22l%22:2295,%22le%22:2296%7D,%22navigation%22:%7B%7D%7D&fp=636&fcp=964
+2026-03-28 18:33:05 XHR: POST https://bam.nr-data.net/events/1/NRBR-ee8ba61b630f29eb069?a=795696191&sa=1&v=1.302.0&t=Unnamed%20Transaction&rst=3115&ck=0&s=73bcd00c4faf71ab&ref=https://verified.capitalone.com/auth/signin&ptid=46c7cb1b78edcb4e
+2026-03-28 18:33:05 XHR: POST https://bam.nr-data.net/jserrors/1/NRBR-ee8ba61b630f29eb069?a=795696191&sa=1&v=1.302.0&t=Unnamed%20Transaction&rst=3116&ck=0&s=73bcd00c4faf71ab&ref=https://verified.capitalone.com/auth/signin&ptid=46c7cb1b78edcb4e
+2026-03-28 18:33:05 XHR: POST https://bam.nr-data.net/ins/1/NRBR-ee8ba61b630f29eb069?a=795696191&sa=1&v=1.302.0&t=Unnamed%20Transaction&rst=3117&ck=0&s=73bcd00c4faf71ab&ref=https://verified.capitalone.com/auth/signin&ptid=46c7cb1b78edcb4e
+2026-03-28 18:33:05 XHR: POST https://bam.nr-data.net/events/1/NRBR-ee8ba61b630f29eb069?a=795696191&sa=1&v=1.302.0&t=Unnamed%20Transaction&rst=3119&ck=0&s=73bcd00c4faf71ab&ref=https://verified.capitalone.com/auth/signin&ptid=46c7cb1b78edcb4e
+2026-03-28 18:33:09 Playwright got 423381 bytes from https://verified.capitalone.com/auth/signin?relationshipId=161
+2026-03-28 18:33:09 Playwright content richer — using rendered HTML
+2026-03-28 18:33:10 Parsed: https://verified.capitalone.com/auth/signin?relationshipId=161
+2026-03-28 18:33:38 WCP probe: https://verified.capitalone.com/auth/signin header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 18:33:40 WCP probe: https://verified.capitalone.com/auth/signin header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 18:33:41 WCP probe: https://verified.capitalone.com/auth/signin header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 18:33:41 WCP probe: https://verified.capitalone.com/auth/signin header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 18:33:42 WCP probe: https://verified.capitalone.com/auth/signin header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 18:33:44 WCP probe: https://verified.capitalone.com/auth/signin header=X-Forwarded-For: 127.0.0.1
+2026-03-28 18:33:45 WCP fat-GET probe: https://verified.capitalone.com/auth/signin param=relationshipId
+2026-03-28 18:33:46 WCP cloak probe: https://verified.capitalone.com/auth/signin?relationshipId=161;param=cloak-probe-9d4e
+2026-03-28 18:33:52 JS-heavy page detected, switching to Playwright: https://verified.capitalone.com/signinhelp.html#/sign-in-help?client=SIC
+2026-03-28 18:33:52 Playwright rendering: https://verified.capitalone.com/signinhelp.html#/sign-in-help?client=SIC
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://onetms.capitalone.com/utag/capitalone/others/prod/utag.400.js?utv=ut4.48.202602272119
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: ').find((function(i){return i.toUpperCase().startsWith("".concat(e.toUpperCase(),"="))}));if(i)return i.split("=")[1]}function l(){var e=s(n.Cookie._GA);if(e)return"s"+e.split(".").slice(2).join(".")}function _(e){if("view"===e){var i=s(n.Cookie.KM_2);if(!i)try{var t=window.localStorage.kmInfo;t&&(i='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:33:53
+================================================================
+
+2026-03-28 18:33:53 [!] PP client-side sink 'JSON.parse(…)[': https://onetms.capitalone.com/utag/capitalone/others/prod/utag.400.js?utv=ut4.48.202602272119
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://onetms.capitalone.com/ot/ot.js
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: ');l.map(function(e){return e.split("=")}).forEach(function(e,t){Object.keys(_).forEach(function(t){e[1]=e[0]===v(_[t],e[0],a)?e[1]:g}),l[t]=e[1]===g?null:e.join("=")}),e=e.split("?")[0]+"?"+l.filter(Boolean).join("&")}}return e};const h=function(e,a){var t;return F(null==(t=e)||"object"!=typeof t?t:'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:33:53
+================================================================
+
+2026-03-28 18:33:53 [!] PP client-side sink 'JSON.parse(…)[': https://onetms.capitalone.com/ot/ot.js
+2026-03-28 18:33:53 XHR: GET https://verified.capitalone.com/sign-in-help/content/i18n/header-footer/en_us.json
+2026-03-28 18:33:53 XHR: GET https://verified.capitalone.com/sign-in-help/content/i18n/identity-experience/forgots/pii/en_us.json
+2026-03-28 18:33:53 XHR: GET https://verified.capitalone.com/sign-in-help/content/i18n/common-components/pii-form/en_us.json
+2026-03-28 18:33:54 XHR: GET https://verified.capitalone.com/forgotunorchsvc-web/signinhelp/getSignInAppUrl
+2026-03-28 18:33:54 XHR: GET https://verified.capitalone.com/forgotunorchsvc-web/signinhelp/UserCookies
+2026-03-28 18:33:54 XHR: GET https://dpm.demdex.net/id?d_visid_ver=4.5.2&d_fieldgroup=MC&d_rtbd=json&d_ver=2&d_verify=1&d_orgid=317906C354252E890A4C98BC%40AdobeOrg&d_nsid=0&ts=1774737234553
+2026-03-28 18:33:54 XHR: POST https://potomac-clickstream.capitalone.com/com.snowplowanalytics.snowplow/tp2
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://onetms.capitalone.com/utag/capitalone/others/prod/utag.js
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: ').find((function(i){return i.toUpperCase().startsWith("".concat(e.toUpperCase(),"="))}));if(i)return i.split("=")[1]}function l(){var e=s(n.Cookie._GA);if(e)return"s"+e.split(".").slice(2).join(".")}function _(e){if("view"===e){var i=s(n.Cookie.KM_2);if(!i)try{var t=window.localStorage.kmInfo;t&&(i='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:33:54
+================================================================
+
+2026-03-28 18:33:54 XHR: GET https://d1af033869koo7.cloudfront.net/psp/cap1enterprise-v1-001/CustomScript.js?jsVersion=3.11.18
+2026-03-28 18:33:54 XHR: POST https://tie.cloud.247-inc.net/init
+2026-03-28 18:33:54 [!] PP client-side sink 'JSON.parse(…)[': https://onetms.capitalone.com/utag/capitalone/others/prod/utag.js
+2026-03-28 18:33:54 JS analysis: 5 findings in https://onetms.capitalone.com/utag/capitalone/others/prod/utag.js
+2026-03-28 18:33:54 XHR: GET https://dpm.demdex.net/id/rd?d_visid_ver=4.5.2&d_fieldgroup=MC&d_rtbd=json&d_ver=2&d_verify=1&d_orgid=317906C354252E890A4C98BC%40AdobeOrg&d_nsid=0&ts=1774737234553
+2026-03-28 18:33:54 XHR: GET https://smetrics.capitalone.com/id?d_visid_ver=4.5.2&d_fieldgroup=A&mcorgid=317906C354252E890A4C98BC%40AdobeOrg&mid=73168644495376110244572586878227324836&ts=1774737234902
+2026-03-28 18:33:55 XHR: POST https://bam.nr-data.net/1/NRBR-ee8ba61b630f29eb069?a=795696191&sa=1&v=1.302.0&t=Unnamed%20Transaction&rst=2684&ck=0&s=a5d8008cb72b847a&ref=https://verified.capitalone.com/sign-in-help/pii&ptid=70d8109caf1795ad&af=err,spa,xhr,stn,ins&be=715&fe=1743&dc=523&fsh=1&perf=%7B%22timing%22:%7B%22of%22:1774737232733,%22n%22:0,%22r%22:0,%22re%22:640,%22f%22:640,%22dn%22:640,%22dne%22:640,%22c%22:640,%22s%22:640,%22ce%22:640,%22rq%22:641,%22rp%22:715,%22rpe%22:744,%22di%22:1052,%22ds%22:1237,%22de%22:1238,%22dc%22:2457,%22l%22:2457,%22le%22:2458%7D,%22navigation%22:%7B%22rc%22:1%7D%7D&fp=1052&fcp=1244
+2026-03-28 18:33:55 XHR: POST https://tie.cloud.247-inc.net/init
+2026-03-28 18:33:55 XHR: POST https://tie.cloud.247-inc.net/events
+2026-03-28 18:33:55 XHR: GET https://d1af033869koo7.cloudfront.net/content/cap1enterprise-v1-001/default/config.json
+2026-03-28 18:33:55 XHR: POST https://bam.nr-data.net/events/1/NRBR-ee8ba61b630f29eb069?a=795696191&sa=1&v=1.302.0&t=Unnamed%20Transaction&rst=2944&ck=0&s=a5d8008cb72b847a&ref=https://verified.capitalone.com/sign-in-help/pii&ptid=70d8109caf1795ad
+2026-03-28 18:33:55 XHR: POST https://bam.nr-data.net/jserrors/1/NRBR-ee8ba61b630f29eb069?a=795696191&sa=1&v=1.302.0&t=Unnamed%20Transaction&rst=2945&ck=0&s=a5d8008cb72b847a&ref=https://verified.capitalone.com/sign-in-help/pii&ptid=70d8109caf1795ad
+2026-03-28 18:33:55 XHR: POST https://bam.nr-data.net/ins/1/NRBR-ee8ba61b630f29eb069?a=795696191&sa=1&v=1.302.0&t=Unnamed%20Transaction&rst=2946&ck=0&s=a5d8008cb72b847a&ref=https://verified.capitalone.com/sign-in-help/pii&ptid=70d8109caf1795ad
+2026-03-28 18:33:55 XHR: POST https://bam.nr-data.net/events/1/NRBR-ee8ba61b630f29eb069?a=795696191&sa=1&v=1.302.0&t=Unnamed%20Transaction&rst=3085&ck=0&s=a5d8008cb72b847a&ref=https://verified.capitalone.com/sign-in-help/pii&ptid=70d8109caf1795ad
+2026-03-28 18:33:55 XHR: POST https://api.cloud.247-inc.net/v1/frontends/clients/cap1enterprise-v1-001/applications/cards/interactions
+2026-03-28 18:33:56 XHR: POST https://tie.cloud.247-inc.net/events
+2026-03-28 18:33:56 XHR: POST https://tie.cloud.247-inc.net/events
+2026-03-28 18:33:58 XHR: GET https://d1af033869koo7.cloudfront.net/content/cap1enterprise-v1-001/us_forgots/config.json
+2026-03-28 18:33:58 XHR: POST https://tie.cloud.247-inc.net/events
+2026-03-28 18:33:59 XHR: POST https://tie.cloud.247-inc.net/eval
+2026-03-28 18:33:59 Playwright got 331323 bytes from https://verified.capitalone.com/signinhelp.html#/sign-in-help?client=SIC
+2026-03-28 18:33:59 Playwright content richer — using rendered HTML
+2026-03-28 18:34:01 Parsed: https://verified.capitalone.com/signinhelp.html#/sign-in-help?client=SIC
+2026-03-28 18:34:24 WCP probe: https://verified.capitalone.com/signinhelp.html header=X-Forwarded-Host: cache-probe-8b2c.com
+2026-03-28 18:34:25 WCP probe: https://verified.capitalone.com/signinhelp.html header=X-Forwarded-Scheme: cache-probe-8b2c
+2026-03-28 18:34:26 WCP probe: https://verified.capitalone.com/signinhelp.html header=X-Original-URL: /cache-probe-8b2c
+2026-03-28 18:34:27 WCP probe: https://verified.capitalone.com/signinhelp.html header=X-Rewrite-URL: /cache-probe-8b2c
+2026-03-28 18:34:28 WCP probe: https://verified.capitalone.com/signinhelp.html header=X-Custom-IP-Authorization: 127.0.0.1
+2026-03-28 18:34:29 WCP probe: https://verified.capitalone.com/signinhelp.html header=X-Forwarded-For: 127.0.0.1
+2026-03-28 18:34:30 WCP cloak probe: https://verified.capitalone.com/signinhelp.html?param=cloak-probe-9d4e
+2026-03-28 18:34:35 [P1] High-value URL queued: https://verified.capitalone.com/auth/signin
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://d1af033869koo7.cloudfront.net/psp/platform/247px.js
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: '[i]=e[t][i]);o[t]=n}}}function t(e){return Utils$$1.isUndefinedOrNull(e)?o[s]:o[e]}function n(e){var t=Utils$$1.ensureArray(e);0===t.length&&(t=Utils$$1.objectKeys(o));for(var n=0;n<t.length;n++)o.hasOwnProperty(t[n])&&(o[t[n]]=null)}function i(e){var t=null;try{t=window.sessionStorage.getItem(e),t='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:34:36
+================================================================
+
+2026-03-28 18:34:36 [!] PP client-side sink 'JSON.parse(…)[': https://d1af033869koo7.cloudfront.net/psp/platform/247px.js
+2026-03-28 18:34:38 [FP Suppressed] JAVASCRIPT SOURCE MAP EXPOSED on https://d1af033869koo7.cloudfront.net/frontends/files/js/wid matched fingerprint: asset_hashes/.min.js
+2026-03-28 18:34:38 [!!] JS source map exposed: https://d1af033869koo7.cloudfront.net/frontends/files/js/widget-loader.min.js.map
+
+================================================================
+  !! MEDIUM ALERT: CLIENT-SIDE PROTOTYPE POLLUTION SINK !!
+  Target     : https://d1af033869koo7.cloudfront.net/frontends/files/js/widget-loader.min.js
+  Detail     : Sink 'JSON.parse(…)[' found in first-party JS with a user-controlled input source nearby — manual verification required to confirm exploitability. Context: '.removeSpecificKeys(n[e],t):n[e]={},this._store.setItem(this._storageKey,u.a.encode(JSON.stringify(n)))}},{key:"addStorageListener",value:function(e){var t=this;c.a.ieVersion&&9!==c.a.isVersion?this._pollForStorage(e):window.addEventListener("storage",(function(n){if(n.key===t._storageKey)try{var r='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:34:38
+================================================================
+
+2026-03-28 18:34:38 [!] PP client-side sink 'JSON.parse(…)[': https://d1af033869koo7.cloudfront.net/frontends/files/js/widget-loader.min.js
+2026-03-28 18:34:38 JS analysis: 4 findings in https://d1af033869koo7.cloudfront.net/frontends/files/js/widget-loader.min.js
+2026-03-28 18:34:42 JS-heavy page detected, switching to Playwright: https://rei.jobs/
+2026-03-28 18:34:42 Playwright rendering: https://rei.jobs/
+2026-03-28 18:34:45 XHR: GET https://www.rei.jobs/api/trackcdn/safe
+2026-03-28 18:34:46 XHR: POST https://analytics.google.com/g/collect?v=2&tid=G-5Y2BYGL910&gtm=45je63p1v885508000z89126885743za20gzb9126885743zd9126885743&_p=1774737284244&_gaz=1&gcd=13l3l3l3l1l1&npa=0&dma=0&cid=603682306.1774737286&ul=en-us&sr=1280x720&uaa=x86&uab=64&uafvl=Not%253AA-Brand%3B99.0.0.0%7CHeadlessChrome%3B145.0.7632.6%7CChromium%3B145.0.7632.6&uamb=0&uam=&uap=Windows&uapv=10.0&uaw=0&are=1&frm=0&pscdl=noapi&_eu=AAAAAGA&_s=1&tag_exp=0~115616986~115938466~115938468~117484252&sid=1774737286&sct=1&seg=0&dl=https%3A%2F%2Fwww.rei.jobs%2Fcareers-home&dt=Careers%20Home%20%7C%20REI&en=page_view&_fv=1&_ss=1&tfd=3425
+2026-03-28 18:34:46 XHR: GET https://api.altrulabs.com/dist-api/us/widgets/12013860
+2026-03-28 18:34:47 XHR: GET https://api.altrulabs.com/api/us/answers?client_id=12007680&per_page=5&q[id_eq_any][]=13968450
+2026-03-28 18:34:47 XHR: GET https://api.altrulabs.com/api/us/answers?client_id=12007680&per_page=5&q[id_eq_any][]=13968460
+2026-03-28 18:34:47 XHR: GET https://api.altrulabs.com/api/us/answers?client_id=12007680&per_page=5&q[id_eq_any][]=13968470
+2026-03-28 18:34:47 XHR: GET https://api.altrulabs.com/api/us/answers?client_id=12007680&per_page=5&q[id_eq_any][]=13968480
+2026-03-28 18:34:47 XHR: GET https://cdn.altrulabs.com/www/plyr.svg
+2026-03-28 18:34:47 XHR: GET https://cdn.altrulabs.com/www/plyr.svg
+2026-03-28 18:34:47 XHR: GET https://cdn.altrulabs.com/www/plyr.svg
+2026-03-28 18:34:47 XHR: GET https://cdn.altrulabs.com/www/plyr.svg
+2026-03-28 18:34:47 XHR: POST https://c.talentplatform.us/com.snowplowanalytics.snowplow/tp2
+2026-03-28 18:34:49 XHR: POST https://bam.nr-data.net/1/dc1a1a251b?a=1120400762&sa=1&v=1.295.0&t=Unnamed%20Transaction&rst=6737&ck=0&s=2850a714907c3236&ref=https://www.rei.jobs/careers-home&ptid=7d6f0b4459d63289&af=err,spa,xhr,stn,ins&be=1196&fe=5224&dc=2248&fsh=1&perf=%7B%22timing%22:%7B%22of%22:1774737283040,%22n%22:0,%22f%22:937,%22dn%22:937,%22dne%22:937,%22c%22:937,%22s%22:937,%22ce%22:937,%22rq%22:938,%22rp%22:1197,%22rpe%22:1428,%22di%22:3444,%22ds%22:3444,%22de%22:3444,%22dc%22:6417,%22l%22:6418,%22le%22:6420%7D,%22navigation%22:%7B%7D%7D&fp=1912&fcp=1912
+2026-03-28 18:34:50 XHR: POST https://bam.nr-data.net/events/1/dc1a1a251b?a=1120400762&sa=1&v=1.295.0&t=Unnamed%20Transaction&rst=7019&ck=0&s=2850a714907c3236&ref=https://www.rei.jobs/careers-home&ptid=7d6f0b4459d63289
+2026-03-28 18:34:52 XHR: POST https://usage-us.talentplatform.com/track/?verbose=1&ip=0&_=1774737292484
+2026-03-28 18:34:54 Playwright got 642663 bytes from https://rei.jobs/
+2026-03-28 18:34:54 Playwright content richer — using rendered HTML
+2026-03-28 18:34:57 Parsed: https://rei.jobs/
+2026-03-28 18:35:10 Saved email: jobs@rei.com
+[NuScrape] Scan stopped by user @ 2026-03-28 18:35:14.570810
+
+[*] Received signal 15 — shutting down cleanly...
+
+============================================================
+[NuScrape] Starting scan → https://www.rei.com  @ 2026-03-28 18:35:47.865105
+============================================================
+[scope] Loaded 0 in-scope and 0 excluded pattern(s) from /home/colin/Code/NuScrape/nuscrape_scope_27so_oma.csv
+[*] Stealth profile: GHOST
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+[*] Multi-domain mode: 4 target(s)  parallel=False
+
+============================================================
+[1/4] Scanning https://www.rei.com...
+============================================================
+2026-03-28 18:35:48 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 18:35:48 Starting NuScrape → https://www.rei.com
+2026-03-28 18:35:48 Same-domain-only: staying on www.rei.com
+2026-03-28 18:35:48 robots.txt: ignored (--ignore-robots)
+2026-03-28 18:35:48 Fetching sitemap...
+2026-03-28 18:36:01 No sitemap.xml for https://www.rei.com
+2026-03-28 18:36:02 [SSRF] OOB client registered: 120bdbcd9fa9cdea5c26.interact.sh
+2026-03-28 18:36:02 Batch 1 [workers=3] | crawled=0 queue=0
+[NuScrape] Scan stopped by user @ 2026-03-28 18:36:15.906400
+
+[*] Received signal 15 — shutting down cleanly...
+
+============================================================
+[2/4] Scanning https://login.rei.com...
+============================================================
+2026-03-28 18:36:15 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 18:36:15 Starting NuScrape → https://login.rei.com
+2026-03-28 18:36:15 Same-domain-only: staying on login.rei.com
+2026-03-28 18:36:15 robots.txt: ignored (--ignore-robots)
+2026-03-28 18:36:15 Fetching sitemap...
+[NuScrape] Scan stopped by user @ 2026-03-28 18:36:17.157647
+
+[*] Received signal 15 — shutting down cleanly...
+
+============================================================
+[3/4] Scanning http://collaboration.rei.com...
+============================================================
+2026-03-28 18:36:17 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 18:36:17 Starting NuScrape → http://collaboration.rei.com
+2026-03-28 18:36:17 Same-domain-only: staying on collaboration.rei.com
+2026-03-28 18:36:17 robots.txt: ignored (--ignore-robots)
+2026-03-28 18:36:17 Fetching sitemap...
+
+============================================================
+[NuScrape] Starting scan → https://www.rei.com  @ 2026-03-28 18:36:44.975032
+============================================================
+[scope] Loaded 0 in-scope and 0 excluded pattern(s) from /home/colin/Code/NuScrape/nuscrape_scope_aa4feg3w.csv
+[*] Stealth profile: GHOST
+============================================================
+[!] WARNING: Active probes enabled.
+[!] Payload-injecting checks are ON:
+[!]   path traversal, SSTI, CRLF injection,
+[!]   CORS evil-origin probes, default credential tests,
+[!]   dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT)
+[!] Only scan targets you are authorised to test.
+============================================================
+[*] Social media filter enabled — skipping Facebook, X, YouTube, LinkedIn, etc.
+[*] Playwright JS rendering enabled
+[*] Multi-domain mode: 4 target(s)  parallel=True
+
+[1/4] Scanning https://www.rei.com  [parallel]
+
+[2/4] Scanning https://login.rei.com  [parallel]
+2026-03-28 18:36:45 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+
+[3/4] Scanning http://collaboration.rei.com  [parallel]
+2026-03-28 18:36:45 Starting NuScrape → https://www.rei.com
+2026-03-28 18:36:45 Same-domain-only: staying on www.rei.com
+2026-03-28 18:36:45 robots.txt: ignored (--ignore-robots)
+2026-03-28 18:36:45 Fetching sitemap...
+2026-03-28 18:36:45 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 18:36:45 Starting NuScrape → https://login.rei.com
+2026-03-28 18:36:45 Same-domain-only: staying on login.rei.com
+2026-03-28 18:36:45 robots.txt: ignored (--ignore-robots)
+2026-03-28 18:36:45 Fetching sitemap...
+2026-03-28 18:36:45 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 18:36:45 Starting NuScrape → http://collaboration.rei.com
+2026-03-28 18:36:45 Same-domain-only: staying on collaboration.rei.com
+2026-03-28 18:36:45 robots.txt: ignored (--ignore-robots)
+2026-03-28 18:36:45 Fetching sitemap...
+2026-03-28 18:36:46 No sitemap.xml for http://collaboration.rei.com
+2026-03-28 18:36:46 No sitemap.xml for https://login.rei.com
+2026-03-28 18:36:47 [SSRF] OOB client registered: b0924b2a856b968bf8b2.interact.sh
+2026-03-28 18:36:47 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 18:36:47 [SSRF] OOB client registered: 1cfe6486a160bbe48a95.interact.sh
+2026-03-28 18:36:47 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 18:36:47 HTTP 403 https://login.rei.com
+2026-03-28 18:36:49 Done! Crawled 0 pages.
+
+[4/4] Scanning https://engineering.rei.com  [parallel]
+2026-03-28 18:36:50 [AdaptiveConcurrency] min=1 max=10 start=3 workers
+2026-03-28 18:36:50 Skipping 1 URLs crawled in the last 14 days.
+2026-03-28 18:36:50 Starting NuScrape → https://engineering.rei.com
+2026-03-28 18:36:50 Same-domain-only: staying on engineering.rei.com
+2026-03-28 18:36:50 robots.txt: ignored (--ignore-robots)
+2026-03-28 18:36:50 Fetching sitemap...
+2026-03-28 18:36:51 Sitemap found 36 URLs for https://engineering.rei.com
+2026-03-28 18:36:52 ERROR: Timeout fetching: http://collaboration.rei.com
+2026-03-28 18:36:52 [SSRF] OOB client registered: 7154fc55dcbafc8cb1c1.interact.sh
+2026-03-28 18:36:52 Batch 3 [workers=3] | crawled=0 queue=34
+2026-03-28 18:36:52 HTTP 200 https://engineering.rei.com
+2026-03-28 18:36:52 HTTP 200 https://engineering.rei.com/mobile/server-driven-ui.html
+2026-03-28 18:36:52 HTTP 200 https://engineering.rei.com/culture/store-technology.html
+2026-03-28 18:36:53 Done! Crawled 0 pages.
+2026-03-28 18:36:54 No sitemap.xml for https://www.rei.com
+2026-03-28 18:36:55 [SSRF] OOB client registered: c88d1633d011f698deef.interact.sh
+2026-03-28 18:36:55 Batch 1 [workers=3] | crawled=0 queue=0
+2026-03-28 18:36:55 Parsed: https://engineering.rei.com
+2026-03-28 18:36:55 Parsed: https://engineering.rei.com/mobile/server-driven-ui.html
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://engineering.rei.com/mobile/server-driven-ui.html
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'X-Amz-Cf-Id' of https://engineering.rei.com/mobile/server-driven-ui.html | Entropy: 4.94 | Class: base64 | Context: 'UrWA8ivCn0C9lCCHfopgvaOSPgFNQbnWyOE4l17hKYooPfx'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:36:55
+================================================================
+
+2026-03-28 18:36:55 [!] Entropy: high entropy string (entropy=4.94) at https://engineering.rei.com/mobile/server-driven-ui.html
+2026-03-28 18:36:55 Parsed: https://engineering.rei.com/culture/store-technology.html
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://engineering.rei.com/culture/store-technology.html
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'X-Amz-Cf-Id' of https://engineering.rei.com/culture/store-technology.html | Entropy: 5.17 | Class: base64 | Context: 'cJ4EYP05CLXvV6S2Mi3osQlYW07GFosWONQvXezsRWrZti4po6dKsA=='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:36:55
+================================================================
+
+2026-03-28 18:36:55 [!] Entropy: high entropy string (entropy=5.17) at https://engineering.rei.com/culture/store-technology.html
+2026-03-28 18:36:55 Batch 3 [workers=3] | crawled=3 queue=31
+2026-03-28 18:36:55 HTTP 200 https://engineering.rei.com/mobile/xcuitest-element-locator-enumerations.html
+2026-03-28 18:36:55 HTTP 200 https://engineering.rei.com/mobile/xcuitest-page-components.html
+2026-03-28 18:36:55 HTTP 200 https://engineering.rei.com/mobile/xcuitest-page-object-models.html
+2026-03-28 18:36:58 Parsed: https://engineering.rei.com/mobile/xcuitest-page-components.html
+2026-03-28 18:36:58 Parsed: https://engineering.rei.com/mobile/xcuitest-page-object-models.html
+2026-03-28 18:36:58 Parsed: https://engineering.rei.com/mobile/xcuitest-element-locator-enumerations.html
+2026-03-28 18:36:58 Batch 3 [workers=3] | crawled=6 queue=28
+2026-03-28 18:36:59 HTTP 200 https://engineering.rei.com/frontend/automated-accessibility-testing.html
+2026-03-28 18:36:59 HTTP 200 https://engineering.rei.com/mobile/swift-ui.html
+2026-03-28 18:36:59 HTTP 200 https://engineering.rei.com/devops/chaos-engineering.html
+2026-03-28 18:37:01 Parsed: https://engineering.rei.com/mobile/swift-ui.html
+2026-03-28 18:37:01 Parsed: https://engineering.rei.com/frontend/automated-accessibility-testing.html
+2026-03-28 18:37:01 Parsed: https://engineering.rei.com/devops/chaos-engineering.html
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://engineering.rei.com/devops/chaos-engineering.html
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'X-Amz-Cf-Id' of https://engineering.rei.com/devops/chaos-engineering.html | Entropy: 4.83 | Class: base64 | Context: 'rCVcB5OfF9tEoTYpespmZGyBWYvwZ46B4WgvuYA=='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:37:01
+================================================================
+
+2026-03-28 18:37:01 [!] Entropy: high entropy string (entropy=4.83) at https://engineering.rei.com/devops/chaos-engineering.html
+2026-03-28 18:37:01 Batch 3 [workers=3] | crawled=9 queue=26
+2026-03-28 18:37:02 HTTP 200 https://engineering.rei.com/frontend/accessibility-plus-content-design.html
+2026-03-28 18:37:02 HTTP 200 https://engineering.rei.com/security/making-csp-less-annoying.html
+2026-03-28 18:37:02 HTTP 200 https://engineering.rei.com/frontend/front-end-build-tool-renaissance.html
+2026-03-28 18:37:05 Parsed: https://engineering.rei.com/frontend/accessibility-plus-content-design.html
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://engineering.rei.com/frontend/accessibility-plus-content-design.html
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'X-Amz-Cf-Id' of https://engineering.rei.com/frontend/accessibility-plus-content-design.html | Entropy: 5.26 | Class: base64 | Context: 'QtynuvlmlpcsI62qKBZ3E2R7SExM1rGHHPJRGiArwNHyFO00eSon1Q=='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:37:05
+================================================================
+
+2026-03-28 18:37:05 [!] Entropy: high entropy string (entropy=5.26) at https://engineering.rei.com/frontend/accessibility-plus-content-design.html
+2026-03-28 18:37:05 Parsed: https://engineering.rei.com/frontend/front-end-build-tool-renaissance.html
+2026-03-28 18:37:05 Parsed: https://engineering.rei.com/security/making-csp-less-annoying.html
+2026-03-28 18:37:05 Batch 3 [workers=3] | crawled=12 queue=23
+2026-03-28 18:37:05 HTTP 200 https://engineering.rei.com/web-performance/disabling-server-push-at-rei.html
+2026-03-28 18:37:05 HTTP 200 https://engineering.rei.com/culture/so-long-and-thanks-for-all-the-bugs.html
+2026-03-28 18:37:05 HTTP 200 https://engineering.rei.com/web-performance/catch-the-wheel.html
+2026-03-28 18:37:05 ERROR: Timeout fetching: https://www.rei.com
+2026-03-28 18:37:07 Done! Crawled 0 pages.
+2026-03-28 18:37:07 Parsed: https://engineering.rei.com/web-performance/catch-the-wheel.html
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://engineering.rei.com/web-performance/catch-the-wheel.html
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'X-Amz-Cf-Id' of https://engineering.rei.com/web-performance/catch-the-wheel.html | Entropy: 4.84 | Class: base64 | Context: '82FiDX4ec9kpdFAGqfZAcELp3OTPvsKQoxx'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:37:07
+================================================================
+
+2026-03-28 18:37:07 [!] Entropy: high entropy string (entropy=4.84) at https://engineering.rei.com/web-performance/catch-the-wheel.html
+2026-03-28 18:37:07 Parsed: https://engineering.rei.com/web-performance/disabling-server-push-at-rei.html
+2026-03-28 18:37:07 Parsed: https://engineering.rei.com/culture/so-long-and-thanks-for-all-the-bugs.html
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://engineering.rei.com/culture/so-long-and-thanks-for-all-the-bugs.html
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'X-Amz-Cf-Id' of https://engineering.rei.com/culture/so-long-and-thanks-for-all-the-bugs.html | Entropy: 4.99 | Class: base64 | Context: '1RutCRay7Hd2rHIrDeNT8R5h0o8cyFlzEqNtIZBAPw=='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:37:07
+================================================================
+
+2026-03-28 18:37:07 [!] Entropy: high entropy string (entropy=4.99) at https://engineering.rei.com/culture/so-long-and-thanks-for-all-the-bugs.html
+2026-03-28 18:37:07 Batch 3 [workers=3] | crawled=15 queue=20
+2026-03-28 18:37:08 HTTP 200 https://engineering.rei.com/cloud-engineering/infrastructure-as-code.html
+2026-03-28 18:37:08 HTTP 200 https://engineering.rei.com/content-management/distributing-dynamic-data-in-a-wysiwyg-world.html
+2026-03-28 18:37:08 HTTP 200 https://engineering.rei.com/devops/reverse-proxy-monolith-gateway-bar.html
+2026-03-28 18:37:10 Parsed: https://engineering.rei.com/content-management/distributing-dynamic-data-in-a-wysiwyg-world.html
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://engineering.rei.com/content-management/distributing-dynamic-data-in-a-wysiwyg-world.html
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'X-Amz-Cf-Id' of https://engineering.rei.com/content-management/distributing-dynamic-data-in-a-wysiwyg-world.html | Entropy: 4.90 | Class: base64 | Context: 'qJmNxXNJCDLSJpkSd90BrwJIXRJgnhS1PZVnSeFH9OlaaWXa5'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:37:10
+================================================================
+
+2026-03-28 18:37:10 [!] Entropy: high entropy string (entropy=4.90) at https://engineering.rei.com/content-management/distributing-dynamic-data-in-a-wysiwyg-world.html
+2026-03-28 18:37:10 Parsed: https://engineering.rei.com/devops/reverse-proxy-monolith-gateway-bar.html
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://engineering.rei.com/devops/reverse-proxy-monolith-gateway-bar.html
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'X-Amz-Cf-Id' of https://engineering.rei.com/devops/reverse-proxy-monolith-gateway-bar.html | Entropy: 5.19 | Class: base64 | Context: 'FN2QhbAOkzRvkwRPn7GOB2ibWIbZbaUtHWrsJNlqUEC1vryu6QTPrg=='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:37:10
+================================================================
+
+2026-03-28 18:37:10 [!] Entropy: high entropy string (entropy=5.19) at https://engineering.rei.com/devops/reverse-proxy-monolith-gateway-bar.html
+2026-03-28 18:37:10 Parsed: https://engineering.rei.com/cloud-engineering/infrastructure-as-code.html
+2026-03-28 18:37:10 Batch 3 [workers=3] | crawled=18 queue=17
+2026-03-28 18:37:10 HTTP 200 https://engineering.rei.com/devops/easing-the-pain-of-the-big-upgrade.html
+2026-03-28 18:37:10 HTTP 200 https://engineering.rei.com/open-source/jenkins-as-code.html
+2026-03-28 18:37:10 HTTP 200 https://engineering.rei.com/frontend/launching-our-new-design-system.html
+2026-03-28 18:37:13 Parsed: https://engineering.rei.com/devops/easing-the-pain-of-the-big-upgrade.html
+2026-03-28 18:37:13 [AdaptiveConcurrency] 3→4 workers (avg=0.39s err=0%)
+2026-03-28 18:37:13 Parsed: https://engineering.rei.com/frontend/launching-our-new-design-system.html
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://engineering.rei.com/frontend/launching-our-new-design-system.html
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'X-Amz-Cf-Id' of https://engineering.rei.com/frontend/launching-our-new-design-system.html | Entropy: 5.00 | Class: base64 | Context: 'N5fr6piqb7KQECU2p9GzeWUrgt01ZGXxk2nHEFqeFHOHnrG06g2Kww=='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:37:13
+================================================================
+
+2026-03-28 18:37:13 [!] Entropy: high entropy string (entropy=5.00) at https://engineering.rei.com/frontend/launching-our-new-design-system.html
+2026-03-28 18:37:13 [AdaptiveConcurrency] 4→5 workers (avg=0.39s err=0%)
+2026-03-28 18:37:13 Parsed: https://engineering.rei.com/open-source/jenkins-as-code.html
+2026-03-28 18:37:13 Batch 5 [workers=5] | crawled=21 queue=12
+2026-03-28 18:37:13 HTTP 200 https://engineering.rei.com/cloud/trust-but-verify.html
+2026-03-28 18:37:13 HTTP 200 https://engineering.rei.com/site-reliability/hystrix-circuit-breakers.html
+2026-03-28 18:37:13 HTTP 200 https://engineering.rei.com/devops/deploying-microservices-to-amazon-ecs.html
+2026-03-28 18:37:13 HTTP 200 https://engineering.rei.com/frontend/the-rei-front-end-build-system.html
+2026-03-28 18:37:13 HTTP 200 https://engineering.rei.com/devops/effective-code-freezes.html
+2026-03-28 18:37:16 [AdaptiveConcurrency] 5→6 workers (avg=0.39s err=0%)
+2026-03-28 18:37:16 Parsed: https://engineering.rei.com/frontend/the-rei-front-end-build-system.html
+2026-03-28 18:37:16 [AdaptiveConcurrency] 6→7 workers (avg=0.38s err=0%)
+2026-03-28 18:37:16 Parsed: https://engineering.rei.com/devops/effective-code-freezes.html
+2026-03-28 18:37:16 [AdaptiveConcurrency] 7→8 workers (avg=0.38s err=0%)
+2026-03-28 18:37:16 Parsed: https://engineering.rei.com/site-reliability/hystrix-circuit-breakers.html
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://engineering.rei.com/site-reliability/hystrix-circuit-breakers.html
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'X-Amz-Cf-Id' of https://engineering.rei.com/site-reliability/hystrix-circuit-breakers.html | Entropy: 4.81 | Class: base64 | Context: 'W6eJsg4aTqXrX6Hkrz2sgdeRPs9jsRWiN0oBcjR1ZHtZt8'
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:37:16
+================================================================
+
+2026-03-28 18:37:16 [!] Entropy: high entropy string (entropy=4.81) at https://engineering.rei.com/site-reliability/hystrix-circuit-breakers.html
+2026-03-28 18:37:16 [AdaptiveConcurrency] 8→9 workers (avg=0.38s err=0%)
+2026-03-28 18:37:16 Parsed: https://engineering.rei.com/devops/deploying-microservices-to-amazon-ecs.html
+2026-03-28 18:37:16 [AdaptiveConcurrency] 9→10 workers (avg=0.37s err=0%)
+2026-03-28 18:37:16 Parsed: https://engineering.rei.com/cloud/trust-but-verify.html
+2026-03-28 18:37:16 Batch 10 [workers=10] | crawled=26 queue=2
+2026-03-28 18:37:16 HTTP 200 https://engineering.rei.com/
+2026-03-28 18:37:16 HTTP 200 https://engineering.rei.com/culture/beers-with-engineers.html
+2026-03-28 18:37:16 HTTP 200 https://engineering.rei.com/open-source/sampling-metric-data-with-gsampler.html
+2026-03-28 18:37:16 HTTP 200 https://engineering.rei.com/culture/introducing-rei-engineering.html
+2026-03-28 18:37:16 HTTP 200 https://engineering.rei.com/authors.html
+2026-03-28 18:37:16 HTTP 200 https://engineering.rei.com/about-us.html
+2026-03-28 18:37:16 HTTP 200 https://engineering.rei.com/devops/unlocking-continuous-deployment.html
+2026-03-28 18:37:16 HTTP 200 https://engineering.rei.com/open-source/generating-projects-with-ezup.html
+2026-03-28 18:37:16 HTTP 200 https://engineering.rei.com/articles.html
+2026-03-28 18:37:16 HTTP 200 https://engineering.rei.com/devops/how-we-built-a-microservices-platform.html
+2026-03-28 18:37:19 Parsed: https://engineering.rei.com/open-source/generating-projects-with-ezup.html
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://engineering.rei.com/open-source/generating-projects-with-ezup.html
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'X-Amz-Cf-Id' of https://engineering.rei.com/open-source/generating-projects-with-ezup.html | Entropy: 5.07 | Class: base64 | Context: 'aeF8H4CAM0qC9DfKjT6WT5QqQOUDj44fl3t5grdyCJKYxfVjXZ38Og=='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:37:19
+================================================================
+
+2026-03-28 18:37:19 [!] Entropy: high entropy string (entropy=5.07) at https://engineering.rei.com/open-source/generating-projects-with-ezup.html
+2026-03-28 18:37:19 Parsed: https://engineering.rei.com/culture/beers-with-engineers.html
+2026-03-28 18:37:19 Parsed: https://engineering.rei.com/devops/how-we-built-a-microservices-platform.html
+2026-03-28 18:37:19 Parsed: https://engineering.rei.com/devops/unlocking-continuous-deployment.html
+2026-03-28 18:37:19 Parsed: https://engineering.rei.com/open-source/sampling-metric-data-with-gsampler.html
+2026-03-28 18:37:19 Parsed: https://engineering.rei.com/culture/introducing-rei-engineering.html
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://engineering.rei.com/culture/introducing-rei-engineering.html
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'X-Amz-Cf-Id' of https://engineering.rei.com/culture/introducing-rei-engineering.html | Entropy: 4.87 | Class: base64 | Context: '6cet4g4ujdNLNFTEq4I99z3FGxGtafyb9z9s48HZmafkA=='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:37:19
+================================================================
+
+2026-03-28 18:37:19 [!] Entropy: high entropy string (entropy=4.87) at https://engineering.rei.com/culture/introducing-rei-engineering.html
+2026-03-28 18:37:19 Parsed: https://engineering.rei.com/about-us.html
+2026-03-28 18:37:19 Parsed: https://engineering.rei.com/authors.html
+
+================================================================
+  !! LOW ALERT: HIGH ENTROPY STRING: HIGH ENTROPY STRING !!
+  Target     : https://engineering.rei.com/authors.html
+  Detail     : High-entropy base64 string (high entropy string) detected in header 'X-Amz-Cf-Id' of https://engineering.rei.com/authors.html | Entropy: 4.89 | Class: base64 | Context: '0YGV7HwfwTzCiOtaQmGPWoXqYt9cZQ0YpGf9IQL3WMDIXEcQ=='
+  Confidence : NEEDS VERIFICATION
+  Time       : 2026-03-28 18:37:19
+================================================================
+
+2026-03-28 18:37:19 [!] Entropy: high entropy string (entropy=4.89) at https://engineering.rei.com/authors.html
+2026-03-28 18:37:19 Parsed: https://engineering.rei.com/articles.html
+2026-03-28 18:37:19 Parsed: https://engineering.rei.com/
+2026-03-28 18:37:19 Batch 2 [workers=10] | crawled=36 queue=0
+2026-03-28 18:37:20 HTTP 200 https://engineering.rei.com/authors.html#Harmony%20Hames
+2026-03-28 18:37:20 HTTP 200 https://engineering.rei.com/open-source.html
+2026-03-28 18:37:22 Parsed: https://engineering.rei.com/open-source.html
+2026-03-28 18:37:22 Parsed: https://engineering.rei.com/authors.html#Harmony%20Hames
+2026-03-28 18:37:22 Waiting for 190 JS analysis threads to complete...
+2026-03-28 18:37:22 Done! Crawled 38 pages.
+
+============================================================
+MULTI-DOMAIN SCAN SUMMARY
+============================================================
+Domain                         Pages   CRIT   HIGH    MED    LOW      Time
+--------------------------------------------------------------------------
+https://www.rei.com                0      0      0      0      0     0m22s
+https://login.rei.com              1      0      0      0      0     0m05s
+http://collaboration.rei.com       0      0      0      0      0     0m08s
+https://engineering.rei.com       38      0      0      0     13     0m32s
+============================================================
+[NuScrape] Scan completed cleanly (exit 0) for https://www.rei.com.

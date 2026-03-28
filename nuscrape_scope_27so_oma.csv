@@ -1,0 +1,24 @@
+identifier,asset_type,instruction,eligible_for_bounty,eligible_for_submission,availability_requirement,confidentiality_requirement,integrity_requirement,max_severity,system_tags,created_at,updated_at
+rei.com,URL,"",false,true,,,,critical,,2022-10-17 20:39:20 UTC,2022-10-17 20:39:20 UTC
+http://rei.com/rei-garage,URL,"",false,false,,,,critical,,2022-10-17 20:41:09 UTC,2024-03-27 20:13:00 UTC
+Any public cloud resource or infrastructure operated and managed by REI,OTHER,"Public cloud storage accounts. (e.g. AWS S3 buckets)
+Public cloud computer server. (e.g. AWS EC2 instances)",false,true,,,,critical,,2022-10-17 20:52:10 UTC,2022-10-17 20:52:10 UTC
+Android & iOS App for REI Customers,OTHER,"To download the app, please visit https://www.rei.com/mobile",false,true,,,,critical,,2022-10-17 20:52:30 UTC,2022-10-17 20:52:30 UTC
+http://rei.com/used,URL,,false,false,,,,critical,,2022-12-05 23:05:26 UTC,2024-04-01 16:03:20 UTC
+http://rei.com/blog,URL,,false,false,,,,critical,,2022-12-05 23:05:43 UTC,2024-04-01 16:04:46 UTC
+http://rei.com/rentals,URL,,false,false,,,,critical,,2022-12-05 23:05:59 UTC,2024-04-01 16:05:09 UTC
+rei.jobs,URL,,false,false,,,,critical,,2022-12-05 23:06:15 UTC,2024-04-01 16:05:28 UTC
+reifund.org,URL,,false,false,,,,critical,,2022-12-05 23:06:29 UTC,2024-04-01 16:05:50 UTC
+destinations.rei.com,URL,,false,false,,,,critical,,2022-12-05 23:06:46 UTC,2024-04-01 16:06:06 UTC
+partners2.rei.com,URL,,false,false,,,,critical,,2022-12-05 23:07:01 UTC,2024-04-01 16:07:33 UTC
+greenvestrentals.rei.com,URL,,false,false,,,,critical,,2024-03-27 14:28:24 UTC,2024-04-01 16:06:45 UTC
+wpvip.rei.com,URL,"",false,false,,,,critical,,2024-03-27 14:28:24 UTC,2024-03-27 18:59:02 UTC
+engineering.rei.com,URL,"",false,true,,,,critical,,2024-03-27 14:28:24 UTC,2024-03-27 14:28:24 UTC
+*.rentals.rei.com,WILDCARD,This is an out of scope asset since it is owned and managed by a 3rd party.,false,false,,,,critical,,2024-03-27 14:28:24 UTC,2024-08-01 18:09:41 UTC
+login.rei.com,URL,,false,true,,,,critical,,2024-03-27 14:29:28 UTC,2024-03-28 22:20:10 UTC
+desktop.rei.com,URL,,false,false,,,,critical,,2024-03-27 14:29:28 UTC,2024-03-28 22:18:41 UTC
+foryourbenefit-rei.com/,URL,,false,false,,,,critical,,2024-03-27 14:29:28 UTC,2024-03-28 22:25:47 UTC
+test-login.rei.com,URL,,false,false,,,,critical,,2024-03-28 22:20:25 UTC,2024-04-01 16:49:44 UTC
+vpn.rei.com,URL,,false,false,,,,critical,,2024-03-28 22:20:43 UTC,2024-03-28 22:20:43 UTC
+http://www.rei.com/learn/expert-advice,URL,,false,false,,,,critical,,2024-04-01 16:46:16 UTC,2025-02-05 22:39:59 UTC
+http://collaboration.rei.com,URL,,false,true,,,,critical,,2024-04-01 16:49:24 UTC,2024-04-01 16:49:24 UTC
