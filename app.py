@@ -189,8 +189,9 @@ def api_start():
     if not isinstance(domains_list, list):
         domains_list = []
     import re as _re
-    _cidr_re   = _re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}$')
-    _ip_re     = _re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}$')
+    _cidr_re     = _re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}$')
+    _ip_re       = _re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}$')
+    _wildcard_re = _re.compile(r'^\*\..+')
     domains_list = [
         d.strip() for d in domains_list
         if isinstance(d, str) and d.strip()
@@ -199,6 +200,7 @@ def api_start():
                or d.strip().startswith("https://")
                or _cidr_re.match(d.strip())
                or _ip_re.match(d.strip())
+               or _wildcard_re.match(d.strip())
            )
     ]
     # use_domains_file: any non-empty domains_list goes through --domains so that
@@ -1376,8 +1378,9 @@ async function startCrawler(){
   const taVal=(document.getElementById('multiDomains').value||'');
   const _cidrRe=/^\d{1,3}(?:\.\d{1,3}){3}\/\d{1,2}$/;
   const _ipRe=/^\d{1,3}(?:\.\d{1,3}){3}$/;
+  const _wildcardRe=/^\*\..+/;
   const domainsList=taVal.split('\n').map(l=>l.trim()).filter(l=>
-    l && (l.startsWith('http://')||l.startsWith('https://')||_cidrRe.test(l)||_ipRe.test(l))
+    l && (l.startsWith('http://')||l.startsWith('https://')||_cidrRe.test(l)||_ipRe.test(l)||_wildcardRe.test(l))
   );
   const singleDomain=document.getElementById('domain').value.trim();
 

@@ -7846,7 +7846,7 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
         print(timestamp() + " Fetching sitemap...")
         sitemap_urls = fetch_sitemap(base_url)
         for su in sitemap_urls:
-            su = _clean_url(su)
+            su = _upgrade_to_https(_clean_url(su))
             if su not in url_seen:
                 url_seen.add(su)
                 _pq_push(url_queue, su)
@@ -16238,21 +16238,107 @@ def _domain_worker(domain: str, kwargs: dict) -> None:
         pass
 
 
-_CIDR_RE    = re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}$')
+_CIDR_RE     = re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}$')
 _PLAIN_IP_RE = re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}$')
+_WILDCARD_RE = re.compile(r'^\*\.(.+)$')
+
+
+def _upgrade_to_https(url: str) -> str:
+    """Opportunistically rewrite http:// to https://.
+
+    Used for URLs collected from sitemaps and crawled links where making a
+    live probe per-URL would be too expensive.  The actual crawl request will
+    follow any redirects, so an overly-aggressive upgrade at most causes one
+    extra redirect round-trip on sites that don't support HTTPS.
+    """
+    if url.startswith("http://"):
+        return "https://" + url[7:]
+    return url
+
+
+def _probe_https_first(hostname: str, timeout: float = 4.0) -> str:
+    """Return the preferred base-URL for a bare hostname.
+
+    Tries HTTPS first.  Falls back to HTTP only if HTTPS raises a connection
+    error (refused, timeout, SSL failure).  Any HTTP response code (including
+    3xx/4xx/5xx) counts as "HTTPS is alive".
+    """
+    for scheme in ("https", "http"):
+        url = f"{scheme}://{hostname}"
+        try:
+            resp = safe_get(url, timeout=timeout, method="head")
+            if resp is not None:
+                return url
+        except Exception:
+            pass
+    # Neither responded — return https anyway; main_crawler will surface the error
+    return f"https://{hostname}"
+
+# Cached subfinder availability check (None = unchecked, True/False = result)
+_subfinder_available: bool | None = None
+
+def _check_subfinder() -> bool:
+    """Return True if subfinder is on PATH; warn once if not."""
+    global _subfinder_available
+    if _subfinder_available is not None:
+        return _subfinder_available
+    import shutil
+    _subfinder_available = shutil.which("subfinder") is not None
+    if not _subfinder_available:
+        print("[wildcard] WARNING: subfinder not found on PATH. "
+              "Install it from https://github.com/projectdiscovery/subfinder "
+              "to enable wildcard domain expansion.")
+    return _subfinder_available
+
+
+def expand_wildcard(wildcard: str) -> list:
+    """
+    Run subfinder against the root domain extracted from a wildcard entry
+    (e.g. *.xiaomi.com → xiaomi.com) and return a list of https:// URLs,
+    one per discovered subdomain.
+
+    Returns [] if subfinder is unavailable or discovers nothing.
+    """
+    import subprocess as _sp
+    m = _WILDCARD_RE.match(wildcard.strip())
+    if not m:
+        return []
+    root_domain = m.group(1).strip()
+    if not _check_subfinder():
+        return []
+    print(f"[wildcard] Running subfinder on {root_domain}…")
+    try:
+        result = _sp.run(
+            ["subfinder", "-d", root_domain, "-silent"],
+            capture_output=True, text=True, timeout=120,
+        )
+        subdomains = [
+            line.strip() for line in result.stdout.splitlines()
+            if line.strip()
+        ]
+    except Exception as exc:
+        print(f"[wildcard] subfinder failed for {root_domain}: {exc}")
+        return []
+    urls = [f"https://{sd}" for sd in subdomains]
+    print(f"[wildcard] {root_domain} → {len(urls)} subdomain(s) discovered")
+    return urls
 
 
 def _expand_target(target: str) -> list:
     """
     Given a raw target string, return a list of scannable base-URLs.
 
-    - http(s):// URL  → returned as-is in a single-element list
-    - CIDR notation   → expand_cidr() then probe_cidr_hosts(); log the expansion
-    - Plain IP        → probe_cidr_hosts([ip]); log if responsive
+    - http(s):// URL      → returned as-is in a single-element list
+    - Wildcard (*.x.com)  → expand_wildcard(); subfinder enumeration
+    - CIDR notation       → expand_cidr() then probe_cidr_hosts()
+    - Plain IP            → probe_cidr_hosts([ip])
+    - Bare hostname       → passed through as-is
     """
     target = target.strip()
     if target.startswith("http://") or target.startswith("https://"):
         return [target]
+    if _WILDCARD_RE.match(target):
+        return expand_wildcard(target)
     if _CIDR_RE.match(target):
         ips = expand_cidr(target)
         if not ips:
@@ -16262,8 +16348,9 @@ def _expand_target(target: str) -> list:
     if _PLAIN_IP_RE.match(target):
         print(f"[CIDR] Probing plain IP {target}")
         return probe_cidr_hosts([target])
-    # Bare hostname — pass through as-is; main_crawler will handle it
-    return [target]
+    # Bare hostname — probe HTTPS first, fall back to HTTP on connection failure
+    url = _probe_https_first(target)
+    return [url]
 
 
 def run_multi_domain(
