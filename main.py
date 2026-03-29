@@ -192,6 +192,7 @@ START_URL        = ""      # set at crawler startup; used by is_in_scope()
 ACTIVE_PROBES    = False   # overridden by --active-probes CLI arg; gates payload-injecting checks
 BASELINE_ENABLED = True    # overridden by --no-baseline CLI arg; disables per-endpoint baseline profiling
 TUTORIAL_MODE    = False   # overridden by --tutorial CLI arg; appends HOW TO VERIFY guidance to findings
+CUSTOM_HEADERS: dict = {}  # populated by --header CLI arg; injected into every outbound request
 
 # HackerOne scope patterns — populated by load_hackerone_scope() when --scope is used.
 # HO_INCLUDE_PATTERNS: compiled regexes for in-scope assets (instruction != 'exclude')
@@ -324,6 +325,8 @@ def stealth_headers(existing=None):
         headers = dict(existing or {})
         if BUG_BOUNTY_HEADER:
             headers["X-Bug-Bounty"] = BUG_BOUNTY_HEADER
+        if CUSTOM_HEADERS:
+            headers.update(CUSTOM_HEADERS)
         return headers
     headers = dict(existing or {})
     headers["User-Agent"] = random.choice(UA_POOL)
@@ -345,6 +348,8 @@ def stealth_headers(existing=None):
             headers.pop("Upgrade-Insecure-Requests", None)
     if BUG_BOUNTY_HEADER:
         headers["X-Bug-Bounty"] = BUG_BOUNTY_HEADER
+    if CUSTOM_HEADERS:
+        headers.update(CUSTOM_HEADERS)
     return headers
 RATE_LIMIT_MIN  = 1.0
 RATE_LIMIT_MAX  = 3.0
@@ -6116,11 +6121,15 @@ def parse_anchors_from_html(html_content):
 
 def load_hackerone_scope(csv_path: str) -> tuple:
     """
-    Parse a HackerOne scope CSV and return (includes, excludes) as lists of
-    compiled hostname-matching regex patterns.
+    Parse a HackerOne scope CSV and return (includes, excludes, cidr_list).
+
+    includes  — compiled hostname-matching regex patterns for in-scope assets
+    excludes  — compiled hostname-matching regex patterns for excluded assets
+    cidr_list — list of CIDR strings from rows where asset_type == 'CIDR'
+                (only non-excluded ones are returned)
 
     Expected columns: asset_identifier, asset_type, instruction, max_severity
-    Only rows with asset_type URL, WILDCARD, or DOMAIN are processed.
+    Processed asset_type values: URL, WILDCARD, DOMAIN, CIDR
 
     Pattern construction:
       *.example.com  →  ^(?:.+\\.)?example\\.com$   (matches example.com and all subdomains)
@@ -6129,16 +6138,21 @@ def load_hackerone_scope(csv_path: str) -> tuple:
     import csv as _csv
     includes: list = []
     excludes: list = []
+    cidr_list: list = []
     try:
         with open(csv_path, newline="", encoding="utf-8-sig") as f:
             reader = _csv.DictReader(f)
             for row in reader:
                 asset_type  = (row.get("asset_type") or "").strip().upper()
-                if asset_type not in ("URL", "WILDCARD", "DOMAIN"):
-                    continue
                 identifier  = (row.get("asset_identifier") or "").strip()
                 instruction = (row.get("instruction") or "").strip().lower()
                 if not identifier:
+                    continue
+                if asset_type == "CIDR":
+                    if instruction != "exclude":
+                        cidr_list.append(identifier)
+                    continue
+                if asset_type not in ("URL", "WILDCARD", "DOMAIN"):
                     continue
                 # Extract hostname from URL-type assets
                 if asset_type == "URL":
@@ -6159,11 +6173,98 @@ def load_hackerone_scope(csv_path: str) -> tuple:
                     excludes.append(pattern)
                 else:
                     includes.append(pattern)
-        print(f"[scope] Loaded {len(includes)} in-scope and {len(excludes)} excluded "
-              f"pattern(s) from {csv_path}")
+        parts = [f"{len(includes)} in-scope", f"{len(excludes)} excluded"]
+        if cidr_list:
+            parts.append(f"{len(cidr_list)} CIDR range(s)")
+        print(f"[scope] Loaded {', '.join(parts)} from {csv_path}")
     except Exception as exc:
         print(f"[scope] Failed to load scope file '{csv_path}': {exc}")
-    return includes, excludes
+    return includes, excludes, cidr_list
+
+
+def expand_cidr(cidr: str) -> list:
+    """
+    Expand a CIDR notation string into a list of host IP strings.
+
+    Rules:
+    - Excludes the network address and broadcast address (per RFC).
+    - Skips private/RFC-1918 and other reserved ranges with a warning.
+    - For ranges larger than /24 (> 254 usable hosts), prompts for confirmation
+      in interactive mode; returns [] without confirmation.
+
+    Returns a list of IP address strings (may be empty on refusal or error).
+    """
+    import ipaddress
+    try:
+        network = ipaddress.ip_network(cidr, strict=False)
+    except ValueError as exc:
+        print(f"[cidr] Invalid CIDR '{cidr}': {exc}")
+        return []
+
+    if network.is_private or network.is_reserved or network.is_loopback or network.is_link_local:
+        print(f"[cidr] WARNING: {cidr} is a private/reserved range (RFC 1918 / loopback / "
+              f"link-local). Skipping — scanning internal networks without explicit "
+              f"authorisation is not permitted.")
+        return []
+
+    hosts = list(network.hosts())  # excludes network addr + broadcast
+    if len(hosts) == 0:
+        print(f"[cidr] {cidr} has no usable host addresses.")
+        return []
+
+    if len(hosts) > 254:
+        import sys
+        if sys.stdin.isatty():
+            try:
+                resp = input(
+                    f"[cidr] WARNING: {cidr} contains {len(hosts)} hosts (> /24). "
+                    f"This will generate a large number of probe requests.\n"
+                    f"[cidr] Proceed? [y/N]: "
+                ).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                resp = ""
+            if resp not in ("y", "yes"):
+                print(f"[cidr] Skipping {cidr} — user declined.")
+                return []
+        else:
+            print(f"[cidr] WARNING: {cidr} contains {len(hosts)} hosts. "
+                  f"Skipping (non-interactive mode — use a /24 or smaller, "
+                  f"or confirm interactively).")
+            return []
+
+    return [str(h) for h in hosts]
+
+
+def probe_cidr_hosts(ip_list: list) -> list:
+    """
+    For each IP in ip_list, attempt HTTP (port 80) then HTTPS (port 443)
+    connections using a short timeout.
+
+    Returns a list of responsive base-URLs (e.g. ['https://10.0.0.1',
+    'http://10.0.0.2']).  Unreachable hosts are logged at DEBUG level only.
+    """
+    import socket
+    responsive: list = []
+
+    def _tcp_open(ip: str, port: int, timeout: float = 3.0) -> bool:
+        try:
+            with socket.create_connection((ip, port), timeout=timeout):
+                return True
+        except OSError:
+            return False
+
+    for ip in ip_list:
+        hit = False
+        for scheme, port in (("https", 443), ("http", 80)):
+            if _tcp_open(ip, port):
+                responsive.append(f"{scheme}://{ip}")
+                hit = True
+                break  # prefer HTTPS; no need to also add HTTP
+        if not hit:
+            print(f"[cidr] debug: {ip} — no response on port 443 or 80, skipping")
+
+    print(f"[cidr] {len(responsive)}/{len(ip_list)} hosts responded")
+    return responsive
 
 
 def is_in_scope(url):
@@ -16131,6 +16232,10 @@ if __name__ == "__main__":
                         help="Stealth profile: LOUD (fast, default), NORMAL (moderate delays), GHOST (slow, randomised)")
     parser.add_argument("--bug-bounty-header", type=str, default=None,
                         help="Value for X-Bug-Bounty header e.g. 'HackerOne-chr0nic'. Omit to disable.")
+    parser.add_argument("--header", metavar="KEY:VALUE", action="append", default=[],
+                        help="Extra header to inject into every request, e.g. "
+                             "'User-Agent:qinetiqvdpChr0nic'. Split on first colon only. "
+                             "May be specified multiple times.")
     parser.add_argument("--active-probes", action="store_true",
                         help="Enable payload-injecting checks: path traversal, SSTI, CRLF injection, "
                              "CORS evil-origin probes, default credential tests, and dangerous HTTP method testing. "
@@ -16152,12 +16257,18 @@ if __name__ == "__main__":
     parser.add_argument("--scope", metavar="FILE",
                         help="Path to a HackerOne scope CSV file "
                              "(columns: asset_identifier, asset_type, instruction, max_severity). "
-                             "In-scope assets expand crawl scope; excluded assets are skipped entirely.")
+                             "In-scope assets expand crawl scope; excluded assets are skipped entirely. "
+                             "Rows with asset_type CIDR are expanded into live hosts via probe_cidr_hosts().")
+    parser.add_argument("--cidr", metavar="CIDR",
+                        help="CIDR range to scan (e.g. 192.168.1.0/24). "
+                             "Each host is probed on port 443/80; responsive hosts are added as scan targets. "
+                             "Private/RFC-1918 ranges are skipped. Ranges larger than /24 require confirmation.")
 
     args = parser.parse_args()
 
+    _scope_cidrs: list = []
     if args.scope:
-        HO_INCLUDE_PATTERNS, HO_EXCLUDE_PATTERNS = load_hackerone_scope(args.scope)
+        HO_INCLUDE_PATTERNS, HO_EXCLUDE_PATTERNS, _scope_cidrs = load_hackerone_scope(args.scope)
 
     STEALTH_PROFILE = args.stealth
     if STEALTH_PROFILE != "LOUD":
@@ -16166,6 +16277,17 @@ if __name__ == "__main__":
     BUG_BOUNTY_HEADER = args.bug_bounty_header
     if BUG_BOUNTY_HEADER:
         print(f"[*] Bug bounty header enabled: X-Bug-Bounty: {BUG_BOUNTY_HEADER}")
+
+    if args.header:
+        for _hspec in args.header:
+            if ":" in _hspec:
+                _hk, _hv = _hspec.split(":", 1)
+                CUSTOM_HEADERS[_hk.strip()] = _hv.strip()
+            else:
+                print(f"[!] Ignoring malformed --header value (no colon): {_hspec!r}")
+        if CUSTOM_HEADERS:
+            print(f"[*] Custom headers ({len(CUSTOM_HEADERS)}): "
+                  + ", ".join(f"{k}: {v}" for k, v in CUSTOM_HEADERS.items()))
 
     ACTIVE_PROBES = args.active_probes
     if ACTIVE_PROBES:
@@ -16220,6 +16342,19 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT,  _handle_stop_signal)
     signal.signal(signal.SIGTERM, _handle_stop_signal)
 
+    # ── Collect CIDR-sourced targets (--cidr + scope CSV CIDR rows) ────────
+    _cidr_targets: list = []
+    _all_cidrs = (([args.cidr] if args.cidr else []) + _scope_cidrs)
+    if _all_cidrs:
+        for _cidr_str in _all_cidrs:
+            _ips = expand_cidr(_cidr_str)
+            if _ips:
+                _live = probe_cidr_hosts(_ips)
+                _cidr_targets.extend(_live)
+        if not _cidr_targets and not args.Domain and not args.domains:
+            print("[cidr] No responsive hosts found in the supplied CIDR range(s). Exiting.")
+            sys.exit(0)
+
     if args.domains:
         # ── Multi-domain mode ──────────────────────────────────────────────
         try:
@@ -16237,6 +16372,7 @@ if __name__ == "__main__":
             print(f"[!] No valid domains found in '{args.domains}'.")
             sys.exit(1)
 
+        domain_list = domain_list + _cidr_targets
         print(f"[*] Multi-domain mode: {len(domain_list)} target(s)"
               f"  parallel={args.parallel}")
 
@@ -16254,15 +16390,39 @@ if __name__ == "__main__":
             _shutdown_playwright()
             sys.exit(0)
 
-    elif args.Domain:
-        try:
-            main_crawler(args.Domain, same_domain_only=args.same_domain_only,
-                         resume=args.resume, ignore_robots=args.ignore_robots,
-                         min_workers=args.min_workers, max_workers=args.max_workers)
-        except KeyboardInterrupt:
-            print("\n[*] Interrupted — shutting down cleanly...")
-            _shutdown_playwright()
-            sys.exit(0)
+    elif args.Domain or _cidr_targets:
+        # Single-domain mode — either -D was given or CIDR produced exactly one target
+        if args.Domain:
+            _scan_targets = [args.Domain] + _cidr_targets
+        else:
+            _scan_targets = _cidr_targets
+
+        if len(_scan_targets) == 1:
+            try:
+                main_crawler(_scan_targets[0], same_domain_only=args.same_domain_only,
+                             resume=args.resume, ignore_robots=args.ignore_robots,
+                             min_workers=args.min_workers, max_workers=args.max_workers)
+            except KeyboardInterrupt:
+                print("\n[*] Interrupted — shutting down cleanly...")
+                _shutdown_playwright()
+                sys.exit(0)
+        else:
+            # Multiple targets: run as multi-domain
+            print(f"[*] Multi-domain mode: {len(_scan_targets)} target(s)"
+                  f"  parallel={args.parallel}")
+            try:
+                run_multi_domain(
+                    _scan_targets,
+                    same_domain_only = args.same_domain_only,
+                    ignore_robots    = args.ignore_robots,
+                    min_workers      = args.min_workers,
+                    max_workers      = args.max_workers,
+                    parallel         = args.parallel,
+                )
+            except KeyboardInterrupt:
+                print("\n[*] Interrupted — shutting down cleanly...")
+                _shutdown_playwright()
+                sys.exit(0)
     else:
         print("\nUsage: ./main.py -D https://www.example.com\n")
         print("Optional flags:")
@@ -16280,6 +16440,11 @@ if __name__ == "__main__":
         print("  --parallel              Run up to 3 domain scans concurrently (requires --domains)")
         print("  --scope FILE            HackerOne scope CSV — restricts crawl to in-scope assets,")
         print("                          skips excluded assets entirely")
+        print("  --cidr CIDR             CIDR range to scan (e.g. 203.0.113.0/24).")
+        print("                          Responsive hosts on 443/80 are added as targets.")
+        print("                          Private/RFC-1918 ranges are skipped.")
+        print("  --header KEY:VALUE      Inject a custom header into every request.")
+        print("                          Repeat for multiple headers.")
         print("  --no-baseline           Disable per-endpoint baseline profiling (faster, less accurate)")
         print("  --tutorial              Append HOW TO VERIFY guidance to each finding\n")
 

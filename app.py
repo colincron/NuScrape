@@ -150,6 +150,14 @@ def api_start():
     if not isinstance(bug_bounty_header, str):
         bug_bounty_header = ""
     bug_bounty_header = bug_bounty_header.strip()
+    # custom_headers: list of "Key:Value" strings from the UI textarea
+    custom_headers_raw = data.get("custom_headers", [])
+    if not isinstance(custom_headers_raw, list):
+        custom_headers_raw = []
+    custom_headers = [
+        h.strip() for h in custom_headers_raw
+        if isinstance(h, str) and h.strip() and ":" in h.strip()
+    ]
     active_probes   = bool(data.get("active_probes", False))
     no_baseline     = bool(data.get("no_baseline", False))
     tutorial_mode   = bool(data.get("tutorial_mode", False))
@@ -228,6 +236,8 @@ def api_start():
             cmd.append("--tutorial")
         if scope_file:
             cmd.extend(["--scope", scope_file])
+        for _hdr in custom_headers:
+            cmd.extend(["--header", _hdr])
 
         with log_lock:
             log_buffer.clear()
@@ -846,6 +856,12 @@ td a:hover{text-decoration:underline}
         <div style="font-size:.62rem;color:var(--dim);margin-top:.25rem;font-family:var(--mono)">Optional — restricts scan to in-scope assets and skips excluded assets</div>
         <div id="scopeStatus" style="font-size:.62rem;color:var(--dim);margin-top:.2rem;font-family:var(--mono);display:none"></div>
       </div>
+      <div style="margin-bottom:.7rem">
+        <label style="font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:.4rem">Custom Headers</label>
+        <textarea id="customHeaders" rows="3" placeholder="User-Agent:qinetiqvdpChr0nic&#10;X-HackerOne-Researcher:chr0nic"
+          style="width:100%;box-sizing:border-box;resize:vertical;background:var(--surface);border:1px solid var(--border);color:var(--fg);font-family:var(--mono);font-size:.72rem;padding:.35rem .5rem;border-radius:4px;outline:none;transition:border-color .15s"></textarea>
+        <div style="font-size:.62rem;color:var(--dim);margin-top:.25rem;font-family:var(--mono)">One header per line in Key:Value format. Use for program-specific headers like User-Agent or X-HackerOne-Researcher.</div>
+      </div>
       <button class="btn btn-start" id="btnStart" onclick="startCrawler()">▶ Start Crawler</button>
       <button class="btn btn-stop"  id="btnStop"  onclick="stopCrawler()" disabled>■ Stop Crawler</button>
       <div class="run-info" id="runInfo" style="display:none">
@@ -1396,6 +1412,8 @@ async function startCrawler(){
       ? {bug_bounty_header: document.getElementById('bugBountyValue').value.trim()}
       : {}),
     ...(scopeFilePath ? {scope_file: scopeFilePath} : {}),
+    custom_headers: (document.getElementById('customHeaders').value||'')
+      .split('\n').map(l=>l.trim()).filter(l=>l.includes(':')),
   };
   if(domainsList.length>1){
     payload.domains_list=domainsList;
