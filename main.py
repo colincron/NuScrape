@@ -194,6 +194,7 @@ BASELINE_ENABLED = True    # overridden by --no-baseline CLI arg; disables per-e
 TUTORIAL_MODE    = False   # overridden by --tutorial CLI arg; appends HOW TO VERIFY guidance to findings
 CUSTOM_HEADERS: dict = {}  # populated by --header CLI arg; injected into every outbound request
 AUTO_YES: bool = False     # set by --yes / -y; auto-confirms interactive prompts (e.g. large CIDR ranges)
+DEBUG_MODE: bool = False   # set by --debug; enables verbose debug output
 
 # HackerOne scope patterns — populated by load_hackerone_scope() when --scope is used.
 # HO_INCLUDE_PATTERNS: compiled regexes for in-scope assets (instruction != 'exclude')
@@ -6241,31 +6242,59 @@ def expand_cidr(cidr: str) -> list:
 
 def probe_cidr_hosts(ip_list: list) -> list:
     """
-    For each IP in ip_list, attempt HTTP (port 80) then HTTPS (port 443)
-    connections using a short timeout.
+    Probe each IP in ip_list with an actual HTTP GET request (3-second
+    timeout, up to 50 concurrent probes via aiohttp).
 
-    Returns a list of responsive base-URLs (e.g. ['https://10.0.0.1',
-    'http://10.0.0.2']).  Unreachable hosts are logged at DEBUG level only.
+    A host is considered responsive only if it returns a valid HTTP status
+    code (100–599).  HTTPS is tried first; HTTP is used as a fallback.
+    Hosts that only accept TCP connections but don't speak HTTP are excluded.
+
+    Returns a list of responsive base-URLs (e.g. ['https://10.0.0.1']).
     """
-    import socket
-    responsive: list = []
+    import asyncio
+    import aiohttp
 
-    def _tcp_open(ip: str, port: int, timeout: float = 3.0) -> bool:
+    _CONCURRENCY = 50
+    _TIMEOUT     = aiohttp.ClientTimeout(total=3.0)
+
+    async def _http_get(session: aiohttp.ClientSession, url: str) -> bool:
         try:
-            with socket.create_connection((ip, port), timeout=timeout):
-                return True
-        except OSError:
+            async with session.get(url, allow_redirects=False) as resp:
+                return 100 <= resp.status <= 599
+        except Exception:
             return False
 
-    for ip in ip_list:
-        hit = False
-        for scheme, port in (("https", 443), ("http", 80)):
-            if _tcp_open(ip, port):
-                responsive.append(f"{scheme}://{ip}")
-                hit = True
-                break  # prefer HTTPS; no need to also add HTTP
-        if not hit:
-            print(f"[cidr] debug: {ip} — no response on port 443 or 80, skipping")
+    async def _probe_one(ip: str, sem: asyncio.Semaphore,
+                         session: aiohttp.ClientSession) -> str | None:
+        async with sem:
+            for scheme in ("https", "http"):
+                if await _http_get(session, f"{scheme}://{ip}/"):
+                    return f"{scheme}://{ip}"
+            if DEBUG_MODE:
+                print(f"[cidr] debug: {ip} — no HTTP response on 443 or 80, skipping")
+            return None
+
+    async def _probe_all(ips: list) -> list:
+        sem = asyncio.Semaphore(_CONCURRENCY)
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(
+            timeout=_TIMEOUT, connector=connector
+        ) as session:
+            tasks = [_probe_one(ip, sem, session) for ip in ips]
+            results = await asyncio.gather(*tasks)
+        return [r for r in results if r is not None]
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                future = ex.submit(asyncio.run, _probe_all(ip_list))
+                responsive = future.result()
+        else:
+            responsive = loop.run_until_complete(_probe_all(ip_list))
+    except RuntimeError:
+        responsive = asyncio.run(_probe_all(ip_list))
 
     print(f"[cidr] {len(responsive)}/{len(ip_list)} hosts responded")
     return responsive
@@ -16310,6 +16339,8 @@ if __name__ == "__main__":
     parser.add_argument("--yes", "-y", action="store_true",
                         help="Auto-confirm all interactive prompts (e.g. large CIDR range warnings). "
                              "Useful for non-interactive / scripted runs.")
+    parser.add_argument("--debug", action="store_true",
+                        help="Enable verbose debug output (e.g. per-host CIDR probe results).")
 
     args = parser.parse_args()
 
@@ -16338,6 +16369,8 @@ if __name__ == "__main__":
 
     if args.yes:
         AUTO_YES = True
+    if args.debug:
+        DEBUG_MODE = True
 
     ACTIVE_PROBES = args.active_probes
     if ACTIVE_PROBES:

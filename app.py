@@ -186,8 +186,10 @@ def api_start():
                or _ip_re.match(d.strip())
            )
     ]
-    use_multi   = len(domains_list) > 1
-    parallel    = bool(data.get("parallel", False)) and use_multi
+    # use_domains_file: any non-empty domains_list goes through --domains so that
+    # CIDR entries and plain IPs are handled by main.py's expansion logic.
+    use_domains_file = len(domains_list) >= 1
+    parallel    = bool(data.get("parallel", False)) and len(domains_list) > 1
     first_domain = domains_list[0] if domains_list else domain
 
     if not first_domain:
@@ -197,9 +199,12 @@ def api_start():
         if crawler_proc and crawler_proc.poll() is None:
             return jsonify({"ok": False, "error": "Crawler already running"}), 400
 
-        # ── Write domains file for multi-domain mode ──────────────────────
+        # ── Write domains file whenever a list is present ─────────────────
+        # Always use --domains for textarea targets so CIDR/IP entries are
+        # expanded by main.py's run_multi_domain path rather than being passed
+        # raw as -D arguments.
         domains_file = None
-        if use_multi:
+        if use_domains_file:
             import tempfile
             tf = tempfile.NamedTemporaryFile(
                 mode="w", suffix=".txt", delete=False, dir=BASE_DIR,
@@ -213,7 +218,7 @@ def api_start():
         cmd = [sys.executable, "-u", CRAWLER, "--rate-min", str(rate_min),
                "--rate-max", str(rate_max), "--concurrency", str(concurrency)]
 
-        if use_multi:
+        if use_domains_file:
             cmd.extend(["--domains", domains_file])
             if parallel:
                 cmd.append("--parallel")
@@ -254,7 +259,7 @@ def api_start():
 
         mode_note = (f"multi-domain ({len(domains_list)}"
                      f"{' parallel' if parallel else ' sequential'})"
-                     if use_multi else "single-domain")
+                     if use_domains_file else "single-domain")
         push_log(f"[NuScrape] Args: rate={rate_min}-{rate_max}s  concurrency={concurrency}"
                  f"  same-domain={same_domain}  stealth={stealth_profile}  mode={mode_note}")
         _launch_crawler(first_domain, cmd)
