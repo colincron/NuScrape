@@ -173,10 +173,18 @@ def api_start():
     domains_list = data.get("domains_list", [])
     if not isinstance(domains_list, list):
         domains_list = []
+    import re as _re
+    _cidr_re   = _re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}$')
+    _ip_re     = _re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}$')
     domains_list = [
         d.strip() for d in domains_list
         if isinstance(d, str) and d.strip()
-           and (d.strip().startswith("http://") or d.strip().startswith("https://"))
+           and (
+               d.strip().startswith("http://")
+               or d.strip().startswith("https://")
+               or _cidr_re.match(d.strip())
+               or _ip_re.match(d.strip())
+           )
     ]
     use_multi   = len(domains_list) > 1
     parallel    = bool(data.get("parallel", False)) and use_multi
@@ -238,6 +246,7 @@ def api_start():
             cmd.extend(["--scope", scope_file])
         for _hdr in custom_headers:
             cmd.extend(["--header", _hdr])
+        cmd.append("--yes")  # UI handles confirmation; never block on interactive prompts
 
         with log_lock:
             log_buffer.clear()
@@ -1371,7 +1380,11 @@ document.addEventListener('DOMContentLoaded',()=>{
 async function startCrawler(){
   logOffset=0;logLines=0;clearLog();
   const taVal=(document.getElementById('multiDomains').value||'');
-  const domainsList=taVal.split('\n').map(l=>l.trim()).filter(Boolean);
+  const _cidrRe=/^\d{1,3}(?:\.\d{1,3}){3}\/\d{1,2}$/;
+  const _ipRe=/^\d{1,3}(?:\.\d{1,3}){3}$/;
+  const domainsList=taVal.split('\n').map(l=>l.trim()).filter(l=>
+    l && (l.startsWith('http://')||l.startsWith('https://')||_cidrRe.test(l)||_ipRe.test(l))
+  );
   const singleDomain=document.getElementById('domain').value.trim();
 
   if(domainsList.length===0 && !singleDomain){alert('Enter a target domain');return}

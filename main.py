@@ -193,6 +193,7 @@ ACTIVE_PROBES    = False   # overridden by --active-probes CLI arg; gates payloa
 BASELINE_ENABLED = True    # overridden by --no-baseline CLI arg; disables per-endpoint baseline profiling
 TUTORIAL_MODE    = False   # overridden by --tutorial CLI arg; appends HOW TO VERIFY guidance to findings
 CUSTOM_HEADERS: dict = {}  # populated by --header CLI arg; injected into every outbound request
+AUTO_YES: bool = False     # set by --yes / -y; auto-confirms interactive prompts (e.g. large CIDR ranges)
 
 # HackerOne scope patterns — populated by load_hackerone_scope() when --scope is used.
 # HO_INCLUDE_PATTERNS: compiled regexes for in-scope assets (instruction != 'exclude')
@@ -6214,7 +6215,10 @@ def expand_cidr(cidr: str) -> list:
 
     if len(hosts) > 254:
         import sys
-        if sys.stdin.isatty():
+        if AUTO_YES:
+            print(f"[cidr] WARNING: {cidr} contains {len(hosts)} hosts (> /24) — "
+                  f"proceeding automatically (--yes)")
+        elif sys.stdin.isatty():
             try:
                 resp = input(
                     f"[cidr] WARNING: {cidr} contains {len(hosts)} hosts (> /24). "
@@ -6229,7 +6233,7 @@ def expand_cidr(cidr: str) -> list:
         else:
             print(f"[cidr] WARNING: {cidr} contains {len(hosts)} hosts. "
                   f"Skipping (non-interactive mode — use a /24 or smaller, "
-                  f"or confirm interactively).")
+                  f"or confirm interactively, or pass --yes).")
             return []
 
     return [str(h) for h in hosts]
@@ -16108,6 +16112,34 @@ def _domain_worker(domain: str, kwargs: dict) -> None:
         pass
 
 
+_CIDR_RE    = re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}$')
+_PLAIN_IP_RE = re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}$')
+
+
+def _expand_target(target: str) -> list:
+    """
+    Given a raw target string, return a list of scannable base-URLs.
+
+    - http(s):// URL  → returned as-is in a single-element list
+    - CIDR notation   → expand_cidr() then probe_cidr_hosts(); log the expansion
+    - Plain IP        → probe_cidr_hosts([ip]); log if responsive
+    """
+    target = target.strip()
+    if target.startswith("http://") or target.startswith("https://"):
+        return [target]
+    if _CIDR_RE.match(target):
+        ips = expand_cidr(target)
+        if not ips:
+            return []
+        print(f"[CIDR] Expanding {target} → {len(ips)} hosts")
+        return probe_cidr_hosts(ips)
+    if _PLAIN_IP_RE.match(target):
+        print(f"[CIDR] Probing plain IP {target}")
+        return probe_cidr_hosts([target])
+    # Bare hostname — pass through as-is; main_crawler will handle it
+    return [target]
+
+
 def run_multi_domain(
     domains: list,
     same_domain_only: bool = False,
@@ -16118,6 +16150,9 @@ def run_multi_domain(
 ) -> None:
     """
     Scan a list of domains, either sequentially or in parallel (≤3 concurrent).
+
+    Each entry in `domains` may be a URL, a CIDR range, or a plain IP address.
+    CIDRs and IPs are expanded to responsive base-URLs before scanning begins.
 
     Sequential mode (default):
       Calls main_crawler() in-process for each domain, resetting all dedup
@@ -16132,6 +16167,15 @@ def run_multi_domain(
     Prints progress [N/total] and a summary table when all scans complete.
     """
     import multiprocessing as _mp
+
+    # Expand any CIDR ranges or plain IPs into concrete base-URLs
+    expanded: list = []
+    for raw in domains:
+        expanded.extend(_expand_target(raw))
+    if not expanded:
+        print("[!] run_multi_domain: no scannable targets after expansion.")
+        return
+    domains = expanded
 
     total  = len(domains)
     kwargs = dict(
@@ -16263,6 +16307,9 @@ if __name__ == "__main__":
                         help="CIDR range to scan (e.g. 192.168.1.0/24). "
                              "Each host is probed on port 443/80; responsive hosts are added as scan targets. "
                              "Private/RFC-1918 ranges are skipped. Ranges larger than /24 require confirmation.")
+    parser.add_argument("--yes", "-y", action="store_true",
+                        help="Auto-confirm all interactive prompts (e.g. large CIDR range warnings). "
+                             "Useful for non-interactive / scripted runs.")
 
     args = parser.parse_args()
 
@@ -16288,6 +16335,9 @@ if __name__ == "__main__":
         if CUSTOM_HEADERS:
             print(f"[*] Custom headers ({len(CUSTOM_HEADERS)}): "
                   + ", ".join(f"{k}: {v}" for k, v in CUSTOM_HEADERS.items()))
+
+    if args.yes:
+        AUTO_YES = True
 
     ACTIVE_PROBES = args.active_probes
     if ACTIVE_PROBES:
