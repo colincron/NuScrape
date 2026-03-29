@@ -7016,6 +7016,62 @@ _ENT_URL_ENCODED_PARAM_END_RE = re.compile(
     r'^[A-Za-z0-9+/=_\-]{10,}(?:&|%26|$|\s)',
 )
 
+# ── LinkedIn profile image signature token suppression ───────────────────────
+# v=beta&t= appears in LinkedIn CDN profile-image URLs; the high-entropy suffix
+# is an HMAC signature over the image URL, not a secret.
+_ENT_LINKEDIN_TOKEN_RE = re.compile(r'v=beta(?:&|&amp;)t=', re.IGNORECASE)
+
+# ── WebP / image src hash suppression ────────────────────────────────────────
+# Image integrity hashes embedded in <source> srcset / <img> src attributes.
+_ENT_IMAGE_HASH_CTX_RE = re.compile(
+    r'type="image/webp"'
+    r'|width="640"'
+    r'|x_height=0(?:&|&amp;)hash=',
+    re.IGNORECASE,
+)
+
+# ── CSRF / hidden form token suppression ─────────────────────────────────────
+# Drupal/Laravel/Django CSRF tokens appear as hidden input values.
+_ENT_CSRF_TOKEN_CTX_RE = re.compile(
+    r'_token"\s+value='
+    r'|build_id"\s+value='
+    r'|form-[a-z]',
+    re.IGNORECASE,
+)
+
+# ── Microsoft SafeLinks token suppression ────────────────────────────────────
+# SafeLinks rewrites URLs; the high-entropy fragment after sdata= or %7C%7C%7C
+# is an HMAC tag, not a credential.
+_ENT_SAFELINKS_RE = re.compile(r'sdata=|%7C%7C%7C', re.IGNORECASE)
+
+# ── Inzpire / Craft CMS image transformation token suppression ───────────────
+# CMS-generated image transformation tokens appear in alt/class/type attribute
+# contexts, never in positions where secrets would appear.
+_ENT_CMS_IMAGE_CTX_RE = re.compile(
+    r'alt=""'
+    r'|class="c-'
+    r'|type="i',        # truncated image MIME type: type="image/…
+    re.IGNORECASE,
+)
+
+# ── URL-safe base64 in HTML attribute value context ───────────────────────────
+# A string composed entirely of URL-safe base64 characters (A-Za-z0-9+/=_-)
+# sandwiched between =" and " in the surrounding HTML is almost certainly an
+# image/asset hash or CMS transformation token, not a secret.
+# These are downgraded to INFO rather than suppressed, so they remain visible.
+_ENT_URL_SAFE_B64_ONLY_RE = re.compile(r'^[A-Za-z0-9+/=_\-]+$')
+_ENT_HTML_ATTR_VAL_PRE_RE = re.compile(r'="\s*$')
+_ENT_HTML_ATTR_VAL_POST_RE = re.compile(r'^\s*"')
+
+# ── JavaScript inline variable / string literal suppression ──────────────────
+# High-entropy strings that are values in JS string literals (e.g.
+# var x = 'TOKEN'; or window._nonce = "abc123";) are nonces, CSRF tokens,
+# and session IDs intentionally embedded in page source — not exfiltrated
+# secrets.  The tell is the string being immediately followed by '; or ";
+# (closing quote + semicolon, optionally with whitespace).
+_ENT_JS_LITERAL_POST_RE = re.compile(r"""^['"]?\s*[;,)]""")
+_ENT_JS_LITERAL_PRE_RE  = re.compile(r"""[=:(,\[]\s*['"]?\s*$""")
+
 # ── CSP hash suppression ─────────────────────────────────────────────────────
 
 # Immediately-preceding sha256-/sha384-/sha512- prefix
@@ -7263,6 +7319,28 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
                 after = scan_body[pos + len(candidate): pos + len(candidate) + 4]
                 if not after or _ENT_URL_ENCODED_PARAM_END_RE.match(candidate + after):
                     return
+            # LinkedIn profile image HMAC signature (v=beta&t=<token>)
+            if _ENT_LINKEDIN_TOKEN_RE.search(ctx_window):
+                return
+            # WebP / image src integrity hash
+            if _ENT_IMAGE_HASH_CTX_RE.search(ctx_window):
+                return
+            # CSRF / hidden form token (Drupal/Laravel/Django)
+            if _ENT_CSRF_TOKEN_CTX_RE.search(ctx_window):
+                return
+            # Microsoft SafeLinks HMAC tag (sdata= or %7C%7C%7C)
+            if _ENT_SAFELINKS_RE.search(ctx_window):
+                return
+            # Inzpire / Craft CMS image transformation token
+            if _ENT_CMS_IMAGE_CTX_RE.search(ctx_window):
+                return
+            # JavaScript string literal value (nonce, CSRF token, session ID)
+            # Pattern: something = 'TOKEN'; or similar — value is intentional
+            post_js = scan_body[pos + len(candidate): pos + len(candidate) + 4]
+            if (_ENT_JS_LITERAL_POST_RE.match(post_js)
+                    and _ENT_JS_LITERAL_PRE_RE.search(pre_ctx)):
+                return
+
         else:
             context = candidate[:60]
 
@@ -7280,12 +7358,26 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         # Pattern matching — override severity for known secret types
         final_sev   = sev_override or body_base_sev
         secret_type = "high entropy string"
+
+        # URL-safe base64 in HTML attribute value context → downgrade to INFO.
+        # Pure A-Za-z0-9+/=_- strings sandwiched between =" and " are image/
+        # asset hashes, CMS transform tokens, or similar non-secret values.
+        _is_attr_val_hash = False
+        if pos >= 0 and _ENT_URL_SAFE_B64_ONLY_RE.match(candidate):
+            pre_attr  = scan_body[max(0, pos - 4): pos]
+            post_attr = scan_body[pos + len(candidate): pos + len(candidate) + 2]
+            if _ENT_HTML_ATTR_VAL_PRE_RE.search(pre_attr) and _ENT_HTML_ATTR_VAL_POST_RE.match(post_attr):
+                _is_attr_val_hash = True
         for pat, label, pat_sev in _ENT_SECRET_PATTERNS:
             if pat.search(candidate):
                 if label == "AWS Secret Access Key":
                     # Must be exactly 40 characters — a longer candidate only
                     # contains a 40-char window that matches, not the full value.
                     if len(candidate) != 40:
+                        continue
+                    # Genuine AWS secret keys have entropy >= 5.5; CMS tokens
+                    # cluster around 4.8–5.2 and produce false positives.
+                    if entropy < 5.5:
                         continue
                     # Decode and verify the content looks like random bytes.
                     if _aws_b64_decoded_fp(candidate):
@@ -7297,6 +7389,11 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         # Generic very-high-entropy with no pattern match → still HIGH in JSON
         if secret_type == "high entropy string" and entropy > 4.8:
             final_sev = "HIGH" if is_json else final_sev
+
+        # URL-safe base64 sandwiched in an HTML attribute value → downgrade to INFO
+        if _is_attr_val_hash:
+            final_sev   = "INFO"
+            secret_type = "likely image/asset hash (HTML attribute value)"
 
         detail = (
             f"High-entropy {string_class} string ({secret_type}) detected in "

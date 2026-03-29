@@ -36,8 +36,12 @@ def _write_scan_log(text):
     except Exception:
         pass
 
-def stream_proc(proc):
-    """Read subprocess stdout, push to in-memory buffer, write to scan.log."""
+def stream_proc(proc, cleanup_files=None):
+    """Read subprocess stdout, push to in-memory buffer, write to scan.log.
+
+    cleanup_files: optional list of temp file paths to delete after the
+    process exits (e.g. the domains list written for --domains).
+    """
     for line in iter(proc.stdout.readline, b""):
         decoded = line.decode("utf-8", errors="replace")
         push_log(decoded)
@@ -46,6 +50,14 @@ def stream_proc(proc):
 
     # ── Post-exit: detect unexpected crash and auto-restart ───
     exit_code = proc.wait()
+
+    # Clean up any temporary files created for this run
+    for _path in (cleanup_files or []):
+        try:
+            os.unlink(_path)
+        except OSError:
+            pass
+
     domain    = crawler_stats.get("domain")
     # Guard against poisoned domain values (e.g. error strings from a previous crash loop)
     if domain and not (domain.startswith("http://") or domain.startswith("https://")):
@@ -102,9 +114,13 @@ def index():
 # Stored launch args so auto-restart can reuse them
 _last_cmd = [None]
 
-def _launch_crawler(domain, cmd=None):
+def _launch_crawler(domain, cmd=None, cleanup_files=None):
     """Spawn main.py and start the stream/watchdog thread. Must be called
-    with crawler_lock held (or at startup before Flask is serving)."""
+    with crawler_lock held (or at startup before Flask is serving).
+
+    cleanup_files: optional list of temp file paths deleted after the
+    subprocess exits (e.g. the --domains targets file).
+    """
     global crawler_proc
     if not domain or not (domain.startswith("http://") or domain.startswith("https://")):
         _write_scan_log(f"[NuScrape] _launch_crawler blocked: invalid domain {domain!r}\n")
@@ -126,7 +142,10 @@ def _launch_crawler(domain, cmd=None):
     crawler_stats["started"] = ts()
     crawler_stats["domain"]  = domain
 
-    t = threading.Thread(target=stream_proc, args=(crawler_proc,), daemon=True)
+    t = threading.Thread(target=stream_proc,
+                         args=(crawler_proc,),
+                         kwargs={"cleanup_files": cleanup_files or []},
+                         daemon=True)
     t.start()
 
 @app.route("/api/start", methods=["POST"])
@@ -146,10 +165,6 @@ def api_start():
     stealth_profile = data.get("stealth_profile", "LOUD").upper()
     if stealth_profile not in ("LOUD", "NORMAL", "GHOST"):
         stealth_profile = "LOUD"
-    bug_bounty_header = data.get("bug_bounty_header", "")
-    if not isinstance(bug_bounty_header, str):
-        bug_bounty_header = ""
-    bug_bounty_header = bug_bounty_header.strip()
     # custom_headers: list of "Key:Value" strings from the UI textarea
     custom_headers_raw = data.get("custom_headers", [])
     if not isinstance(custom_headers_raw, list):
@@ -239,8 +254,6 @@ def api_start():
             cmd.append("--no-skip-google-tracking")
         if stealth_profile != "LOUD":
             cmd.extend(["--stealth", stealth_profile])
-        if bug_bounty_header:
-            cmd.extend(["--bug-bounty-header", bug_bounty_header])
         if active_probes:
             cmd.append("--active-probes")
         if no_baseline:
@@ -262,7 +275,8 @@ def api_start():
                      if use_domains_file else "single-domain")
         push_log(f"[NuScrape] Args: rate={rate_min}-{rate_max}s  concurrency={concurrency}"
                  f"  same-domain={same_domain}  stealth={stealth_profile}  mode={mode_note}")
-        _launch_crawler(first_domain, cmd)
+        _launch_crawler(first_domain, cmd,
+                        cleanup_files=[domains_file] if domains_file else [])
 
     return jsonify({"ok": True})
 
@@ -785,6 +799,12 @@ td a:hover{text-decoration:underline}
         <textarea id="multiDomains" rows="4" placeholder="https://target1.com&#10;https://target2.com&#10;https://target3.com"
           style="width:100%;box-sizing:border-box;resize:vertical;background:var(--surface);border:1px solid var(--border);color:var(--fg);font-family:var(--mono);font-size:.72rem;padding:.35rem .5rem;border-radius:4px;outline:none;transition:border-color .15s"></textarea>
       </div>
+      <div style="margin-bottom:.7rem">
+        <label style="font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:.4rem">Custom Headers</label>
+        <textarea id="customHeaders" rows="3" placeholder="User-Agent:qinetiqvdpChr0nic&#10;X-HackerOne-Researcher:chr0nic"
+          style="width:100%;box-sizing:border-box;resize:vertical;background:var(--surface);border:1px solid var(--border);color:var(--fg);font-family:var(--mono);font-size:.72rem;padding:.35rem .5rem;border-radius:4px;outline:none;transition:border-color .15s"></textarea>
+        <div style="font-size:.62rem;color:var(--dim);margin-top:.25rem;font-family:var(--mono)">One header per line in Key:Value format. Use for program-specific headers like User-Agent or X-HackerOne-Researcher.</div>
+      </div>
       <div class="toggle-row" id="parallelRow" style="display:none">
         <label>Parallel Scan (max 3 concurrent)</label>
         <label class="toggle"><input type="checkbox" id="parallelScan"><span class="toggle-slider"></span></label>
@@ -855,26 +875,11 @@ td a:hover{text-decoration:underline}
         <div id="stealthDesc" style="font-size:.65rem;color:var(--dim);margin-top:.3rem;font-family:var(--mono)">Fast scanning, no rate limiting beyond base settings</div>
       </div>
       <div style="margin-bottom:.7rem">
-        <div class="toggle-row" style="margin-bottom:.4rem">
-          <label style="font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em">Bug Bounty Header</label>
-          <label class="toggle"><input type="checkbox" id="bugBountyToggle" onchange="toggleBugBounty(this)"><span class="toggle-slider"></span></label>
-        </div>
-        <input type="text" id="bugBountyValue" disabled placeholder="HackerOne-yourusername"
-          style="width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.35rem .5rem;border-radius:4px;outline:none;transition:border-color .15s,color .15s">
-        <div style="font-size:.62rem;color:var(--dim);margin-top:.25rem;font-family:var(--mono)">Injects X-Bug-Bounty header into all requests — required by some bug bounty programs</div>
-      </div>
-      <div style="margin-bottom:.7rem">
         <label style="font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:.4rem">HackerOne Scope CSV</label>
         <input type="file" id="scopeFile" accept=".csv"
           style="width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:.72rem;padding:.3rem .5rem;border-radius:4px;outline:none">
         <div style="font-size:.62rem;color:var(--dim);margin-top:.25rem;font-family:var(--mono)">Optional — restricts scan to in-scope assets and skips excluded assets</div>
         <div id="scopeStatus" style="font-size:.62rem;color:var(--dim);margin-top:.2rem;font-family:var(--mono);display:none"></div>
-      </div>
-      <div style="margin-bottom:.7rem">
-        <label style="font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:.4rem">Custom Headers</label>
-        <textarea id="customHeaders" rows="3" placeholder="User-Agent:qinetiqvdpChr0nic&#10;X-HackerOne-Researcher:chr0nic"
-          style="width:100%;box-sizing:border-box;resize:vertical;background:var(--surface);border:1px solid var(--border);color:var(--fg);font-family:var(--mono);font-size:.72rem;padding:.35rem .5rem;border-radius:4px;outline:none;transition:border-color .15s"></textarea>
-        <div style="font-size:.62rem;color:var(--dim);margin-top:.25rem;font-family:var(--mono)">One header per line in Key:Value format. Use for program-specific headers like User-Agent or X-HackerOne-Researcher.</div>
       </div>
       <button class="btn btn-start" id="btnStart" onclick="startCrawler()">▶ Start Crawler</button>
       <button class="btn btn-stop"  id="btnStop"  onclick="stopCrawler()" disabled>■ Stop Crawler</button>
@@ -1346,22 +1351,6 @@ function toggleActiveProbesWarning(cb){
   document.getElementById('activeProbesWarning').style.display=cb.checked?'block':'none';
 }
 
-// ── Bug bounty header toggle ───────────────────────────
-function toggleBugBounty(cb){
-  const inp=document.getElementById('bugBountyValue');
-  if(cb.checked){
-    inp.disabled=false;
-    inp.style.color='var(--text)';
-    inp.style.borderColor='rgba(0,229,255,.3)';
-    inp.focus();
-  } else {
-    inp.disabled=true;
-    inp.value='';
-    inp.style.color='var(--muted)';
-    inp.style.borderColor='var(--border)';
-  }
-}
-
 // ── Stealth profile selector ───────────────────────────
 const _stealthDesc={LOUD:'Fast scanning, no rate limiting beyond base settings',NORMAL:'Moderate random delays (0.5–1.5s) between requests',GHOST:'Slow randomised delays (2–6s), rotated User-Agents, periodic burst pauses'};
 function setStealthBtn(el,val){
@@ -1426,9 +1415,6 @@ async function startCrawler(){
     tutorial_mode:document.getElementById('tutorialMode').checked,
     active_probes:document.getElementById('activeProbes').checked,
     stealth_profile:document.querySelector('input[name="stealthProfile"]:checked')?.value||'LOUD',
-    ...(document.getElementById('bugBountyToggle').checked && document.getElementById('bugBountyValue').value.trim()
-      ? {bug_bounty_header: document.getElementById('bugBountyValue').value.trim()}
-      : {}),
     ...(scopeFilePath ? {scope_file: scopeFilePath} : {}),
     custom_headers: (document.getElementById('customHeaders').value||'')
       .split('\n').map(l=>l.trim()).filter(l=>l.includes(':')),
