@@ -476,6 +476,12 @@ def _pq_push(queue: list, url: str) -> None:
         if DEBUG_MODE:
             print(f"[debug] _pq_push: out of scope, skipping {url!r}")
         return
+    if HO_INCLUDE_PATTERNS:
+        _host = urlparse(url).netloc
+        if not any(p.match(_host) for p in HO_INCLUDE_PATTERNS):
+            if DEBUG_MODE:
+                print(f"[debug] _pq_push: allowlist mismatch, dropping {url!r}")
+            return
     heapq.heappush(queue, (_url_priority(url), next(_pq_seq), url))
 
 
@@ -7947,6 +7953,12 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
             url = _pq_pop(url_queue)
             if url in visited:
                 continue
+            if HO_INCLUDE_PATTERNS:
+                _host = urlparse(url).netloc
+                if not any(p.match(_host) for p in HO_INCLUDE_PATTERNS):
+                    if DEBUG_MODE:
+                        print(f"[debug] crawl loop: allowlist mismatch, dropping {url!r}")
+                    continue
             if SOCIAL_FILTER_FLAGS["enabled"] and is_social_media_domain(url):
                 continue
             if SKIP_GOOGLE_TRACKING and is_google_tracking_url(url):
