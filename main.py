@@ -13610,13 +13610,36 @@ def scan_deserial_passive(
                           f"Base64 Java serialization prefix 'rO0AB' in {where}", "MEDIUM"))
 
     # ── PHP serialization ─────────────────────────────────────────────────────
-    for src_label, src_text in (("response body", body_s), ("Set-Cookie", set_cookie)):
-        m = _PHP_SERIAL_RE.search(src_text)
-        if m:
-            snippet = src_text[max(0, m.start() - 10):m.end() + 60].strip()
-            findings.append(("PHP serialization",
-                              f"PHP serialized data pattern in {src_label}: {snippet!r}", "MEDIUM"))
-            break
+    # Binary media responses (video, audio, image, PDF, etc.) always contain
+    # byte sequences that match PHP serialization patterns — skip entirely.
+    _ct_lower = ct.lower().split(";")[0].strip()
+    _is_binary_media = (
+        _ct_lower.startswith("video/")
+        or _ct_lower.startswith("audio/")
+        or _ct_lower.startswith("image/")
+        or _ct_lower in (
+            "application/pdf",
+            "application/octet-stream",
+            "application/zip",
+            "application/gzip",
+            "application/x-tar",
+            "application/x-bzip2",
+            "application/wasm",
+            "application/x-shockwave-flash",
+            "font/woff",
+            "font/woff2",
+            "font/ttf",
+            "font/otf",
+        )
+    )
+    if not _is_binary_media:
+        for src_label, src_text in (("response body", body_s), ("Set-Cookie", set_cookie)):
+            m = _PHP_SERIAL_RE.search(src_text)
+            if m:
+                snippet = src_text[max(0, m.start() - 10):m.end() + 60].strip()
+                findings.append(("PHP serialization",
+                                  f"PHP serialized data pattern in {src_label}: {snippet!r}", "MEDIUM"))
+                break
 
     # ── Python pickle ─────────────────────────────────────────────────────────
     if "application/python-pickle" in ct.lower():
