@@ -207,7 +207,18 @@ def api_start():
     # CIDR entries and plain IPs are handled by main.py's expansion logic.
     use_domains_file = len(domains_list) >= 1
     parallel    = bool(data.get("parallel", False)) and len(domains_list) > 1
-    first_domain = domains_list[0] if domains_list else domain
+
+    # Derive a valid https:// URL for _launch_crawler's display/logging from
+    # the first entry, which may be a wildcard, CIDR, bare IP, or plain URL.
+    def _to_display_url(entry: str) -> str:
+        if entry.startswith("http://") or entry.startswith("https://"):
+            return entry
+        if entry.startswith("*."):
+            return "https://" + entry[2:]   # *.example.com → https://example.com
+        return "https://" + entry           # bare IP, CIDR root, or hostname
+
+    raw_first = domains_list[0] if domains_list else domain
+    first_domain = _to_display_url(raw_first) if raw_first else ""
 
     if not first_domain:
         return jsonify({"ok": False, "error": "No domain provided"}), 400
