@@ -5630,6 +5630,18 @@ def analyse_js_bundle(page_url, js_url):
         return
     if js_url in _js_analysed:
         return
+    if SOCIAL_FILTER_FLAGS.get("enabled") and is_social_media_domain(js_url):
+        if DEBUG_MODE:
+            print(f"[debug] analyse_js_bundle: social media domain, skipping {js_url!r}")
+        return
+    if HO_INCLUDE_PATTERNS and not is_in_scope(js_url):
+        if DEBUG_MODE:
+            print(f"[debug] analyse_js_bundle: out of scope, skipping {js_url!r}")
+        return
+    if is_endpoint_noise(js_url):
+        if DEBUG_MODE:
+            print(f"[debug] analyse_js_bundle: CDN/noise domain, skipping {js_url!r}")
+        return
     _js_analysed.add(js_url)
 
     try:
