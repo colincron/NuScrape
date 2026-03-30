@@ -4714,6 +4714,8 @@ ENDPOINT_NOISE_DOMAINS = {
     # Auth SDKs
     "auth0.com", "cdn.auth0.com",
     "accounts.google.com", "appleid.apple.com",
+    # Microsoft authentication CDN — never contain target-program findings
+    "aadcdn.msftauth.net", "aadcdn.msauth.net",
 }
 
 def is_endpoint_noise(endpoint_str):
@@ -5335,11 +5337,20 @@ def _take_screenshot(finding_id: int, target: str) -> None:
                 page.goto(url, timeout=15000, wait_until="domcontentloaded")
                 page.screenshot(path=out_path, full_page=False)
                 print(f"[screenshot] saved {out_path}")
+            except (BrokenPipeError, OSError) as e:
+                if DEBUG_MODE:
+                    print(f"[debug] screenshot pipe/IO error for {url!r}: {e}")
             except Exception as e:
                 if DEBUG_MODE:
                     print(f"[debug] screenshot failed for {url!r}: {e}")
             finally:
-                browser.close()
+                try:
+                    browser.close()
+                except (BrokenPipeError, OSError):
+                    pass
+    except (BrokenPipeError, OSError) as e:
+        if DEBUG_MODE:
+            print(f"[debug] _take_screenshot: pipe/IO error: {e}")
     except Exception as e:
         if DEBUG_MODE:
             print(f"[debug] _take_screenshot: {e}")
@@ -6034,10 +6045,14 @@ def _shutdown_playwright() -> None:
     for pw, browser in instances:
         try:
             browser.close()
+        except (BrokenPipeError, OSError):
+            pass
         except Exception:
             pass
         try:
             pw.stop()
+        except (BrokenPipeError, OSError):
+            pass
         except Exception:
             pass
 
@@ -6173,6 +6188,9 @@ def playwright_fetch(url):
 
         except PlaywrightTimeout:
             print_error("Playwright page timeout: " + url)
+        except (BrokenPipeError, OSError) as e:
+            if DEBUG_MODE:
+                print(f"[debug] playwright_fetch: pipe/IO error on {url!r}: {e}")
         except Exception as e:
             print_error("Playwright page error on " + url + ": " + str(e))
         finally:
