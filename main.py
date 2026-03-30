@@ -5031,7 +5031,7 @@ EOL_PHP_VERSIONS = {"5", "4", "3"}
 # Add entries here to extend the list.
 SOCIAL_MEDIA_DOMAINS = {
     # Meta
-    "facebook.com", "fb.com", "instagram.com", "threads.net", "messenger.com",
+    "facebook.com", "l.facebook.com", "fb.com", "instagram.com", "threads.net", "messenger.com",
     # Google
     "google.com", "youtube.com", "youtu.be",
     # Twitter / X
