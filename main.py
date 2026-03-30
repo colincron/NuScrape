@@ -191,10 +191,11 @@ SAME_DOMAIN_ONLY = False   # overridden by --same-domain-only CLI arg
 START_URL        = ""      # set at crawler startup; used by is_in_scope()
 ACTIVE_PROBES    = False   # overridden by --active-probes CLI arg; gates payload-injecting checks
 BASELINE_ENABLED = True    # overridden by --no-baseline CLI arg; disables per-endpoint baseline profiling
-TUTORIAL_MODE    = False   # overridden by --tutorial CLI arg; appends HOW TO VERIFY guidance to findings
+TUTORIAL_MODE      = False  # overridden by --tutorial CLI arg; appends HOW TO VERIFY guidance to findings
 CUSTOM_HEADERS: dict = {}  # populated by --header CLI arg; injected into every outbound request
 AUTO_YES: bool = False     # set by --yes / -y; auto-confirms interactive prompts (e.g. large CIDR ranges)
 DEBUG_MODE: bool = False   # set by --debug; enables verbose debug output
+SCREENSHOT_ENABLED: bool = True  # take a Playwright screenshot for every CONFIRMED finding
 
 # HackerOne scope patterns — populated by load_hackerone_scope() when --scope is used.
 # HO_INCLUDE_PATTERNS: compiled regexes for in-scope assets (instruction != 'exclude')
@@ -616,6 +617,30 @@ TECH_SIGNATURES = {
     "Cloudfront":     {
         "headers": ["X-Amz-Cf-Id", "Via: cloudfront"],
         "html":    [],
+    },
+    "Akamai":         {
+        "headers": ["X-Check-Cacheable", "X-Akamai-Session-Info", "X-Akamai-Transformed",
+                    "Akamai-Cache-Status", "X-Akamai-Request-ID", "X-True-Cache-Key"],
+        "html":    [],
+    },
+    "Fastly":         {
+        "headers": ["X-Fastly-Request-ID", "Fastly-Debug-Digest", "X-Served-By",
+                    "Fastly-Restarts"],
+        "html":    [],
+    },
+    # ── CMS: Enterprise ───────────────────────────────────────────────────
+    "Sitecore":       {
+        "headers": ["X-Sitecore-Crm-Item-Id", "X-Sitecore-Item-Id",
+                    "X-Powered-By: Sitecore"],
+        "html":    ["/sitecore/", "sitecore-javascript-renderings",
+                    'name="generator" content="Sitecore',
+                    "Sitecore.Context", "/~/jssmedia/"],
+    },
+    "Umbraco":        {
+        "headers": ["X-Umbraco-Version"],
+        "html":    ["/umbraco/", "umbracoNaviHide", "__UmbracoCurrentPageId",
+                    'name="generator" content="Umbraco',
+                    "UmbAuthToken", "/media/umbraco/"],
     },
     # ── Analytics / tag management ────────────────────────────────────────
     "Google Analytics": {
@@ -1285,11 +1310,32 @@ def query_ct_logs(domain):
 # Technology fingerprinting
 # ─────────────────────────────────────────────
 
+# Version extraction patterns applied in fingerprint_technologies.
+# Each entry: (tech_name, regex_pattern, group_index)
+# Patterns match against the raw (non-lowercased) header string or HTML.
+_TECH_VERSION_PATTERNS = [
+    # Generator meta tags
+    ("WordPress",    re.compile(r'name=["\']generator["\'][^>]*content=["\']WordPress\s+([\d.]+)', re.I), 1),
+    ("Drupal",       re.compile(r'name=["\']generator["\'][^>]*content=["\']Drupal\s+([\d.]+)', re.I), 1),
+    ("Joomla",       re.compile(r'name=["\']generator["\'][^>]*content=["\']Joomla!\s+([\d.]+)', re.I), 1),
+    ("Umbraco",      re.compile(r'name=["\']generator["\'][^>]*content=["\']Umbraco\s+([\d.]+)', re.I), 1),
+    # Response headers
+    ("PHP",          re.compile(r'X-Powered-By:\s*PHP/([\d.]+)', re.I), 1),
+    ("ASP.NET",      re.compile(r'X-AspNet-Version:\s*([\d.]+)', re.I), 1),
+    ("Django",       re.compile(r'django[/ ]([\d.]+)', re.I), 1),
+    ("Ruby on Rails",re.compile(r'X-Powered-By:\s*Phusion Passenger[/ ]([\d.]+)', re.I), 1),
+    ("Umbraco",      re.compile(r'X-Umbraco-Version:\s*([\d.]+)', re.I), 1),
+]
+
+
 def fingerprint_technologies(url, response_headers, html_content):
     detected = []
     try:
         headers_lc = {k.lower(): str(v).lower() for k, v in response_headers.items()} if hasattr(response_headers, 'items') else {}
-        html_str = html_content.decode("utf-8", errors="ignore").lower() if isinstance(html_content, bytes) else str(html_content).lower()
+        # Keep a raw (non-lowercased) combined string for version extraction
+        raw_headers_str = "\n".join(f"{k}: {v}" for k, v in response_headers.items()) if hasattr(response_headers, 'items') else ""
+        html_str = html_content.decode("utf-8", errors="ignore") if isinstance(html_content, bytes) else str(html_content)
+        html_lc  = html_str.lower()
         for tech, sigs in TECH_SIGNATURES.items():
             found = False
             for h in sigs["headers"]:
@@ -1303,13 +1349,24 @@ def fingerprint_technologies(url, response_headers, html_content):
                         found = True
                         break
             if not found:
-                found = any(p.lower() in html_str for p in sigs["html"])
+                found = any(p.lower() in html_lc for p in sigs["html"])
             if found:
                 detected.append(tech)
         if detected:
             print(timestamp() + " Technologies on " + url + ": " + ", ".join(detected))
             for tech in detected:
                 write_to_tech_database(url, tech)
+            # Version extraction — check headers then HTML for each pattern
+            _detected_set = set(detected)
+            _version_search_str = raw_headers_str + "\n" + html_str
+            for tech, pattern, grp in _TECH_VERSION_PATTERNS:
+                if tech not in _detected_set:
+                    continue
+                m = pattern.search(_version_search_str)
+                if m:
+                    version = m.group(grp)
+                    write_to_tech_database(url, f"{tech} {version}")
+                    _check_cve_and_alert(tech, version, url)
     except Exception as e:
         print_error("fingerprint: " + str(e))
     return detected
@@ -5216,6 +5273,7 @@ def _infer_confidence(alert_type: str) -> str:
 
 
 def write_to_alerts_database(alert_type, severity, target, detail, confidence=""):
+    """Persist an alert and return the row id (new insert) or None (duplicate / error)."""
     conn = sqlite3.connect("ScrapeDB", isolation_level=None)
     try:
         conn.execute("""CREATE TABLE IF NOT EXISTS Alerts (
@@ -5236,15 +5294,56 @@ def write_to_alerts_database(alert_type, severity, target, detail, confidence=""
         existing = conn.execute(
             "SELECT id FROM Alerts WHERE alert_type=? AND target=? AND detail=? LIMIT 1",
             (alert_type, target, detail)).fetchone()
-        if not existing:
-            conn.execute(
-                "INSERT INTO Alerts (alert_type,severity,target,detail,confidence,found_at) "
-                "VALUES (?,?,?,?,?,?)",
-                (alert_type, severity, target, detail, confidence, timestamp()))
+        if existing:
+            return None
+        cur = conn.execute(
+            "INSERT INTO Alerts (alert_type,severity,target,detail,confidence,found_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (alert_type, severity, target, detail, confidence, timestamp()))
+        return cur.lastrowid
     except Exception as e:
         print_error("write_to_alerts_database: " + str(e))
+        return None
     finally:
         conn.close()
+
+# ── Screenshot capture for CONFIRMED findings ─────────────────────────────────
+
+def _take_screenshot(finding_id: int, target: str) -> None:
+    """Capture a 1280×800 Playwright screenshot of *target* and save it to screenshots/.
+
+    Runs synchronously — callers should invoke this in a daemon thread to avoid
+    blocking the main crawl loop.  Silently skipped if Playwright is unavailable.
+    """
+    if not PLAYWRIGHT_AVAILABLE:
+        return
+    # Derive a URL to screenshot — target may be a bare hostname or a full URL
+    if not target.startswith("http://") and not target.startswith("https://"):
+        url = "https://" + target
+    else:
+        url = target
+    try:
+        host = urlparse(url).netloc or target
+        # Sanitise hostname for use in a filename (strip port, replace dots etc.)
+        safe_host = re.sub(r"[^\w.\-]", "_", host)
+        os.makedirs("screenshots", exist_ok=True)
+        out_path = os.path.join("screenshots", f"finding_{finding_id}_{safe_host}.png")
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1280, "height": 800})
+            try:
+                page.goto(url, timeout=15000, wait_until="domcontentloaded")
+                page.screenshot(path=out_path, full_page=False)
+                print(f"[screenshot] saved {out_path}")
+            except Exception as e:
+                if DEBUG_MODE:
+                    print(f"[debug] screenshot failed for {url!r}: {e}")
+            finally:
+                browser.close()
+    except Exception as e:
+        if DEBUG_MODE:
+            print(f"[debug] _take_screenshot: {e}")
+
 
 # ── Tutorial mode — per-type verification guidance ────────────────────────────
 
@@ -5472,7 +5571,12 @@ def alert(alert_type, severity, target, detail, redact_detail=False, response_bo
         note = _tutorial_note(alert_type)
         if note:
             detail = detail + note
-    write_to_alerts_database(alert_type, severity, target, detail, confidence)
+    row_id = write_to_alerts_database(alert_type, severity, target, detail, confidence)
+    if (SCREENSHOT_ENABLED and PLAYWRIGHT_AVAILABLE
+            and confidence == _CONFIDENCE_CONFIRMED
+            and row_id is not None):
+        t = threading.Thread(target=_take_screenshot, args=(row_id, target), daemon=True)
+        t.start()
 
 def write_to_js_database(page_url, js_url, finding_type, value, context=""):
     conn = sqlite3.connect("ScrapeDB", isolation_level=None)
@@ -6090,6 +6194,10 @@ def playwright_fetch(url):
 # ─────────────────────────────────────────────
 
 async def async_fetch(session, url, semaphore):
+    if SOCIAL_FILTER_FLAGS.get("enabled") and is_social_media_domain(url):
+        if DEBUG_MODE:
+            print(f"[debug] async_fetch: social media domain, skipping {url!r}")
+        return url, None, {}, 0.0, False, False
     async with semaphore:
         _t0 = time.monotonic()
         try:
@@ -8694,7 +8802,7 @@ def check_technology_specific(base_url: str, domain: str,
     - Confirms findings with body or content-type signatures before alerting
 
     Covers: WordPress, Laravel, Spring Boot, Django, Ruby on Rails,
-            Drupal, Joomla.
+            Drupal, Joomla, Sitecore, Umbraco.
     """
     if not detected_techs:
         return
@@ -8788,6 +8896,25 @@ def check_technology_specific(base_url: str, domain: str,
             )
             print(timestamp() + f" [!!] WordPress debug.log accessible: {domain}")
 
+        # /readme.html — version disclosure + CVE correlation
+        status, body, ct = _probe("/readme.html")
+        if status == 200 and "wordpress" in body.lower():
+            ver_m = re.search(r'<br\s*/?>.*?version\s+([\d.]+)|version\s+([\d.]+)', body, re.I)
+            if not ver_m:
+                ver_m = re.search(r'wordpress\s+([\d.]+)', body, re.I)
+            if ver_m:
+                wp_ver = next(g for g in ver_m.groups() if g)
+                alert(
+                    "WORDPRESS VERSION DISCLOSURE",
+                    "LOW",
+                    base_url + "/readme.html",
+                    f"readme.html is publicly accessible and discloses WordPress "
+                    f"version {wp_ver} — aids targeted lookup of known CVEs. "
+                    f"Remove or deny access to this file via web server configuration."
+                )
+                print(timestamp() + f" [!] WordPress readme.html discloses version {wp_ver}: {domain}")
+                _check_cve_and_alert("WordPress", wp_ver, base_url)
+
     # ── Laravel ───────────────────────────────────────────────────────────────
     if "Laravel" in tech_set:
         # /storage/logs/laravel.log
@@ -8872,17 +8999,41 @@ def check_technology_specific(base_url: str, domain: str,
                 "unhandled exceptions. Set APP_DEBUG=false in .env."
             )
             print(timestamp() + f" [!!] Laravel debug mode detected: {domain}")
+            # Error pages often include the Laravel version — extract for CVE correlation
+            laravel_ver_m = re.search(r'laravel[/ v]+([\d.]+)', body, re.I)
+            if laravel_ver_m:
+                _check_cve_and_alert("Laravel", laravel_ver_m.group(1), base_url)
 
     # ── Spring Boot ───────────────────────────────────────────────────────────
     # Actuator endpoint probing is already handled by check_actuator_exposure
     # (which runs unconditionally in _exposure_tasks). Here we only confirm
-    # that the Whitelabel error page is present as a secondary signal.
+    # that the Whitelabel error page is present as a secondary signal, and
+    # attempt version extraction for CVE correlation.
     if "Spring Boot" in tech_set:
         rand_path = f"/spring-probe-{random.randint(10000, 99999)}"
         status, body, ct = _probe(rand_path)
         if "whitelabel error page" in body.lower():
             print(timestamp() + f" [*] Spring Boot Whitelabel error page confirmed: {domain}")
             write_to_tech_database(base_url, "Spring Boot (Whitelabel confirmed)")
+
+        # /actuator/info — may expose Spring Boot version as JSON
+        status, body, ct = _probe("/actuator/info")
+        if status == 200 and "application/json" in ct.lower():
+            try:
+                info = json.loads(body)
+                # Spring Boot version may be under build.version or build.meta.springBootVersion
+                sb_ver = (info.get("build", {}).get("version")
+                          or info.get("build", {}).get("meta", {}).get("springBootVersion"))
+                if not sb_ver:
+                    # Fall back to regex on raw body
+                    m = re.search(r'"spring[-_]?boot[-_]?version"\s*:\s*"([\d.]+)"', body, re.I)
+                    if m:
+                        sb_ver = m.group(1)
+                if sb_ver:
+                    write_to_tech_database(base_url, f"Spring Boot {sb_ver}")
+                    _check_cve_and_alert("Spring Boot", sb_ver, base_url)
+            except Exception:
+                pass
 
     # ── Django ────────────────────────────────────────────────────────────────
     if "Django" in tech_set:
@@ -8954,6 +9105,9 @@ def check_technology_specific(base_url: str, domain: str,
                 "Restrict in production: config.consider_all_requests_local = false"
             )
             print(timestamp() + f" [!!] Rails /rails/info/properties exposed: {domain}")
+            rails_ver_m = re.search(r'Rails\s+version.*?([\d.]+)', body, re.I)
+            if rails_ver_m:
+                _check_cve_and_alert("Ruby on Rails", rails_ver_m.group(1), base_url)
 
         # /rails/mailers
         status, body, ct = _probe("/rails/mailers")
@@ -9019,6 +9173,66 @@ def check_technology_specific(base_url: str, domain: str,
                 "by strong credentials and not reachable from the public internet."
             )
             print(timestamp() + f" [!] Drupal /admin/ accessible: {domain}")
+
+    # ── Sitecore ──────────────────────────────────────────────────────────────
+    if "Sitecore" in tech_set:
+        # /sitecore/login — admin login page
+        status, body, ct = _probe("/sitecore/login")
+        if status == 200 and not catch_all and (
+            "sitecore" in body.lower() or "log in" in body.lower()
+            or "password" in body.lower()
+        ):
+            alert(
+                "SITECORE LOGIN PAGE ACCESSIBLE",
+                "MEDIUM",
+                base_url + "/sitecore/login",
+                "Sitecore CMS login page is publicly accessible — enables credential "
+                "brute-force attacks against the CMS admin account. Restrict access "
+                "by IP address at the web server or load balancer level."
+            )
+            print(timestamp() + f" [!] Sitecore login page accessible: {domain}")
+
+        # /sitecore/shell/ — CMS shell (authenticated, but exposure confirms CMS)
+        status, body, ct = _probe("/sitecore/shell/")
+        if status == 200 and not catch_all and "sitecore" in body.lower():
+            alert(
+                "SITECORE SHELL ACCESSIBLE",
+                "MEDIUM",
+                base_url + "/sitecore/shell/",
+                "Sitecore CMS shell interface is reachable from the public internet. "
+                "Restrict /sitecore/ paths to authorised IP ranges."
+            )
+            print(timestamp() + f" [!] Sitecore /sitecore/shell/ accessible: {domain}")
+
+    # ── Umbraco ───────────────────────────────────────────────────────────────
+    if "Umbraco" in tech_set:
+        # /umbraco/ — CMS admin panel
+        status, body, ct = _probe("/umbraco/")
+        if status == 200 and not catch_all and (
+            "umbraco" in body.lower() or "log in" in body.lower()
+            or "password" in body.lower()
+        ):
+            alert(
+                "UMBRACO ADMIN PANEL ACCESSIBLE",
+                "MEDIUM",
+                base_url + "/umbraco/",
+                "Umbraco CMS admin panel is publicly accessible — enables credential "
+                "brute-force attacks. Restrict the /umbraco/ path to authorised IP "
+                "addresses via web server or firewall configuration."
+            )
+            print(timestamp() + f" [!] Umbraco /umbraco/ accessible: {domain}")
+
+        # /umbraco/api/ — headless API endpoint enumeration
+        status, body, ct = _probe("/umbraco/api/")
+        if status == 200 and not catch_all:
+            alert(
+                "UMBRACO API ENDPOINT ACCESSIBLE",
+                "LOW",
+                base_url + "/umbraco/api/",
+                "Umbraco REST API base path is publicly reachable — enumerate available "
+                "controllers and verify each endpoint enforces authentication."
+            )
+            print(timestamp() + f" [*] Umbraco /umbraco/api/ accessible: {domain}")
 
     # ── Joomla ────────────────────────────────────────────────────────────────
     if "Joomla" in tech_set:

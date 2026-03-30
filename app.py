@@ -138,6 +138,7 @@ def _launch_crawler(domain, cmd=None, cleanup_files=None):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         cwd=BASE_DIR,
+        start_new_session=True,
     )
     crawler_stats["started"] = ts()
     crawler_stats["domain"]  = domain
@@ -318,20 +319,26 @@ def api_stop():
     with crawler_lock:
         if crawler_proc and crawler_proc.poll() is None:
             _stopped_by_user[0] = True   # suppress auto-restart
-            # SIGTERM triggers _handle_stop_signal in main.py, which sets
-            # _stop_event so all worker threads observe the stop flag and
-            # return early, then shuts down Playwright and exits cleanly.
-            crawler_proc.terminate()
+            # Send SIGTERM to the entire process group so all child processes
+            # spawned by main.py in parallel multi-domain mode are also stopped.
+            # start_new_session=True gives the subprocess its own process group.
+            try:
+                os.killpg(os.getpgid(crawler_proc.pid), signal.SIGTERM)
+            except ProcessLookupError:
+                pass  # process already exited
             _write_scan_log(f"[NuScrape] Scan stopped by user @ {datetime.now()}\n")
             push_log("[NuScrape] Crawler stopped by user.")
-            # Wait up to 5 seconds for the process to exit gracefully,
-            # then force-kill if it is still running.
+            # Wait up to 5 seconds for the process group to exit gracefully,
+            # then force-kill if the main process is still running.
             def _force_kill_if_needed(proc):
                 try:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     push_log("[NuScrape] Crawler did not exit within 5 s — sending SIGKILL.")
-                    proc.kill()
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
             threading.Thread(
                 target=_force_kill_if_needed, args=(crawler_proc,), daemon=True
             ).start()
