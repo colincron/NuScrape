@@ -6352,17 +6352,10 @@ def is_in_scope(url):
         if pat.match(url_host):
             return False
 
-    # 2. If include patterns are loaded, restrict to start domain + includes
+    # 2. If include patterns are loaded, URL must match one — no start-domain bypass
     if HO_INCLUDE_PATTERNS:
-        try:
-            target_host = urlparse(START_URL).netloc.lstrip("www.")
-        except Exception:
-            target_host = ""
-        if target_host and (url_host == target_host or url_host.endswith("." + target_host)):
+        if any(pat.match(url_host) for pat in HO_INCLUDE_PATTERNS):
             return True
-        for pat in HO_INCLUDE_PATTERNS:
-            if pat.match(url_host):
-                return True
         return False
 
     # 3. Default same-domain-only check
