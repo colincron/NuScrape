@@ -456,7 +456,26 @@ def _url_priority(url: str) -> int:
 
 
 def _pq_push(queue: list, url: str) -> None:
-    """Push *url* onto the heapq priority queue."""
+    """Push *url* onto the heapq priority queue.
+
+    Drops the URL without queuing if any of the following apply:
+    - Reserved/invalid address (RFC 1918, loopback, link-local, .local/.internal)
+    - Social media domain (when social filter is enabled)
+    - Fails scope check: with --scope, must match include patterns and not exclude
+      patterns; without --scope, falls back to same-domain-only behaviour
+    """
+    if _is_reserved_target(url):
+        if DEBUG_MODE:
+            print(f"[debug] _pq_push: skipping reserved target {url!r}")
+        return
+    if SOCIAL_FILTER_FLAGS.get("enabled") and is_social_media_domain(url):
+        if DEBUG_MODE:
+            print(f"[debug] _pq_push: social media domain, skipping {url!r}")
+        return
+    if not is_in_scope(url):
+        if DEBUG_MODE:
+            print(f"[debug] _pq_push: out of scope, skipping {url!r}")
+        return
     heapq.heappush(queue, (_url_priority(url), next(_pq_seq), url))
 
 
@@ -6130,8 +6149,15 @@ def load_hackerone_scope(csv_path: str) -> tuple:
     cidr_list — list of CIDR strings from rows where asset_type == 'CIDR'
                 (only non-excluded ones are returned)
 
-    Expected columns: asset_identifier, asset_type, instruction, max_severity
+    Expected columns: asset_identifier, asset_type, instruction,
+                      eligible_for_submission, max_severity
     Processed asset_type values: URL, WILDCARD, DOMAIN, CIDR
+
+    Inclusion/exclusion logic:
+      - eligible_for_submission != 'true'  → excluded (covers 'false', blank, missing)
+      - instruction == 'exclude'           → excluded regardless of eligibility
+      - eligible_for_submission == 'true'
+        AND instruction != 'exclude'       → in-scope (instruction may be blank '')
 
     Pattern construction:
       *.example.com  →  ^(?:.+\\.)?example\\.com$   (matches example.com and all subdomains)
@@ -6146,12 +6172,17 @@ def load_hackerone_scope(csv_path: str) -> tuple:
             reader = _csv.DictReader(f)
             for row in reader:
                 asset_type  = (row.get("asset_type") or "").strip().upper()
-                identifier  = (row.get("asset_identifier") or "").strip()
+                identifier  = (row.get("identifier") or row.get("asset_identifier") or "").strip()
                 instruction = (row.get("instruction") or "").strip().lower()
+                eligible    = (row.get("eligible_for_submission") or "").strip().lower()
                 if not identifier:
                     continue
+                # Include only rows where eligible_for_submission == 'true'
+                # AND instruction is not explicitly 'exclude'.
+                # eligible == '' (missing column) is treated as not eligible.
+                is_excluded = (eligible != "true" or instruction == "exclude")
                 if asset_type == "CIDR":
-                    if instruction != "exclude":
+                    if not is_excluded:
                         cidr_list.append(identifier)
                     continue
                 if asset_type not in ("URL", "WILDCARD", "DOMAIN"):
@@ -6171,7 +6202,7 @@ def load_hackerone_scope(csv_path: str) -> tuple:
                     host    = host.lstrip("*.")
                     bare    = re.escape(host)
                     pattern = re.compile(r'^' + bare + r'$', re.IGNORECASE)
-                if instruction == "exclude":
+                if is_excluded:
                     excludes.append(pattern)
                 else:
                     includes.append(pattern)
@@ -6363,6 +6394,14 @@ def get_domain_names(anchors, url_queue, url_seen, base_netloc, same_domain_only
                 continue
             if SKIP_GOOGLE_TRACKING and is_google_tracking_url(href):
                 continue
+            # Scope enforcement — when HackerOne scope is loaded, only queue
+            # URLs whose hostname matches an include pattern
+            if HO_INCLUDE_PATTERNS:
+                parsed_host = urlparse(href).netloc
+                if not any(p.match(parsed_host) for p in HO_INCLUDE_PATTERNS):
+                    continue
+                if any(p.match(parsed_host) for p in HO_EXCLUDE_PATTERNS):
+                    continue
             url_seen.add(href)
             priority = _url_priority(href)
             _pq_push(url_queue, href)
@@ -7044,6 +7083,11 @@ _ENT_CSRF_TOKEN_CTX_RE = re.compile(
 # is an HMAC tag, not a credential.
 _ENT_SAFELINKS_RE = re.compile(r'sdata=|%7C%7C%7C', re.IGNORECASE)
 
+# ── CSP nonce suppression ────────────────────────────────────────────────────
+# nonce="…" / nonce='…' values are intentionally random per-request identifiers
+# inserted by the server into HTML — they are not secrets.
+_ENT_CSP_NONCE_CTX_RE = re.compile(r"""nonce=['"]""", re.IGNORECASE)
+
 # ── Inzpire / Craft CMS image transformation token suppression ───────────────
 # CMS-generated image transformation tokens appear in alt/class/type attribute
 # contexts, never in positions where secrets would appear.
@@ -7333,6 +7377,9 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
                 return
             # Inzpire / Craft CMS image transformation token
             if _ENT_CMS_IMAGE_CTX_RE.search(ctx_window):
+                return
+            # CSP nonce — per-request random value, not a secret
+            if _ENT_CSP_NONCE_CTX_RE.search(ctx_window):
                 return
             # JavaScript string literal value (nonce, CSRF token, session ID)
             # Pattern: something = 'TOKEN'; or similar — value is intentional
@@ -7760,6 +7807,13 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
         "report-to", "reporting-endpoints",
         # AWS CloudFront / CDN request-tracking headers — high entropy by design, never secrets.
         "x-amz-cf-id", "x-amz-cf-pop", "x-amz-request-id", "x-cache",
+        # HPKP pin hashes — SHA-256 hashes of certificate public keys, not secrets.
+        "public-key-pins", "public-key-pins-report-only",
+        # Distributed request-tracing headers — trace/span IDs, never secrets.
+        "x-b3-traceid", "x-b3-spanid", "x-b3-parentspanid",
+        "x-request-id", "x-trace-id", "x-amzn-trace-id",
+        # Chrome Origin Trial tokens — signed experiment tokens, not secrets.
+        "origin-trial",
     })
     for hdr_name, hdr_val in (response_headers or {}).items():
         if hdr_name.lower() in skip_headers:
@@ -7781,6 +7835,9 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
 def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=False,
                  min_workers=1, max_workers=10):
     global START_URL, SAME_DOMAIN_ONLY, _ac
+    if _is_reserved_target(start_url):
+        print(f"[reserved] Refusing to scan reserved/invalid target: {start_url!r}")
+        return
     _stop_event.clear()   # ensure a fresh scan is never blocked by a previous stop
     START_URL        = start_url
     SAME_DOMAIN_ONLY = same_domain_only
@@ -15515,6 +15572,9 @@ _IDOR_AUTH_PATH_RE = re.compile(
 _IDOR_SKIP_DOMAINS = {
     "facebook.com", "instagram.com", "twitter.com", "x.com",
     "youtube.com", "linkedin.com", "tiktok.com", "pinterest.com", "reddit.com",
+    # Open data portals — dataset/resource IDs are intentionally public UUIDs.
+    "ouvert.canada.ca", "open.canada.ca", "data.gov", "data.gov.uk",
+    "opendata.arcgis.com", "data.europa.eu",
 }
 
 def check_idor_candidates(page_url, html_content):
@@ -15980,6 +16040,27 @@ S3_URL_PATTERNS = [
 
 _s3_checked = set()
 
+def _s3_bucket_relevant(bucket_name: str) -> bool:
+    """Return True if the bucket name plausibly belongs to the scan target.
+
+    Checks whether the bucket name contains the root domain label (e.g. 'acme'
+    from 'acme.com') or the full hostname of the start URL.  Buckets with names
+    entirely unrelated to the target are skipped to avoid false positives from
+    third-party CDN or dependency buckets referenced in the page.
+    """
+    if not START_URL:
+        return True  # no context yet — allow all
+    try:
+        target_host = urlparse(START_URL).hostname or ""
+    except Exception:
+        return True
+    # root label: 'acme' from 'acme.com' or 'api.acme.com'
+    parts = target_host.rstrip(".").split(".")
+    root_label = parts[-2] if len(parts) >= 2 else parts[0] if parts else ""
+    bucket_lower = bucket_name.lower()
+    return (root_label and root_label in bucket_lower) or (target_host in bucket_lower)
+
+
 def check_s3_bucket(bucket_name, source_url=""):
     """
     Probe a discovered S3 bucket for public read or write access.
@@ -15991,6 +16072,11 @@ def check_s3_bucket(bucket_name, source_url=""):
     if bucket_name in _s3_checked:
         return
     _s3_checked.add(bucket_name)
+
+    if not _s3_bucket_relevant(bucket_name):
+        if DEBUG_MODE:
+            print(f"[debug] S3: skipping unrelated bucket {bucket_name!r}")
+        return
 
     bucket_url = f"https://{bucket_name}.s3.amazonaws.com/"
     try:
@@ -16242,6 +16328,56 @@ _CIDR_RE     = re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}/\d{1,2}$')
 _PLAIN_IP_RE = re.compile(r'^\d{1,3}(?:\.\d{1,3}){3}$')
 _WILDCARD_RE = re.compile(r'^\*\.(.+)$')
 
+# ── Reserved / invalid target filter ─────────────────────────────────────────
+
+import ipaddress as _ipaddress
+
+_RESERVED_NETWORKS = [
+    _ipaddress.ip_network("127.0.0.0/8"),    # loopback
+    _ipaddress.ip_network("169.254.0.0/16"),  # link-local
+    _ipaddress.ip_network("10.0.0.0/8"),      # RFC 1918
+    _ipaddress.ip_network("172.16.0.0/12"),   # RFC 1918
+    _ipaddress.ip_network("192.168.0.0/16"),  # RFC 1918
+]
+_RESERVED_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "0.0.0.0"})
+_RESERVED_TLDS      = frozenset({".local", ".internal"})
+
+
+def _is_reserved_target(target: str) -> bool:
+    """Return True if *target* (URL, hostname, or IP) is a reserved/invalid address.
+
+    Checks:
+    - Empty string
+    - localhost, 127.0.0.1, 0.0.0.0
+    - Any IP in 127.0.0.0/8, 169.254.0.0/16, 10.0.0.0/8, 172.16.0.0/12,
+      192.168.0.0/16
+    - Hostnames ending in .local or .internal
+    """
+    if not target or not target.strip():
+        return True
+    # Extract host from URL if a scheme is present
+    stripped = target.strip()
+    if "://" in stripped:
+        host = urlparse(stripped).hostname or ""
+    else:
+        # bare hostname or IP (strip port if present)
+        host = stripped.split(":")[0]
+    host = host.lower().rstrip(".")
+    if not host:
+        return True
+    if host in _RESERVED_HOSTNAMES:
+        return True
+    for tld in _RESERVED_TLDS:
+        if host.endswith(tld):
+            return True
+    # IP address check
+    try:
+        addr = _ipaddress.ip_address(host)
+        return any(addr in net for net in _RESERVED_NETWORKS)
+    except ValueError:
+        pass
+    return False
+
 
 def _upgrade_to_https(url: str) -> str:
     """Opportunistically rewrite http:// to https://.
@@ -16335,6 +16471,11 @@ def _expand_target(target: str) -> list:
     - Bare hostname       → passed through as-is
     """
     target = target.strip()
+    if not target:
+        return []
+    if _is_reserved_target(target):
+        print(f"[reserved] Skipping reserved/invalid target: {target!r}")
+        return []
     if target.startswith("http://") or target.startswith("https://"):
         return [target]
     if _WILDCARD_RE.match(target):
