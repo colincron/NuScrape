@@ -7076,6 +7076,16 @@ _ENT_CSRF_TOKEN_CTX_RE = re.compile(
 # is an HMAC tag, not a credential.
 _ENT_SAFELINKS_RE = re.compile(r'sdata=|%7C%7C%7C', re.IGNORECASE)
 
+# ── reCAPTCHA site key suppression ───────────────────────────────────────────
+# reCAPTCHA site keys are intentionally public — they appear in HTML alongside
+# grecaptcha widget markup and are not secrets.
+_ENT_RECAPTCHA_RE = re.compile(r'class="g-recaptcha|grecaptcha', re.IGNORECASE)
+
+# ── SAML token suppression ────────────────────────────────────────────────────
+# SAMLRequest / SAMLResponse values are URL-encoded XML blobs used in SSO
+# redirect flows — high entropy by design, never secrets.
+_ENT_SAML_RE = re.compile(r'SAMLRequest(?:%3D|=)|SAMLResponse=', re.IGNORECASE)
+
 # ── CSP nonce suppression ────────────────────────────────────────────────────
 # nonce="…" / nonce='…' values are intentionally random per-request identifiers
 # inserted by the server into HTML — they are not secrets.
@@ -7367,6 +7377,12 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
                 return
             # Microsoft SafeLinks HMAC tag (sdata= or %7C%7C%7C)
             if _ENT_SAFELINKS_RE.search(ctx_window):
+                return
+            # SAML SSO token (SAMLRequest= / SAMLResponse= in redirect URL)
+            if _ENT_SAML_RE.search(ctx_window):
+                return
+            # reCAPTCHA site key (public by design — appears next to grecaptcha markup)
+            if _ENT_RECAPTCHA_RE.search(ctx_window):
                 return
             # Inzpire / Craft CMS image transformation token
             if _ENT_CMS_IMAGE_CTX_RE.search(ctx_window):
