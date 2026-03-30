@@ -54,6 +54,10 @@ playwright install chromium
 pip install playwright-stealth --break-system-packages
 ```
 
+**Optional — wildcard domain enumeration (subdomain discovery via subfinder):**
+
+Install [subfinder](https://github.com/projectdiscovery/subfinder) and ensure it is on your `PATH`. When a wildcard target like `*.example.com` is passed, NuScrape runs `subfinder -d example.com -silent` and probes each discovered subdomain.
+
 **Start the web UI:**
 
 ```bash
@@ -79,10 +83,18 @@ python3 main.py -D <url> [options]
 
 | Flag | Default | Description |
 |---|---|---|
-| `-D`, `--Domain` | — | Target URL including scheme, e.g. `https://example.com` |
+| `-D`, `--Domain` | — | Target URL including scheme, e.g. `https://example.com`. Also accepts a bare hostname, CIDR range, wildcard (`*.example.com`), or IP address — see target expansion below. |
+| `--domains` | — | Path to a file listing additional targets (one per line). Each entry may be a URL, hostname, CIDR range, wildcard, or IP. |
+| `--cidr` | — | CIDR range to scan (e.g. `10.0.0.0/24`). NuScrape probes each host via HTTP GET and adds responsive hosts to the crawl queue. RFC 1918 / reserved ranges are skipped with a warning. Ranges larger than /24 (>254 hosts) require `--yes` or interactive confirmation. |
+| `--header` | — | Inject a custom HTTP header into every request. Accepts `Key: Value` format. Repeatable: `--header "X-Bug-Bounty: username" --header "X-Custom: value"`. |
+| `--yes`, `-y` | off | Non-interactive mode — automatically confirm large CIDR range scans without prompting. |
+| `--debug` | off | Enable verbose debug logging (reserved-target skips, scope decisions, queue events, etc.). |
 | `--rate-min` | `1.0` | Minimum seconds between requests |
 | `--rate-max` | `3.0` | Maximum seconds between requests |
 | `--concurrency` | `5` | Number of concurrent async requests |
+| `--parallel` | off | Run multiple targets in parallel. |
+| `--min-workers` | — | Minimum worker threads for parallel scanning. |
+| `--max-workers` | — | Maximum worker threads for parallel scanning. |
 | `--same-domain-only` | off | Only follow links that stay on the starting domain |
 | `--resume` | off | Resume a previously interrupted crawl from saved state |
 | `--ignore-robots` | off | Ignore `robots.txt` restrictions |
@@ -90,8 +102,7 @@ python3 main.py -D <url> [options]
 | `--no-social` | off | Skip crawling into social media domains |
 | `--no-skip-google-tracking` | off | Crawl Google tracking, Maps, and Fonts CDN URLs (skipped by default) |
 | `--stealth` | `LOUD` | Stealth profile: `LOUD` (fast), `NORMAL` (moderate delays), `GHOST` (slow, rotated UAs, randomised) |
-| `--bug-bounty-header` | — | Injects `X-Bug-Bounty: <value>` into all requests — required by some bug bounty programs |
-| `--scope` | — | Path to a HackerOne scope CSV file (`asset_identifier`, `asset_type`, `instruction`, `max_severity`). In-scope assets (URL/WILDCARD/DOMAIN with `instruction != exclude`) are treated as valid crawl targets alongside the primary domain. Excluded assets are skipped entirely regardless of other scope settings. |
+| `--scope` | — | Path to a HackerOne scope CSV. In-scope assets are treated as valid crawl targets; excluded assets are skipped entirely. See [HackerOne scope CSV format](#hackerone-scope-csv-format) below. |
 | `--active-probes` | off | Enable payload-injecting checks: path traversal, SSTI, CRLF injection, CORS evil-origin probes, default credential tests, dangerous HTTP method testing (TRACE/PUT/DELETE/CONNECT), WebSocket security probes (origin validation, auth, scheme), XXE injection (XML/SOAP entity expansion), prototype pollution (server-side body/query probes + client-side JS sink detection), and HTTP request smuggling (CL.TE, TE.CL, TE.TE via raw sockets). **Only use against targets you are authorised to test.** |
 
 **Examples:**
@@ -109,14 +120,23 @@ python3 main.py -D https://app.example.com --playwright --same-domain-only
 # Resume an interrupted scan
 python3 main.py -D https://example.com --resume
 
-# Ghost mode for low-noise scanning with bug bounty header
-python3 main.py -D https://example.com --stealth GHOST --bug-bounty-header "HackerOne-username"
+# Ghost mode with a custom bug bounty identification header
+python3 main.py -D https://example.com --stealth GHOST --header "X-Bug-Bounty: HackerOne-username"
 
 # Full active scan with payload-injecting checks (authorised targets only)
 python3 main.py -D https://example.com --active-probes
 
+# Scan a CIDR range (probes each host via HTTP GET before crawling)
+python3 main.py -D 192.168.1.0/24 --yes
+
+# Enumerate subdomains via wildcard (requires subfinder on PATH)
+python3 main.py -D '*.example.com'
+
+# Multiple custom headers
+python3 main.py -D https://example.com --header "X-Bug-Bounty: username" --header "X-Forwarded-For: 127.0.0.1"
+
 # Scan constrained to a HackerOne program's declared scope
-python3 main.py -D https://example.com --scope scope.csv --bug-bounty-header "HackerOne-username"
+python3 main.py -D https://example.com --scope scope.csv --header "X-Bug-Bounty: username"
 ```
 
 #### HackerOne scope CSV format
@@ -125,16 +145,35 @@ Export the scope from a HackerOne program's Assets page. The expected columns ar
 
 | Column | Description |
 |---|---|
-| `asset_identifier` | Domain, wildcard (`*.example.com`), or URL |
-| `asset_type` | `URL`, `WILDCARD`, or `DOMAIN` (other types are ignored) |
-| `instruction` | `exclude` to skip, anything else is treated as in-scope |
-| `max_severity` | Informational only — not used by NuScrape |
+| `identifier` | Domain, wildcard (`*.example.com`), URL, or CIDR range. Fallback: `asset_identifier` if `identifier` column is absent. |
+| `asset_type` | `URL`, `WILDCARD`, `DOMAIN`, or `CIDR`. Other types are ignored. CIDR entries are probed and responsive hosts are added to the crawl queue. |
+| `instruction` | `exclude` to skip this asset entirely. Blank or any other value is treated as in-scope. |
+| `eligible_for_submission` | Must be `true` for a row to be treated as in-scope. Rows with any other value (blank, `false`) are excluded by default. |
+| `max_severity` | Informational only — not used by NuScrape. |
 
-Wildcard entries (`*.example.com`) match the apex domain and all subdomains. Non-wildcard entries match only the exact hostname. Excluded assets are skipped by every check in NuScrape regardless of `--same-domain-only`.
+**Inclusion logic:** A row is in scope only when `eligible_for_submission == "true"` **and** `instruction != "exclude"`. Excluded assets are skipped by every crawl and check in NuScrape regardless of `--same-domain-only`.
+
+Wildcard entries (`*.example.com`) match the apex domain and all subdomains. Non-wildcard entries match only the exact hostname.
+
+#### Target expansion
+
+The `-D` flag (and each line in a `--domains` file) accepts several input formats beyond a plain URL:
+
+| Format | Example | Behaviour |
+|---|---|---|
+| Full URL | `https://example.com` | Crawled directly |
+| Bare hostname | `example.com` | HTTPS probed first (HEAD); falls back to HTTP |
+| Wildcard | `*.example.com` | Runs `subfinder -d example.com -silent`; each discovered subdomain is probed via HTTPS and added to the queue. Requires subfinder on `PATH`. |
+| CIDR range | `10.0.0.0/24` | Expands all host addresses, probes each via HTTP GET (50 concurrent, 3 s timeout), adds responsive hosts to the crawl queue. Ranges >254 hosts require `--yes` or interactive confirmation. RFC 1918 / loopback / link-local ranges are skipped with a warning. |
+| Plain IP | `192.168.1.1` | Probed via HTTP GET; treated as a single-host CIDR. |
+
+**Reserved target filter** — targets resolving to RFC 1918 addresses, loopback (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`), or `.local` / `.internal` TLDs are silently dropped from the crawl queue at every insertion point.
 
 ### Web UI
 
-Start `app.py` and open `http://localhost:5000`. The control panel sidebar lets you configure all scan options including stealth profile, bug bounty header, scope CSV upload, social media filter, Google tracking/CDN filter, and active probes. All views update live as the crawler runs.
+Start `app.py` and open `http://localhost:5000`. The control panel sidebar lets you configure all scan options including stealth profile, custom headers, scope CSV upload, social media filter, Google tracking/CDN filter, and active probes. All views update live as the crawler runs.
+
+**Custom Headers** — A textarea in the control panel accepts one `Key: Value` header per line. All headers are injected into every request made during the scan. Useful for bug bounty identification headers, auth tokens, or internal routing headers.
 
 **Views available in the UI:**
 
@@ -720,11 +759,13 @@ Inline `<script>` blocks are stripped from HTML before scanning to avoid minifie
 
 **Character distribution gate** — after the entropy check, a candidate is suppressed if it has fewer than 8 distinct characters or any single character accounts for more than 20% of the string. Real secrets have roughly uniform character distribution; encoded content and repeated-pattern strings do not.
 
+**AWS entropy floor** — AWS Access Key ID candidates must also have entropy ≥ 5.5 (raised from the base alphanumeric threshold of 4.2) to reduce false positives from short high-entropy identifiers that happen to match the `AKIA`/`ABIA`/`ACCA`/`AROA` prefix format.
+
 **Known secret pattern matching** — strings that pass all gates are tested against named patterns. Matches override the base severity:
 
 | Pattern | Label | Severity | Notes |
 |---|---|---|---|
-| `(?:AKIA\|ABIA\|ACCA\|AROA)[0-9A-Z]{16}` | AWS Access Key ID | CRITICAL | All four IAM key prefixes |
+| `(?:AKIA\|ABIA\|ACCA\|AROA)[0-9A-Z]{16}` | AWS Access Key ID | CRITICAL | All four IAM key prefixes; entropy ≥ 5.5 required |
 | exactly 40-char base64 string | AWS Secret Access Key | CRITICAL | Length enforced; also requires binary decode (not JSON/text) |
 | `(?:ghp\|gho\|ghu\|ghs\|ghr)_[A-Za-z0-9]{36}` | GitHub Personal Token | CRITICAL | All five GitHub token types |
 | `sk_live_[A-Za-z0-9]{24,}` | Stripe Live Secret Key | CRITICAL | |
@@ -771,6 +812,16 @@ Inline `<script>` blocks are stripped from HTML before scanning to avoid minifie
 | DOM identifier attribute (tag-close) | Candidate immediately followed by `">` or `'>` — the string terminates an HTML attribute value and closes the tag; characteristic of `id="…">`, `aria-*="…">`, `for="…">`, `data-*="…">` patterns generated by frontend frameworks |
 | DOM identifier attribute (look-behind) | The 200-char look-behind ends with an assignment to `id=`, `for=`, `data-<name>=`, or `aria-<name>=` — these DOM identifier attributes are auto-generated and never contain secrets |
 | `name=` on non-input/non-textarea element | The 400-char look-behind ends with `name=` and the last unclosed tag is not `<input` or `<textarea`; those elements may carry CSRF or form state tokens, but `<div name=`, `<span name=`, etc. never do |
+| LinkedIn tracking token | Context contains `v=beta&t=` or `v=beta&amp;t=` — LinkedIn member tracking tokens embedded in profile URLs |
+| WebP / image hash context | Context contains `type="image/webp"`, `width="640"`, or `x_height=0[&\|&amp;]hash=` — browser-generated WebP source parameters and CMS image cache tokens |
+| CSRF / build-ID form token | Context matches `_token" value=`, `build_id" value=`, or `form-[a-z]` — hidden CSRF input values and Next.js build identifiers |
+| Microsoft SafeLinks token | Context contains `sdata=` or `%7C%7C%7C` — Office 365 SafeLinks URL parameters |
+| Inzpire / Craft CMS image token | Context matches `alt=""`, `class="c-`, or `type="i` (including `&amp;` HTML-encoded variants) — CMS-generated image transformation tokens |
+| CSP nonce | Context contains `nonce='` or `nonce="` — inline script nonces are intentionally random per-response and are never application secrets |
+| SAML token | Context contains `SAMLRequest=`, `SAMLRequest%3D`, or `SAMLResponse=` — base64-encoded SAML assertion payloads |
+| reCAPTCHA site key | Context contains `class="g-recaptcha` or `grecaptcha` — Google reCAPTCHA v2/v3 site keys are public by design |
+| HTML attribute value hash (downgraded) | Candidate consists entirely of URL-safe base64 characters and the 80-char look-behind ends with an HTML attribute assignment — downgraded to INFO rather than suppressed, to surface attribute-value hashes without false-positive HIGH/MEDIUM alerts |
+| JS inline literal | Candidate appears inside a JavaScript string or variable assignment (e.g. `var x = "…"`, `const x = '…'`) in page source — minified JS literal values are not application secrets |
 
 Deduplicates by the first 8 characters of each flagged string to avoid repeated alerts for the same token across pages.
 
@@ -1472,6 +1523,12 @@ Several measures are in place to reduce noise:
 **Google tracking / CDN URL filter** — `play.google.com`, `google-analytics.com`, `analytics.google.com`, `googletagmanager.com`, `googleadservices.com`, `doubleclick.net`, `maps.google.com`, `maps.googleapis.com`, `fonts.googleapis.com`, and `fonts.gstatic.com` are skipped during crawling by default. Disable with `--no-skip-google-tracking`.
 
 **TODO comment scope** — Comment scanning is restricted to first-party JS only (CDN and vendor URLs excluded) and requires explicit `TODO`, `FIXME`, `HACK`, or `NOTE` keywords — not arbitrary keyword matches.
+
+**Response header skip list** — Certain response headers are excluded from entropy analysis entirely because they never contain application secrets: `Public-Key-Pins`, `Public-Key-Pins-Report-Only` (certificate pinning hashes), distributed tracing headers (`X-B3-TraceId`, `X-B3-SpanId`, `X-B3-ParentSpanId`, `X-Request-Id`, `X-Trace-Id`, `X-Amzn-Trace-Id`), and `Origin-Trial` (browser feature experiment tokens).
+
+**Open data portal IDOR suppression** — IDOR checks skip known public open-data portals (`data.gov`, `data.gov.uk`, `open.canada.ca`, `ouvert.canada.ca`, `opendata.arcgis.com`, `data.europa.eu`) because their numeric/UUID IDs are public identifiers, not access-controlled resources.
+
+**S3 bucket relevance filter** — S3 bucket names found in page source are only probed when the bucket name contains the root label of the scan target (e.g. scanning `acme.com` only probes buckets whose name contains `acme`). Third-party CDN and analytics buckets that happen to be referenced in page source are skipped.
 
 **IDOR 5-stage verification** — See [IDOR Candidates](#idor-candidates-verified) above. Eliminates the vast majority of false positives from numeric IDs in CSS paths, public help article IDs, cache-busting hashes, etc.
 
