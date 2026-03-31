@@ -446,6 +446,10 @@ _P4_RE = re.compile(
 
 def _url_priority(url: str) -> int:
     """Return crawl priority tier for *url* (1=highest … 4=lowest)."""
+    # Social media domains are always lowest priority — their paths often
+    # contain /login, /auth, /oauth etc. that would otherwise match P1/P2.
+    if is_social_media_domain(url):
+        return 4
     path = urlparse(url).path
     if _P1_RE.search(path):
         return 1
@@ -465,24 +469,12 @@ def _pq_push(queue: list, url: str) -> None:
     - Fails scope check: with --scope, must match include patterns and not exclude
       patterns; without --scope, falls back to same-domain-only behaviour
     """
-    if _is_reserved_target(url):
-        if DEBUG_MODE:
-            print(f"[debug] _pq_push: skipping reserved target {url!r}")
-        return
-    if SOCIAL_FILTER_FLAGS.get("enabled") and is_social_media_domain(url):
-        if DEBUG_MODE:
-            print(f"[debug] _pq_push: social media domain, skipping {url!r}")
+    if not should_fetch(url):
         return
     if not is_in_scope(url):
         if DEBUG_MODE:
             print(f"[debug] _pq_push: out of scope, skipping {url!r}")
         return
-    if HO_INCLUDE_PATTERNS:
-        _host = urlparse(url).netloc
-        if not any(p.match(_host) for p in HO_INCLUDE_PATTERNS):
-            if DEBUG_MODE:
-                print(f"[debug] _pq_push: allowlist mismatch, dropping {url!r}")
-            return
     heapq.heappush(queue, (_url_priority(url), next(_pq_seq), url))
 
 
@@ -790,6 +782,8 @@ def create_request_header():
     return stealth_headers(base)
 
 def safe_get(url, timeout=REQUEST_TIMEOUT, method="get"):
+    if not should_fetch(url):
+        return None
     try:
         domain = urlparse(url).netloc
         stealth_delay(domain)
@@ -5185,6 +5179,35 @@ def is_social_media_domain(url):
         pass
     return False
 
+
+def should_fetch(url: str) -> bool:
+    """Central pre-fetch gate — returns True only if *url* should be fetched/queued.
+
+    Checks in order (first failure short-circuits):
+    1. Social media domain (when filter enabled) → reject
+    2. Reserved/invalid target (RFC 1918, loopback, link-local, .local/.internal) → reject
+    3. HO_INCLUDE_PATTERNS loaded and hostname not in scope → reject
+    4. Known CDN / auth / noise domain (ENDPOINT_NOISE_DOMAINS) → reject
+    """
+    if SOCIAL_FILTER_FLAGS.get("enabled") and is_social_media_domain(url):
+        if DEBUG_MODE:
+            print(f"[debug] should_fetch: social media domain, skipping {url!r}")
+        return False
+    if _is_reserved_target(url):
+        if DEBUG_MODE:
+            print(f"[debug] should_fetch: reserved target, skipping {url!r}")
+        return False
+    if HO_INCLUDE_PATTERNS and not is_in_scope(url):
+        if DEBUG_MODE:
+            print(f"[debug] should_fetch: out of scope, skipping {url!r}")
+        return False
+    if is_endpoint_noise(url):
+        if DEBUG_MODE:
+            print(f"[debug] should_fetch: CDN/noise domain, skipping {url!r}")
+        return False
+    return True
+
+
 _CONFIDENCE_CONFIRMED = "CONFIRMED"
 _CONFIDENCE_LIKELY    = "LIKELY"
 _CONFIDENCE_NEEDS_VER = "NEEDS VERIFICATION"
@@ -5630,17 +5653,7 @@ def analyse_js_bundle(page_url, js_url):
         return
     if js_url in _js_analysed:
         return
-    if SOCIAL_FILTER_FLAGS.get("enabled") and is_social_media_domain(js_url):
-        if DEBUG_MODE:
-            print(f"[debug] analyse_js_bundle: social media domain, skipping {js_url!r}")
-        return
-    if HO_INCLUDE_PATTERNS and not is_in_scope(js_url):
-        if DEBUG_MODE:
-            print(f"[debug] analyse_js_bundle: out of scope, skipping {js_url!r}")
-        return
-    if is_endpoint_noise(js_url):
-        if DEBUG_MODE:
-            print(f"[debug] analyse_js_bundle: CDN/noise domain, skipping {js_url!r}")
+    if not should_fetch(js_url):
         return
     _js_analysed.add(js_url)
 
@@ -5996,6 +6009,8 @@ def check_js_source_map(page_url, js_url, js_response=None):
         if map_url in seen:
             continue
         seen.add(map_url)
+        if not should_fetch(map_url):
+            continue
         try:
             stealth_delay(urlparse(map_url).netloc)
             resp = _get_session().get(
@@ -6224,9 +6239,9 @@ def playwright_fetch(url):
 # ─────────────────────────────────────────────
 
 async def async_fetch(session, url, semaphore):
-    if SOCIAL_FILTER_FLAGS.get("enabled") and is_social_media_domain(url):
+    if not should_fetch(url):
         if DEBUG_MODE:
-            print(f"[debug] async_fetch: social media domain, skipping {url!r}")
+            print(f"[debug] async_fetch: blocked by should_fetch, skipping {url!r}")
         return url, None, {}, 0.0, False, False
     async with semaphore:
         _t0 = time.monotonic()
@@ -6527,18 +6542,10 @@ def get_domain_names(anchors, url_queue, url_seen, base_netloc, same_domain_only
             parsed_href = urlparse(href)
             if same_domain_only and parsed_href.netloc != base_netloc:
                 continue
-            if SOCIAL_FILTER_FLAGS["enabled"] and is_social_media_domain(href):
+            if not should_fetch(href):
                 continue
             if SKIP_GOOGLE_TRACKING and is_google_tracking_url(href):
                 continue
-            # Scope enforcement — when HackerOne scope is loaded, only queue
-            # URLs whose hostname matches an include pattern
-            if HO_INCLUDE_PATTERNS:
-                parsed_host = urlparse(href).netloc
-                if not any(p.match(parsed_host) for p in HO_INCLUDE_PATTERNS):
-                    continue
-                if any(p.match(parsed_host) for p in HO_EXCLUDE_PATTERNS):
-                    continue
             url_seen.add(href)
             priority = _url_priority(href)
             _pq_push(url_queue, href)
@@ -8057,6 +8064,8 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
         sitemap_urls = fetch_sitemap(base_url)
         for su in sitemap_urls:
             su = _upgrade_to_https(_clean_url(su))
+            if not should_fetch(su):
+                continue
             if su not in url_seen:
                 url_seen.add(su)
                 _pq_push(url_queue, su)
@@ -8091,13 +8100,7 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
             url = _pq_pop(url_queue)
             if url in visited:
                 continue
-            if HO_INCLUDE_PATTERNS:
-                _host = urlparse(url).netloc
-                if not any(p.match(_host) for p in HO_INCLUDE_PATTERNS):
-                    if DEBUG_MODE:
-                        print(f"[debug] crawl loop: allowlist mismatch, dropping {url!r}")
-                    continue
-            if SOCIAL_FILTER_FLAGS["enabled"] and is_social_media_domain(url):
+            if not should_fetch(url):
                 continue
             if SKIP_GOOGLE_TRACKING and is_google_tracking_url(url):
                 continue
@@ -13644,14 +13647,33 @@ def scan_deserial_passive(
             "font/otf",
         )
     )
-    if not _is_binary_media:
+    _BINARY_EXT_RE = re.compile(
+        r'\.(mp4|mp3|avi|mov|mkv|webm|flv|wmv|pdf|jpg|jpeg|png|gif|webp|svg'
+        r'|ico|bmp|avif|woff2?|ttf|otf|eot|zip|gz|tar|bz2|7z|rar|wasm)(\?|$)',
+        re.IGNORECASE,
+    )
+    _url_is_binary = bool(_BINARY_EXT_RE.search(page_url))
+
+    if not _is_binary_media and not _url_is_binary:
         for src_label, src_text in (("response body", body_s), ("Set-Cookie", set_cookie)):
             m = _PHP_SERIAL_RE.search(src_text)
-            if m:
-                snippet = src_text[max(0, m.start() - 10):m.end() + 60].strip()
-                findings.append(("PHP serialization",
-                                  f"PHP serialized data pattern in {src_label}: {snippet!r}", "MEDIUM"))
-                break
+            if not m:
+                continue
+            snippet = src_text[max(0, m.start() - 10):m.end() + 60].strip()
+            # Google JS minification artifact — "003dtypeof N;switch" is produced
+            # by Closure Compiler and consistently matches the PHP serialization
+            # regex despite being valid JS.
+            if "003dtypeof" in snippet.lower() and "switch" in snippet.lower():
+                continue
+            # Suppress if the snippet is predominantly non-printable binary data
+            # (>30% non-ASCII / control characters) — indicates a binary resource
+            # that slipped past the Content-Type guard.
+            non_printable = sum(1 for c in snippet if ord(c) < 32 or ord(c) > 126)
+            if snippet and non_printable / len(snippet) > 0.30:
+                continue
+            findings.append(("PHP serialization",
+                              f"PHP serialized data pattern in {src_label}: {snippet!r}", "MEDIUM"))
+            break
 
     # ── Python pickle ─────────────────────────────────────────────────────────
     if "application/python-pickle" in ct.lower():
@@ -15664,6 +15686,8 @@ def _idor_requires_auth(url):
          the no-cookie probe and the crawler's current session — evidence that
          authenticated users see different (more) content.
     """
+    if not should_fetch(url):
+        return False, None
     try:
         stealth_delay(urlparse(url).netloc)
 
@@ -15802,6 +15826,8 @@ def verify_idor_candidate(base_url, endpoint, param, value, kind):
 
     fingerprints = []
     for label, test_url in variants:
+        if not should_fetch(test_url):
+            continue
         try:
             stealth_delay(urlparse(test_url).netloc)
             resp = _get_session().get(
@@ -15874,7 +15900,7 @@ def check_idor_candidates(page_url, html_content):
     if _stop_event.is_set():
         return
     domain = urlparse(page_url).netloc
-    base_domain = domain.lstrip("www.")
+    base_domain = domain[4:] if domain.startswith("www.") else domain
     if any(base_domain == d or base_domain.endswith("." + d) for d in _IDOR_SKIP_DOMAINS):
         return
 
@@ -15896,6 +15922,8 @@ def check_idor_candidates(page_url, html_content):
     for raw_url in all_urls:
         try:
             resolved_url = urljoin(page_url, raw_url)
+            if not should_fetch(resolved_url):
+                continue
             parsed = urlparse(resolved_url)
             if not parsed.query:
                 continue
@@ -15917,6 +15945,8 @@ def check_idor_candidates(page_url, html_content):
     for raw_url in all_urls:
         try:
             resolved_url = urljoin(page_url, raw_url)
+            if not should_fetch(resolved_url):
+                continue
             parsed = urlparse(resolved_url)
             for match in IDOR_PATH_REGEX.finditer(parsed.path):
                 id_val  = match.group(1)
