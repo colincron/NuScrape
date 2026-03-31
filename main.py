@@ -6549,7 +6549,7 @@ def get_domain_names(anchors, url_queue, url_seen, base_netloc, same_domain_only
             url_seen.add(href)
             priority = _url_priority(href)
             _pq_push(url_queue, href)
-            if priority == 1:
+            if priority == 1 and should_fetch(href) and is_in_scope(href):
                 print(timestamp() + " [P1] High-value URL queued: " + href)
             if href.endswith((".com", ".gov/", ".net/", ".edu/", ".org/",
                                ".io/", ".co.uk/", ".ie/", ".info/")):
@@ -7993,8 +7993,15 @@ def check_response_entropy(page_url: str, body: str, response_headers: dict) -> 
 # ─────────────────────────────────────────────
 
 def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=False,
-                 min_workers=1, max_workers=10):
-    global START_URL, SAME_DOMAIN_ONLY, _ac
+                 min_workers=1, max_workers=10, scope_csv: str = ""):
+    global START_URL, SAME_DOMAIN_ONLY, _ac, HO_INCLUDE_PATTERNS, HO_EXCLUDE_PATTERNS
+    # In child processes (parallel mode) the parent's scope patterns are not
+    # inherited.  Reload them from the CSV path so should_fetch() works correctly.
+    if scope_csv:
+        try:
+            HO_INCLUDE_PATTERNS, HO_EXCLUDE_PATTERNS, _ = load_hackerone_scope(scope_csv)
+        except Exception as _e:
+            print(f"[!] main_crawler: failed to reload scope CSV {scope_csv!r}: {_e}")
     if _is_reserved_target(start_url):
         print(f"[reserved] Refusing to scan reserved/invalid target: {start_url!r}")
         return
@@ -8098,9 +8105,9 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
         batch_size = _ac.workers
         while len(batch) < batch_size and url_queue:
             url = _pq_pop(url_queue)
-            if url in visited:
-                continue
             if not should_fetch(url):
+                continue
+            if url in visited:
                 continue
             if SKIP_GOOGLE_TRACKING and is_google_tracking_url(url):
                 continue
@@ -8166,6 +8173,13 @@ def main_crawler(start_url, same_domain_only=False, resume=False, ignore_robots=
                             print(timestamp() + " Playwright content richer — using rendered HTML")
                         for endpoint, method in xhr_endpoints:
                             write_to_xhr_database(url, endpoint, method)
+
+            # Final scope guard — if the URL somehow slipped through earlier
+            # filters, skip all analysis rather than processing an out-of-scope page.
+            if not should_fetch(url):
+                if DEBUG_MODE:
+                    print(f"[debug] crawl loop: skipping analysis for out-of-scope URL {url!r}")
+                continue
 
             print(timestamp() + " Parsed: " + url)
             email_scraper(html)
@@ -9523,6 +9537,8 @@ def flag_ssrf_candidates(page_url, html_content):
     that every finding is backed by an OOB confirmation attempt.
     Does not make any HTTP requests.
     """
+    if not should_fetch(page_url):
+        return
     domain = urlparse(page_url).netloc
     if domain in _ssrf_flagged:
         return
@@ -16819,6 +16835,7 @@ def run_multi_domain(
     min_workers: int       = 1,
     max_workers: int       = 10,
     parallel: bool         = False,
+    scope_csv: str         = "",
 ) -> None:
     """
     Scan a list of domains, either sequentially or in parallel (≤3 concurrent).
@@ -16855,6 +16872,7 @@ def run_multi_domain(
         ignore_robots    = ignore_robots,
         min_workers      = min_workers,
         max_workers      = max_workers,
+        scope_csv        = scope_csv,
     )
     results = {}   # domain → {'elapsed': float, 'summary': dict}
 
@@ -17110,6 +17128,7 @@ if __name__ == "__main__":
                 min_workers      = args.min_workers,
                 max_workers      = args.max_workers,
                 parallel         = args.parallel,
+                scope_csv        = args.scope or "",
             )
         except KeyboardInterrupt:
             print("\n[*] Interrupted — shutting down cleanly...")
@@ -17144,6 +17163,7 @@ if __name__ == "__main__":
                     min_workers      = args.min_workers,
                     max_workers      = args.max_workers,
                     parallel         = args.parallel,
+                    scope_csv        = args.scope or "",
                 )
             except KeyboardInterrupt:
                 print("\n[*] Interrupted — shutting down cleanly...")

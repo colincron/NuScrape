@@ -3,3 +3,4 @@ scan.log
 nuscrape_*
 crawl_state.json
 screenshots/*
+__pycache__/
